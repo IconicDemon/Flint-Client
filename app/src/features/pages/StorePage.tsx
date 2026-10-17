@@ -1,4 +1,4 @@
-import wallpaper from "../../assets/wallpapers/java_edition.jpg";
+import wallpaper from "../../assets/wallpapers/26_3.jpg";
 import { FlintMark } from "../../ui/Logo";
 
 export default function StorePage() {

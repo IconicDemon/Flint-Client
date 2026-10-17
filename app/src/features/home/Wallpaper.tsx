@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import fallback from "../../assets/wallpapers/java_edition.jpg";
+import fallback from "../../assets/wallpapers/26_3.jpg";
 
 const ready = new Map<string, Promise<boolean>>();
 
