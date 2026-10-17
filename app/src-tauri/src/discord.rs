@@ -37,6 +37,7 @@ const SETTLE: Duration = Duration::from_secs(4);
 const RETRY_SECS: [u64; 5] = [5, 15, 30, 60, 120];
 /// How often an open connection is checked for Discord having quit or restarted.
 const HEARTBEAT: Duration = Duration::from_secs(30);
+#[cfg_attr(not(unix), allow(dead_code))] // Windows pipes are opened as files, which have no timeouts
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const KEEPER_FLAG: &str = "--flint-discord-keeper";
 const KEEPER_FILE: &str = "discord-keeper.json";
@@ -97,6 +98,7 @@ fn shown(sessions: &[(Session, Instant)], now: Instant) -> Option<&Session> {
 
 // ---------- the IPC connection ----------
 
+#[cfg_attr(not(unix), allow(dead_code))] // the Windows pipe can't peek, so it only reports Nothing
 enum Pending {
     Nothing,
     Data,

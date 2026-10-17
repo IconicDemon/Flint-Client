@@ -214,7 +214,8 @@ pub fn copy_file(from: &Path, to: &Path, copier: Copier) -> std::io::Result<()> 
         let mut dst = std::fs::File::create(to)?;
         std::io::copy(&mut src, &mut dst)?;
     }
-    std::fs::File::open(to)?.sync_all()
+    // Write access: Windows refuses to flush a read-only handle ("Access is denied").
+    std::fs::OpenOptions::new().write(true).open(to)?.sync_all()
 }
 
 /// Copies a folder pack's regular files (links are skipped) into `to`, which must not exist yet.

@@ -34,6 +34,7 @@ struct Download {
     path: PathBuf,
     sha1: Option<String>,
     size: Option<u64>,
+    #[cfg_attr(not(unix), allow(dead_code))] // only Unix has an executable bit
     executable: bool,
 }
 
@@ -173,7 +174,8 @@ fn library_key(name: &str) -> String {
 
 fn safe_join(base: &Path, relative: &str) -> CmdResult<PathBuf> {
     let rel = Path::new(relative);
-    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    // Only plain names: on Windows "/etc" and "C:x" aren't absolute but still escape `base` when joined.
+    if rel.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir)) {
         return Err("Refused an unsafe file path from version metadata".into());
     }
     Ok(base.join(rel))
@@ -735,6 +737,7 @@ fn extract_natives(jar: &Path, dest: &Path, exclude: &[String]) -> CmdResult<()>
 struct Plan {
     pending: Vec<Download>,
     totals: Totals,
+    #[cfg_attr(not(unix), allow(dead_code))] // symlinks are only made on Unix
     links: Vec<(PathBuf, String)>,
     installed: Installed,
 }
