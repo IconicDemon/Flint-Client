@@ -12,8 +12,6 @@ import t1_21_11 from "../assets/wallpapers/thumbs/1_21_11.jpg";
 import t26_1_1 from "../assets/wallpapers/thumbs/26_1_1.jpg";
 import t26_2 from "../assets/wallpapers/thumbs/26_2.jpg";
 import t26_3 from "../assets/wallpapers/thumbs/26_3.jpg";
-import wGeneric from "../assets/wallpapers/java_edition.jpg";
-import tGeneric from "../assets/wallpapers/thumbs/java_edition.jpg";
 // Portrait crops for the Profiles carousel, sized for its largest card (300×420 CSS px) at 2× density.
 import c1_8_9 from "../assets/wallpapers/cards/1_8_9.jpg";
 import c1_21_1 from "../assets/wallpapers/cards/1_21_1.jpg";
@@ -22,7 +20,6 @@ import c1_21_11 from "../assets/wallpapers/cards/1_21_11.jpg";
 import c26_1_1 from "../assets/wallpapers/cards/26_1_1.jpg";
 import c26_2 from "../assets/wallpapers/cards/26_2.jpg";
 import c26_3 from "../assets/wallpapers/cards/26_3.jpg";
-import cGeneric from "../assets/wallpapers/cards/java_edition.jpg";
 
 export type VersionMeta = {
   id: string;
@@ -39,9 +36,9 @@ export type VersionMeta = {
 export const VERSIONS: VersionMeta[] = [
   { id: "26.3", java: 25, wallpaper: w26_3, thumb: t26_3, card: c26_3, fabric: true },
   { id: "26.2", java: 25, wallpaper: w26_2, thumb: t26_2, card: c26_2, fabric: true },
-  { id: "26.1.2", java: 25, wallpaper: w26_1_1, thumb: t26_1_1, card: c26_1_1, fabric: true },
+  { id: "26.1.2", java: 25, wallpaper: w26_2, thumb: t26_2, card: c26_2, fabric: true },
   { id: "26.1.1", java: 25, wallpaper: w26_1_1, thumb: t26_1_1, card: c26_1_1, fabric: true },
-  { id: "26.1", java: 25, wallpaper: w26_1_1, thumb: t26_1_1, card: c26_1_1, fabric: true },
+  { id: "26.1", java: 25, wallpaper: w26_2, thumb: t26_2, card: c26_2, fabric: true },
   { id: "1.21.11", drop: "Mounts of Mayhem", java: 21, wallpaper: w1_21_11, thumb: t1_21_11, card: c1_21_11, fabric: true },
   { id: "1.21.10", drop: "The Copper Age", java: 21, wallpaper: w1_21_10, thumb: t1_21_10, card: c1_21_10, fabric: true },
   { id: "1.21.1", drop: "Tricky Trials", java: 21, wallpaper: w1_21_1, thumb: t1_21_1, card: c1_21_1, fabric: true },
@@ -67,9 +64,9 @@ function javaFor(id: string): number {
   return 8;
 }
 
-/** Wallpapers come only from the explicit mapping; anything else uses the generic Java Edition art. */
+/** Wallpapers come only from the explicit mapping; anything else (and Home with no profile) uses the newest version art. */
 export const versionMeta = (id: string): VersionMeta =>
-  VERSIONS.find((v) => v.id === id) ?? { id, java: javaFor(id), wallpaper: wGeneric, thumb: tGeneric, card: cGeneric, fabric: true };
+  VERSIONS.find((v) => v.id === id) ?? { id, java: javaFor(id), wallpaper: w26_3, thumb: t26_3, card: c26_3, fabric: true };
 
 export const loaderLabel = (loader: string) => (loader === "fabric" ? "Fabric" : "Vanilla");
 
