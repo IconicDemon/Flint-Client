@@ -1,0 +1,1404 @@
+.page-body.profiles > .page-head {
+  max-width: 1440px;
+}
+
+/* ---------- Profile carousel ---------- */
+/*
+ * Cards are absolutely placed from the stage's centre; ProfileCarousel computes each one's
+ * translateX and scale from the measured width (lib/carousel.ts). Only compositor-friendly
+ * properties animate: transform and opacity (plus z-index, which just restacks).
+ *
+ * Motion: positions use a spring-shaped curve over --pc-move (580ms, set inline from MOVE_MS). It is
+ * a sampled damped spring (damping ratio 0.92, starting with a little velocity so a card that is
+ * retargeted mid-glide keeps moving instead of stalling): half-way at ~17% of the duration, 90% at
+ * ~45%, 99% at ~74%, overshoot under 0.05% (none after sampling). Fades are shorter and plainly
+ * eased so the depth reads before the cards land. A new focus restarts each transition from the
+ * card's current position, so rapid input simply retargets; nothing queues.
+ */
+.pc {
+  --pc-move: 580ms;
+  --pc-fade: 420ms;
+  --pc-fade-out: 260ms;
+  --pc-hover: 360ms;
+  --pc-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --pc-fade-ease: cubic-bezier(0.33, 1, 0.68, 1);
+  position: relative;
+  animation: page-in var(--t-page) var(--ease-out) both;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  .pc {
+    --pc-spring: linear(0, 0.245 8.1%, 0.354 11.8%, 0.463 15.9%, 0.557 19.9%, 0.645 24.2%, 0.72 28.6%, 0.785 33.1%, 0.839 37.9%, 0.882 42.9%, 0.918 48.3%, 0.946 54.1%, 0.967 60.7%, 0.982 67.8%, 0.992 76.2%, 0.998 86.4%, 1);
+  }
+}
+
+.pc-stage {
+  position: relative;
+  border-radius: var(--r-xl);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The ring goes on the focused card instead of the whole row. */
+.pc-stage:focus-visible {
+  box-shadow: none;
+}
+
+/* A faint pool of the theme accent behind the centre card: static and unblurred. */
+.pc-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 34% 44% at 50% 56%, rgba(var(--accent-rgb), 0.06), transparent 72%);
+  pointer-events: none;
+}
+
+/*
+ * The card itself only moves; its face clips the art. z-index transitions too, so the card coming to
+ * the front passes over its neighbour half-way through the glide (when the two overlap least)
+ * instead of popping on top before it has moved.
+ */
+.pc-card {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  border-radius: 20px;
+  cursor: pointer;
+  transform-origin: 50% 50%;
+  transition:
+    transform var(--pc-move) var(--pc-spring),
+    z-index var(--pc-move) var(--pc-spring),
+    opacity var(--pc-fade) var(--pc-fade-ease),
+    translate var(--pc-hover) var(--pc-spring),
+    scale var(--pc-hover) var(--pc-spring);
+  will-change: transform, opacity;
+  /* Cards that mount mid-gesture (a far jump, or the first paint) fade up instead of appearing. */
+  animation: pc-card-in var(--pc-fade) var(--pc-fade-ease) backwards;
+}
+
+@keyframes pc-card-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+/* Leaving cards fade out quicker than arriving ones fade in, so two never crowd one slot. */
+.pc-card.is-hidden {
+  pointer-events: none;
+  transition-duration: var(--pc-move), var(--pc-move), var(--pc-fade-out), var(--pc-hover), var(--pc-hover);
+}
+
+.pc-face {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+}
+
+/* The focused card sits a little higher off the page: a deeper shadow that fades in, never repainted. */
+.pc-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 26px 52px -22px rgba(0, 0, 0, 0.62);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--pc-fade) var(--pc-fade-ease);
+}
+
+.pc-card.is-focus .pc-glow {
+  opacity: 1;
+}
+
+/*
+ * Hover preview: the neighbour under a moving pointer lifts and brightens at once, before the dwell
+ * moves it to the centre. Not while dragging, and not while the pointer rests where the cards slid
+ * under it (`data-resting`), since that card isn't being pointed at.
+ */
+@media (hover: hover) {
+  .pc-stage:not([data-resting], [data-dragging]) .pc-card:not(.is-focus, .is-hidden):hover {
+    translate: 0 -5px;
+    scale: 1.02;
+  }
+
+  .pc-stage:not([data-resting], [data-dragging]) .pc-card:not(.is-focus, .is-hidden):hover .pc-dim {
+    opacity: calc(var(--dim) * 0.45);
+  }
+
+  .pc-stage:not([data-resting], [data-dragging]) .pc-card:not(.is-focus, .is-hidden):hover .pc-face::after {
+    box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.3);
+  }
+}
+
+/* Hairline (and selection ring) drawn above the artwork, which would otherwise cover an inset shadow. */
+.pc-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  pointer-events: none;
+}
+
+.pc-card.is-selected .pc-face {
+  box-shadow:
+    0 16px 38px -14px rgba(var(--accent-rgb), 0.4),
+    var(--shadow-2);
+}
+
+.pc-card.is-selected .pc-face::after {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    inset 0 0 0 3px rgba(var(--bg-rgb), 0.45);
+}
+
+.pc-stage:focus-visible .pc-card.is-focus .pc-face {
+  box-shadow:
+    var(--focus-ring),
+    var(--shadow-2);
+}
+
+/* Card art is pre-cropped to the card's shape (assets/wallpapers/cards). */
+.pc-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 50%;
+  pointer-events: none;
+}
+
+/* Readable text at the bottom, a lighter touch at the top for the badges. */
+.pc-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, rgba(var(--bg-rgb), 0.95) 0%, rgba(var(--bg-rgb), 0.74) 24%, rgba(var(--bg-rgb), 0.14) 52%, transparent 68%),
+    linear-gradient(to bottom, rgba(var(--bg-rgb), 0.38), transparent 22%);
+}
+
+/* Farther cards dim as a whole (art and text); `--dim` comes from the layout. */
+.pc-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgb(var(--bg-rgb));
+  opacity: var(--dim, 0);
+  pointer-events: none;
+  transition: opacity var(--pc-fade) var(--pc-fade-ease);
+}
+
+/* Window resizes re-lay the cards in one step, so sizes and positions never drift apart. */
+.pc-stage[data-instant] :is(.pc-card, .pc-dim, .pc-glow) {
+  transition: none;
+}
+
+/* Reduced motion: cards jump to their slots; only brightness and visibility fade, briefly. */
+[data-motion="reduced"] :is(.pc-card, .pc-dim, .pc-glow) {
+  transition: opacity 140ms linear !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.pc-card, .pc-dim, .pc-glow) {
+    transition: opacity 140ms linear !important;
+  }
+}
+
+.pc-top {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pc-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 10px 0 9px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.72);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.14);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pc-flag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.pc-flag.is-play {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+}
+
+.pc-flag.is-play::before {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.pc-info {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 16px 18px 18px;
+}
+
+.pc-name,
+.pc-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc-meta {
+  white-space: nowrap;
+}
+
+/* Long names wrap to a second line, then end in an ellipsis; even one long word breaks rather than overflowing. */
+.pc-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--display-tracking);
+  font-size: 22px;
+  line-height: 1.18;
+  color: var(--fg);
+}
+
+.pc-meta {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.pc-info .state-pill {
+  margin-top: 7px;
+}
+
+.pc-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* At most DOTS_MAX dots (12 × 18px); longer lists show a window of 9 plus a count, so this never wraps. */
+.pc-dots {
+  display: flex;
+  justify-content: center;
+}
+
+.pc-dot {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.pc-dot::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: rgba(var(--ink-rgb), 0.22);
+  transition:
+    background-color var(--t-fast) var(--ease),
+    transform var(--pc-hover) var(--pc-spring);
+}
+
+.pc-dot:hover::before {
+  background: rgba(var(--ink-rgb), 0.45);
+}
+
+.pc-dot.is-edge::before {
+  transform: scale(0.6);
+}
+
+.pc-dot.is-selected::before {
+  background: rgba(var(--accent-rgb), 0.6);
+}
+
+.pc-dot.is-focus::before {
+  background: var(--fg);
+  transform: scale(1.4);
+}
+
+.pc-dot.is-focus.is-selected::before {
+  background: var(--accent);
+}
+
+.pc-count {
+  min-width: 52px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* ---------- Gallery layout ---------- */
+/*
+ * The header stays at the top; the cards and their action row share the rest of the height and sit a
+ * little above its centre, so one profile (or a short window) never leaves a card floating over a void.
+ */
+.page-body.profiles.is-gallery {
+  display: flex;
+  flex-direction: column;
+}
+
+.page-body.profiles.is-gallery > .page-head {
+  flex: none;
+}
+
+.pc-area {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 1440px;
+  padding-bottom: clamp(0px, 4vh, 40px);
+}
+
+/* ---------- Focused profile action row ---------- */
+.pc-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  animation: pc-bar-in var(--t-panel) var(--ease-out) both;
+}
+
+@keyframes pc-bar-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.pc-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Both labels share one width, so the row doesn't shift sideways as focus moves between profiles. */
+.pc-bar-play {
+  min-width: 156px;
+}
+
+/* One line, always present, so the row never changes height as focus moves. */
+.pc-bar-note {
+  max-width: min(100%, 560px);
+  min-height: 1.4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.pc-bar-note.is-danger {
+  color: var(--danger);
+}
+
+/* What clicking the centred card does. Quiet at rest, clearer when the card is pointed at or focused. */
+.pc-cta {
+  position: absolute;
+  right: 14px;
+  bottom: 18px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.6);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.14);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.8;
+  transition:
+    opacity var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease),
+    background-color var(--t-micro) var(--ease);
+}
+
+.pc-card.is-focus:hover .pc-cta,
+.pc-stage:focus-visible .pc-cta {
+  opacity: 1;
+  color: var(--fg);
+  background: rgba(var(--bg-rgb), 0.85);
+}
+
+.pc-card.is-focus:hover .pc-cta.is-open,
+.pc-stage:focus-visible .pc-cta.is-open {
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.delete-contents {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.delete-contents ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delete-contents li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.delete-contents li.is-precious strong {
+  color: var(--danger);
+}
+
+.version-chip {
+  position: relative;
+}
+
+.version-chip-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--accent-text);
+}
+
+.modal-copy {
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.delete-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.delete-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+  transition: box-shadow var(--t-micro) var(--ease);
+}
+
+.delete-option strong {
+  color: var(--fg);
+}
+
+.delete-option .muted {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.delete-option.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.delete-option.is-danger.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+/* ---------- Workspace ---------- */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.ws-hero {
+  position: relative;
+  flex: none;
+  min-height: 200px;
+  margin-bottom: 14px;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.ws-hero-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ws-hero-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, rgba(var(--bg-rgb), 0.92), rgba(var(--bg-rgb), 0.35) 70%, rgba(var(--bg-rgb), 0.15)),
+    linear-gradient(to right, rgba(var(--bg-rgb), 0.55), transparent 60%);
+}
+
+.ws-hero-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 200px;
+  padding: 16px 22px 20px;
+}
+
+.ws-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  height: 30px;
+  padding: 0 10px 0 6px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.55);
+  color: var(--text-2);
+  font-size: 13px;
+  transition: color var(--t-micro) var(--ease), background-color var(--t-micro) var(--ease);
+}
+
+.ws-back:hover {
+  color: var(--fg);
+  background: rgba(var(--bg-rgb), 0.8);
+}
+
+.ws-hero-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.ws-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ws-hero-text h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(26px, 2.2vw, 36px);
+}
+
+.ws-hero-text p {
+  color: var(--text-2);
+}
+
+.ws-hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Memory: a chip beside the status, opening a small panel with the same slider as Settings. */
+.ws-memory-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.12);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  transition:
+    color var(--t-micro) var(--ease),
+    background-color var(--t-micro) var(--ease);
+}
+
+.ws-memory-chip:hover,
+.ws-memory-chip[aria-expanded="true"] {
+  background: rgba(var(--bg-rgb), 0.8);
+  color: var(--fg);
+}
+
+.ws-memory-chip .faint {
+  font-weight: 500;
+}
+
+.ws-memory-chip.is-custom {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.ws-memory {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 16px 14px;
+}
+
+.ws-memory-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ws-memory-head .muted {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-memory .slider {
+  width: 100%;
+}
+
+.ws-memory-wait {
+  display: grid;
+  place-items: center;
+  height: 28px;
+}
+
+.ws-memory-foot {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+
+.ws-memory .settings-warn {
+  margin: 0;
+}
+
+.ws-memory-note {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ws-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.ws-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  white-space: pre-line;
+}
+
+.ws-body {
+  flex: 1;
+  padding-top: 16px;
+}
+
+.ws-loading {
+  display: grid;
+  place-items: center;
+  padding: 50px;
+}
+
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-4);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.state-pill.state-ready,
+.state-pill.state-running {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.state-pill.state-error {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.state-pill.state-downloading,
+.state-pill.state-installing,
+.state-pill.state-checking,
+.state-pill.state-launching {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+/* ---------- Content tab ---------- */
+.ct-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ct-filters {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.ct-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 9px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 550;
+  transition: background-color var(--t-micro) var(--ease), color var(--t-micro) var(--ease);
+}
+
+.ct-filter:hover {
+  color: var(--fg);
+}
+
+.ct-filter.is-active {
+  color: var(--fg);
+  background: var(--surface-4);
+}
+
+.ct-search {
+  flex: 1;
+  min-width: 160px;
+  max-width: 320px;
+  height: 38px;
+}
+
+.ct-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.ct-note.is-warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.ct-updates,
+.ct-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+}
+
+.ct-updates {
+  justify-content: space-between;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--text);
+}
+
+.ct-updates > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ct-batch {
+  position: sticky;
+  top: -10px;
+  z-index: 5;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong), var(--shadow-2);
+}
+
+.ct-batch strong {
+  margin-right: 6px;
+}
+
+.ct-batch-clear {
+  margin-left: auto;
+  padding: 0 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.ct-table {
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.ct-row {
+  display: grid;
+  grid-template-columns: 36px minmax(220px, 2.4fr) minmax(110px, 1fr) minmax(110px, 0.9fr) 120px 44px;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 8px 12px;
+}
+
+.ct-table > .ct-row:not(.ct-head) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 58px;
+}
+
+.dep-list {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  margin: 12px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.dep-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.dep-list li > span {
+  display: grid;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.ct-row + .ct-row {
+  border-top: 1px solid var(--line);
+}
+
+.ct-head {
+  min-height: 42px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ct-row.is-off .ct-name,
+.ct-row.is-off .ct-version {
+  opacity: 0.5;
+}
+
+.ct-row.is-missing {
+  background: var(--danger-soft);
+}
+
+.ct-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ct-name > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.ct-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.ct-name .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ct-version {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ct-version > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ct-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ct-update:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.22);
+}
+
+.ct-source {
+  font-size: 12.5px;
+}
+
+.ct-status .faint {
+  font-size: 12px;
+}
+
+.ct-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ct-foot {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.ct-foot code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
+/* ---------- Files / Worlds / Logs ---------- */
+.files-path {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 10px 10px 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.files-path .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  user-select: text;
+}
+
+.folder-grid,
+.world-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.world-grid {
+  margin-bottom: 16px;
+}
+
+.folder-card,
+.world-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+  transition: background-color var(--t-micro) var(--ease), box-shadow var(--t-micro) var(--ease);
+}
+
+.folder-card:hover:not(:disabled) {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.folder-card:disabled {
+  opacity: 0.55;
+}
+
+.folder-card svg {
+  flex: none;
+  color: var(--accent-text);
+}
+
+.folder-card > span,
+.world-card > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.folder-card strong,
+.world-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.folder-card .faint,
+.world-card .faint {
+  font-size: 12px;
+}
+
+.world-card img,
+.world-icon {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 10px;
+  image-rendering: pixelated;
+}
+
+.world-icon {
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.logs-tab {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  height: calc(100vh - 330px);
+  min-height: 360px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+}
+
+.log-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--text-2);
+}
+
+.log-item:hover {
+  background: var(--hover);
+}
+
+.log-item.is-active {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.log-item svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.log-item > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.log-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.log-item .faint {
+  font-size: 11.5px;
+}
+
+.log-item.is-crash svg {
+  color: var(--danger);
+}
+
+.log-view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+}
+
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px;
+}
+
+.log-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.log-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  color: var(--fg);
+}
+
+.log-title .faint {
+  font-size: 11.5px;
+}
+
+.log-counts {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.log-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.log-count.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.28);
+  transition: background-color var(--t-micro) var(--ease);
+}
+
+.log-count.is-error:hover {
+  background: rgba(var(--danger-rgb), 0.2);
+}
+
+.log-count.is-warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.log-crash {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 14px 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.24);
+  color: var(--text);
+  font-size: 12.5px;
+  user-select: text;
+}
+
+.log-crash svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+.log-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(var(--ink-rgb), 0.015);
+}
+
+.log-tools .lib-search {
+  max-width: 240px;
+  height: 32px;
+}
+
+.log-tools-gap {
+  flex: 1;
+}
+
+/* Rows have a fixed height so only the visible ones need to be rendered. */
+.log-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: rgb(var(--bg-rgb));
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.log-rows {
+  position: relative;
+  min-width: max-content;
+  padding: 6px 0;
+}
+
+.log-line {
+  display: flex;
+  height: 20px;
+  padding: 0 14px 0 0;
+  line-height: 20px;
+  white-space: pre;
+  color: var(--text-2);
+}
+
+.log-line:hover {
+  background: rgba(var(--ink-rgb), 0.035);
+}
+
+.log-time {
+  flex: none;
+  width: 74px;
+  padding-left: 14px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.log-line.lv-debug {
+  color: var(--text-3);
+}
+
+.log-line.lv-warn .log-msg {
+  color: var(--warning);
+}
+
+.log-line.lv-error {
+  background: rgba(var(--danger-rgb), 0.06);
+  box-shadow: inset 2px 0 0 rgba(var(--danger-rgb), 0.55);
+}
+
+.log-line.lv-error .log-msg {
+  color: var(--danger);
+}
+
+.log-line.is-stack .log-msg {
+  padding-left: 18px;
+  color: rgba(var(--danger-rgb), 0.78);
+}
+
+.log-empty {
+  margin: 0;
+  padding: 18px;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+@media (max-width: 1240px) {
+  .ct-row {
+    grid-template-columns: 32px minmax(200px, 2fr) minmax(100px, 1fr) 100px 40px;
+  }
+  .ct-source {
+    display: none;
+  }
+  .ct-head > :nth-child(4) {
+    display: none;
+  }
+  .logs-tab {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}

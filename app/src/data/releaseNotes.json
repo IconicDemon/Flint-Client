@@ -1,0 +1,50 @@
+[
+  {
+    "version": "0.5.0",
+    "date": "2026-10-16",
+    "title": "Beta 1 is here",
+    "summary": "The first Flint beta for Minecraft 26.3.",
+    "points": [
+      "Quick Play: pin up to five servers from Multiplayer to the main menu",
+      "Flint updates itself: an Update button appears when a new version is out",
+      "A clearer Settings button, and the Store coming soon",
+      "Flint's main menu stays readable at any GUI scale"
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-10-14",
+    "title": "Flint, now inside Minecraft",
+    "summary": "Flint's own menu, now in Minecraft 26.3.",
+    "points": [
+      "A Flint main menu inside Minecraft 26.3 with Fabric",
+      "Discord Rich Presence for games launched from Flint",
+      "Flint AI finds mods, resource packs and shaders in the Library",
+      "Memory can be set for each profile"
+    ]
+  },
+  {
+    "version": "0.3.0",
+    "date": "2026-10-12",
+    "title": "A calmer, more complete Flint",
+    "summary": "Home, Profiles and Skins rebuilt around real account and profile data.",
+    "points": [
+      "Home, Profiles and Skins rebuilt around real account and profile data",
+      "Library talks to Modrinth with a live catalog, dependencies and a performance preset",
+      "Apple silicon marks 1.8.9 unsupported instead of failing mid-download",
+      "Safer RAM limits and a wired AI gateway with keyword fallback"
+    ]
+  },
+  {
+    "version": "0.2.0",
+    "date": "2026-10-11",
+    "title": "A new Flint",
+    "summary": "Guided first-run setup with Microsoft sign-in.",
+    "points": [
+      "Guided first-run setup with Microsoft sign-in",
+      "Profiles with real Minecraft and Fabric installs",
+      "Mod suggestions checked against Modrinth",
+      "New Home, Settings and themes"
+    ]
+  }
+]

@@ -1,0 +1,4 @@
+# Build output lives in a folder whose name ends in ".noindex", so Spotlight never lists build
+# copies of Flint next to the installed app (macOS ignores .metadata_never_index for this).
+[build]
+target-dir = "target.noindex"

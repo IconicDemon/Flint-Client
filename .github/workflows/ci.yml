@@ -1,0 +1,99 @@
+# Flint Client checks: tests, type and lint checks, a build check and a secrets scan on every push and pull
+# request. Uses no repository secrets and publishes nothing: builds made here are unsigned and never reach players.
+# (Signed releases: release.yml. Making a release available to installed copies: promote-update.yml.)
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secrets scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks (history of this push or pull request)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_SUMMARY: true
+      - name: No signing keys or environment files in the tree
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)|\.key$|\.pem$|\.p12$|\.keystore$|(^|/)\.flint-signing/' | grep -v '\.env\.example$'; then
+            echo "::error::Credential-like files are tracked (above)."; exit 1
+          fi
+          # (One character of each pattern is bracketed so this file doesn't match itself.)
+          if git grep -l -E 'rsign encrypted secret ke[y]|dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V[5]|-----BEGIN [A-Z ]*PRIVATE KEY-----'; then
+            echo "::error::A private key is in the tree (above)."; exit 1
+          fi
+
+  checks:
+    name: Tests and build (macOS)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 25 (game runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target.noindex
+
+      - name: Game runtime (tests and jar)
+        working-directory: game-runtime
+        run: ./gradlew build --no-daemon
+
+      - name: Launcher interface (versions, types, tests, bundle)
+        working-directory: app
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npx vite build
+
+      - name: Launcher core (lint and tests)
+        working-directory: app/src-tauri
+        run: |
+          cargo clippy --no-default-features -- -D warnings
+          cargo test --no-default-features
+
+      - name: Update manifest never lists an unsigned or plain-HTTP build
+        working-directory: app
+        run: |
+          echo "sig" > /tmp/test.sig
+          if node scripts/updater-manifest.mjs --version 9.9.9 --out /tmp/m.json --platform "darwin-aarch64=http://example.invalid/a.tar.gz,/tmp/test.sig"; then
+            echo "::error::plain HTTP accepted"; exit 1
+          fi
+          if node scripts/updater-manifest.mjs --version 9.9.9 --out /tmp/m.json --platform "windows-x86_64=https://example.invalid/a.exe,/tmp/missing.sig"; then
+            echo "::error::missing signature accepted"; exit 1
+          fi

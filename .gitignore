@@ -1,0 +1,49 @@
+# Build output and caches
+.gradle/
+build/
+run/
+out/
+node_modules/
+dist/
+target/
+/game-runtime/bin/
+*.tsbuildinfo
+/app/vite.config.js
+/app/vite.config.d.ts
+
+# Editors
+.idea/
+*.iml
+.vscode/
+
+# Local and generated files
+.DS_Store
+*.log
+*.log.gz
+# Minecraft logs from local runs (they name the player)
+logs/
+.netlify/
+/artifacts/
+
+# Credentials and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+# Updater signing material lives outside the repository (docs/UPDATE_SYSTEM.md)
+.flint-signing/
+*.keystore
+
+# Packaged binaries
+*.dmg
+*.app/
+*.exe
+*.msi
+*.asar
+
+# Untrusted third-party and forensic material; must never enter this repository
+/recovery/
+/rebrand/
+/builds/

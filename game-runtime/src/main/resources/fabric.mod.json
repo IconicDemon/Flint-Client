@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "flintclient",
+  "version": "${version}",
+  "name": "Flint Client",
+  "description": "Flint Client's in-game runtime: the Flint main menu. Fast where it matters.",
+  "authors": [
+    "Flint Client Team"
+  ],
+  "license": "GPL-3.0-only",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.flintclient.client.FlintClient"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "flintclient.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25"
+  }
+}

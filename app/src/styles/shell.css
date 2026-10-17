@@ -1,0 +1,626 @@
+/* Component additions */
+.btn-xl {
+  height: 56px;
+  padding: 0 26px;
+  font-size: 16px;
+  border-radius: var(--r-md);
+}
+
+.empty.is-compact {
+  padding: 14px 8px 10px;
+  gap: 4px;
+}
+
+.empty.is-compact .empty-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 2px;
+}
+
+.empty.is-compact h3 {
+  font-size: 14px;
+}
+
+.empty.is-compact p {
+  font-size: 12.5px;
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 28%;
+  background: var(--surface-4);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 0.42em;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.fatal {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.fatal p {
+  max-width: 440px;
+  color: var(--text-2);
+}
+
+.fatal-details {
+  max-width: 440px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.fatal-details summary {
+  cursor: pointer;
+}
+
+.fatal-details pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  text-align: left;
+  user-select: text;
+}
+
+.page-loading {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+}
+
+/* Shell */
+.shell {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Navigation rail: narrow, tall, fully rounded, solid black, inset from the window edge. */
+.rail {
+  position: absolute;
+  z-index: 30;
+  top: var(--rail-top, var(--rail-inset));
+  bottom: var(--rail-inset);
+  left: var(--rail-inset);
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0 14px;
+  border-radius: var(--r-pill);
+  /* Nearly solid so it never competes with the artwork, without a heavy black slab over it. */
+  background: color-mix(in srgb, var(--rail) 86%, transparent);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--ink-rgb), 0.07),
+    0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.platform-macos .rail {
+  --rail-top: 44px;
+}
+
+.rail-logo {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: clamp(12px, 3.4vh, 30px);
+  color: var(--fg);
+}
+
+.rail ul {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(4px, 0.9vh, 8px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  color: var(--text-3);
+  transition:
+    background-color var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease);
+}
+
+.rail-item:hover {
+  color: var(--text);
+  background: rgba(var(--ink-rgb), 0.07);
+}
+
+.rail-item:active {
+  background: rgba(var(--ink-rgb), 0.1);
+  transform: scale(var(--press-scale-icon));
+  transition-duration: var(--t-press);
+}
+
+.rail-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.rail-item.is-active {
+  color: var(--fg);
+  background: rgba(var(--ink-rgb), 0.1);
+}
+
+/* Active marker on the rail's inner edge: (rail width − item width) / 2 to the left. */
+.rail-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: calc((44px - var(--rail-w)) / 2);
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.rail-version {
+  margin-top: auto;
+  font-size: 10px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-height: 700px) {
+  .rail-item {
+    width: 42px;
+    height: 40px;
+  }
+  .rail-logo {
+    margin-bottom: 10px;
+  }
+}
+
+/* Background task tray */
+.jobs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  max-width: 260px;
+  padding: 0 13px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.7);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease);
+}
+
+.jobs-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-chip.is-active {
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.jobs-chip:hover {
+  background: rgba(var(--bg-rgb), 0.9);
+}
+
+:is(.jobs-chip, .account-chip):active {
+  transform: scale(var(--press-scale));
+  transition-duration: var(--t-press);
+}
+
+.jobs-pop {
+  width: 360px;
+  padding: 6px;
+}
+
+.jobs-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.jobs-head .faint {
+  font-size: 11.5px;
+}
+
+.jobs-list {
+  max-height: min(420px, 60vh);
+  margin: 0;
+  padding: 4px 0 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+}
+
+.job + .job {
+  border-top: 1px solid var(--line);
+}
+
+.job-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.job-top strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.job-stage {
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-stage.is-danger {
+  color: var(--danger);
+}
+
+.job-done .job-stage {
+  color: var(--success);
+}
+
+.job-link {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--accent-text);
+}
+
+.job-link:hover {
+  text-decoration: underline;
+}
+
+/* Top bar */
+.topbar {
+  position: absolute;
+  z-index: 25;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--gutter) 0 calc(var(--content-left) + 8px);
+}
+
+/*
+ * The top bar is transparent, so on scrolling pages the content would slide up under the account and
+ * download chips. A static fade to the page background hides it there (invisible at rest: pages start
+ * below it). It stops short of the right edge so the page's scrollbar stays crisp.
+ */
+.shell:not(.page-play) .topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0 14px 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(var(--bg-rgb), 0.94) 45%, rgba(var(--bg-rgb), 0));
+}
+
+.platform-windows .topbar,
+.platform-linux .topbar {
+  padding-right: 0;
+}
+
+.topbar-fill {
+  flex: 1;
+  align-self: stretch;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 12px 0 6px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.5);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-2);
+  transition:
+    background var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease);
+}
+
+[data-effects="full"] .account-chip {
+  backdrop-filter: blur(14px);
+}
+
+.account-chip:hover,
+.account-chip[aria-expanded="true"] {
+  background: rgba(var(--bg-rgb), 0.78);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.18);
+  color: var(--fg);
+}
+
+.account-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.account-pop {
+  min-width: 240px;
+}
+
+.account-row,
+.profile-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-row img {
+  width: 40px;
+  height: 26px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.profile-row > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.profile-row .faint {
+  font-size: 12px;
+}
+
+.profile-pop {
+  min-width: 280px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* Windows / Linux caption buttons */
+.win-controls {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-self: flex-start;
+  height: 34px;
+}
+
+.ob > .win-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.win-controls button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 34px;
+  color: var(--text-2);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.win-controls button:hover {
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--fg);
+}
+
+.win-controls button.is-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+/* Stage */
+.stage {
+  position: absolute;
+  inset: 0;
+}
+
+.page {
+  position: absolute;
+  inset: 0;
+  /* A short fade-up on arrival; the page is interactive from the first frame. */
+  animation: page-in var(--t-route) var(--ease-out);
+}
+
+.page-home.is-parked {
+  display: none;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.page-body {
+  height: 100%;
+  overflow: auto;
+  overflow-x: hidden;
+  padding: 72px calc(var(--gutter) * 1.4) 40px calc(var(--content-left) + var(--gutter));
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--ink-rgb), 0.14) transparent;
+  /* Content that grows past the fold doesn't shift sideways when a classic scrollbar appears. */
+  scrollbar-gutter: stable;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  max-width: 1280px;
+  margin-bottom: 26px;
+}
+
+.page-head h1 {
+  font-size: 30px;
+  margin-bottom: 6px;
+}
+
+.page-head-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Flint update: a compact chip beside the account, only while an update is available or in progress */
+.update-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45);
+  color: var(--accent-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: update-chip-in var(--t-slow, 240ms) var(--ease) both;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease);
+}
+
+.update-chip:hover,
+.update-chip[aria-expanded="true"] {
+  background: rgba(var(--accent-rgb), 0.22);
+}
+
+.update-chip:active {
+  transform: scale(var(--press-scale));
+  transition-duration: var(--t-press);
+}
+
+.update-chip.is-ready {
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--accent-ink);
+}
+
+.update-chip.is-ready:hover {
+  background: var(--accent-hover);
+}
+
+.update-chip.is-error {
+  background: rgba(var(--danger-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.45);
+  color: rgb(var(--danger-rgb));
+}
+
+@keyframes update-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-chip {
+    animation: none;
+  }
+}
+
+.update-pop {
+  width: 320px;
+  padding: 6px 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.update-pop > .btn {
+  margin: 0 10px;
+}
+
+.update-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.update-head .faint {
+  font-size: 11.5px;
+}
+
+.update-notes {
+  margin: 0;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.update-notes.is-danger {
+  color: rgb(var(--danger-rgb));
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+
+.about-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.about-version .is-danger {
+  color: rgb(var(--danger-rgb));
+}

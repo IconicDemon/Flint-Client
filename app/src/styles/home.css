@@ -1,0 +1,754 @@
+.home {
+  /* Where the character stands: a little right of the window's centre, balancing the launch
+     controls on the left. Shared by the stage and the wallpaper's local shading. */
+  --figure-x: 56vw;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* ---------- Wallpaper ---------- */
+.wallpaper {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.wallpaper-move {
+  position: absolute;
+  inset: 0;
+}
+
+.wallpaper-move.has-parallax {
+  inset: -18px;
+  will-change: transform;
+}
+
+.wallpaper-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+}
+
+.wallpaper-img.is-entering {
+  animation: fade-in var(--t-wallpaper) var(--ease) both;
+}
+
+/*
+ * Cinematic grade, applied locally so the artwork stays recognisable. The upper middle is left
+ * almost untouched; shade gathers where text sits (left edge, the ground line, the top bar) and in
+ * the far corners. Everything is tinted with the theme's background, plus a trace of its accent
+ * at the launch corner, so themes colour the frame without recolouring the art. The Settings
+ * brightness slider (--wallpaper-dim) scales every layer.
+ */
+.wallpaper-shade {
+  --dim: var(--wallpaper-dim, 0.3);
+  position: absolute;
+  inset: 0;
+  background:
+    /* Floor: the ground line everything stands on sinks into the theme's background. */
+    linear-gradient(to top, rgba(var(--bg-rgb), 0.94) 0%, rgba(var(--bg-rgb), calc(0.6 + var(--dim) * 0.15)) 20%, rgba(var(--bg-rgb), 0.18) 46%, transparent 64%),
+    /* Sides: deeper behind the launch controls, lighter behind the news column. */
+    linear-gradient(to right, rgba(var(--bg-rgb), calc(0.74 + var(--dim) * 0.16)) 0%, rgba(var(--bg-rgb), 0.4) 28%, transparent 50%),
+    linear-gradient(to left, rgba(var(--bg-rgb), 0.55) 0%, rgba(var(--bg-rgb), 0.16) 24%, transparent 42%),
+    /* Top bar. */
+    linear-gradient(to bottom, rgba(var(--bg-rgb), calc(0.5 + var(--dim) * 0.2)), transparent 150px),
+    /* Behind the character: a soft, local quieting of the busiest part of the artwork, so the figure
+       reads through contrast rather than being brightened itself. */
+    radial-gradient(ellipse 26% 40% at var(--figure-x) 50%, rgba(var(--bg-rgb), calc(0.42 + var(--dim) * 0.2)), rgba(var(--bg-rgb), 0.12) 60%, transparent 100%),
+    /* Vignette: the frame closes in toward the corners. */
+    radial-gradient(ellipse 72% 78% at 52% 46%, transparent 34%, rgba(0, 0, 0, calc(0.36 + var(--dim) * 0.25)) 100%),
+    /* A faint trace of the theme's accent at the launch corner. */
+    radial-gradient(ellipse 50% 42% at 0% 100%, rgba(var(--accent-rgb), 0.07), transparent 70%),
+    /* Overall grade: calmer contrast so the art sits behind the interface. */
+    rgba(var(--bg-rgb), calc(0.26 + var(--dim) * 0.36));
+}
+
+/* ---------- Layout: launch · character · side, all resting on one baseline ---------- */
+.home-layout {
+  --baseline: clamp(32px, 5.6vh, 64px);
+  --stage-h: min(66vh, 700px);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "launch side";
+  align-items: end;
+  column-gap: clamp(16px, 2vw, 40px);
+  padding: 72px clamp(22px, 2.6vw, 48px) var(--baseline) calc(var(--content-left) + clamp(28px, 3.4vw, 68px));
+}
+
+/* ---------- Launch ---------- */
+.home-launch {
+  grid-area: launch;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  /* Never reaches under the character, which stands at --figure-x. */
+  max-width: min(560px, calc(var(--figure-x) - var(--content-left) - 190px));
+  animation: launch-in var(--t-page) var(--ease-out) both;
+}
+
+/* Profile switcher: the selected version's artwork and a quiet label, opening the profile menu. */
+.launch-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  margin-left: -4px;
+  padding: 0 12px 0 4px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.42);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease),
+    box-shadow var(--t-micro) var(--ease);
+}
+
+.launch-switch:hover,
+.launch-switch[aria-expanded="true"] {
+  background: rgba(var(--bg-rgb), 0.7);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.18);
+  color: var(--fg);
+}
+
+.launch-switch img {
+  width: 40px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  object-fit: cover;
+}
+
+.launch-switch-chevron {
+  color: var(--text-3);
+  transition: transform var(--t-micro) var(--ease);
+}
+
+.launch-switch[aria-expanded="true"] .launch-switch-chevron {
+  transform: rotate(180deg);
+}
+
+.launch-title {
+  max-width: 100%;
+  margin-top: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--display-tracking);
+  font-size: clamp(38px, 3.6vw, 62px);
+  line-height: 1.02;
+  color: var(--fg);
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Version, loader and installation state read as one row of facts. */
+.launch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.launch-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.46);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.launch-chips .launch-status {
+  color: var(--text);
+}
+
+.launch-chips .launch-status.state-error {
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.32);
+}
+
+.launch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  min-width: clamp(232px, 17vw, 280px);
+  height: 58px;
+  padding: 0 30px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(to bottom, var(--accent-hover), var(--accent) 70%);
+  color: var(--accent-ink);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 12px 30px -8px rgba(var(--accent-rgb), 0.45);
+  transition:
+    filter var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease),
+    box-shadow var(--t-micro) var(--ease);
+}
+
+.play-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 16px 34px -8px rgba(var(--accent-rgb), 0.55);
+}
+
+.play-btn:active:not(:disabled) {
+  filter: brightness(0.94);
+  transform: translateY(1px);
+  transition-duration: 40ms;
+}
+
+.play-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.play-btn.is-busy,
+.play-btn.is-running,
+.play-btn.is-muted {
+  background: rgba(var(--bg-rgb), 0.74);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.play-btn.is-busy:hover:not(:disabled),
+.play-btn.is-running:hover:not(:disabled) {
+  filter: none;
+  background: rgba(var(--bg-rgb), 0.9);
+}
+
+.play-btn.is-muted {
+  color: var(--text-3);
+}
+
+.play-btn:disabled {
+  cursor: default;
+}
+
+.play-btn.is-running svg {
+  color: var(--danger);
+}
+
+.play-btn.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.36);
+}
+
+.play-btn.is-error:hover:not(:disabled) {
+  filter: none;
+  background: rgba(var(--danger-rgb), 0.2);
+}
+
+.launch-more.icon-btn {
+  width: 58px;
+  height: 58px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--bg-rgb), 0.56);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.12);
+}
+
+.launch-more.icon-btn:hover,
+.launch-more.icon-btn[aria-expanded="true"] {
+  background: rgba(var(--bg-rgb), 0.82);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.2);
+}
+
+.launch-progress {
+  width: min(100%, 348px);
+  margin-top: 14px;
+}
+
+/* One quiet caption under the buttons; keeps its height so nothing jumps when it changes. */
+.launch-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 20px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.launch-state-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launch-state.state-error {
+  color: var(--danger);
+}
+
+.launch-link {
+  flex: none;
+  font-size: 13px;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.launch-link:hover {
+  color: var(--fg);
+}
+
+/* Empty state (no profile yet) */
+.launch-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.launch-meta {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.state-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+
+.state-ready .state-dot,
+.state-running .state-dot {
+  background: var(--success);
+}
+
+.state-running .state-dot {
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.state-error .state-dot,
+.state-blocked .state-dot {
+  background: var(--danger);
+}
+
+.state-paused .state-dot {
+  background: var(--warning);
+}
+
+.state-downloading .state-dot,
+.state-installing .state-dot,
+.state-checking .state-dot,
+.state-launching .state-dot {
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes launch-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---------- Character ---------- */
+/*
+ * The character is the focal point, not part of the bottom row. skinview3d frames the model in the
+ * middle of its canvas (it spans about 15–88% of the stage height, centred near 51.5%), so placing
+ * the stage at that offset puts the figure's own centre on the window's visual centre line.
+ */
+.home-stage {
+  position: absolute;
+  z-index: 1;
+  left: var(--figure-x);
+  top: calc(50% - var(--stage-h) * 0.515);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(420px, 34vw);
+  height: var(--stage-h);
+  transform: translateX(-50%);
+}
+
+.skin-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Minecraft-style name tag: square-cornered, dark and quiet. */
+.nameplate {
+  position: absolute;
+  z-index: 2;
+  top: var(--plate-top, 5.5%);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+[data-font="minecraft"] .nameplate {
+  font-family: var(--font-display);
+}
+
+.skin-hit {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Hover target covering the character's silhouette rather than the whole stage. */
+.skin-target {
+  position: absolute;
+  z-index: 2;
+  top: 13%;
+  bottom: 12%;
+  left: 32%;
+  right: 32%;
+  border-radius: var(--r-lg);
+}
+
+.skin-target:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.skin-host {
+  position: absolute;
+  inset: 0;
+}
+
+.skin-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Greeting: a small speech tag beside the raised hand (the player's right, the viewer's left). */
+.skin-hi {
+  position: absolute;
+  z-index: 3;
+  top: 13%;
+  right: 66%;
+  padding: 5px 11px;
+  border-radius: 10px 10px 3px 10px;
+  background: rgba(var(--bg-rgb), 0.82);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.14), var(--shadow-1);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(4px) scale(0.94);
+  transform-origin: bottom right;
+  pointer-events: none;
+  transition:
+    opacity 200ms var(--ease),
+    transform 260ms var(--ease-out);
+}
+
+.skin-hi.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+/* A soft pool of shade behind the figure, so it reads against any artwork. */
+.skin-stage::before {
+  content: "";
+  position: absolute;
+  inset: 4% -30% 8%;
+  background: radial-gradient(ellipse 40% 48% at 50% 52%, rgba(var(--ink-rgb), 0.05), rgba(var(--ink-rgb), 0.02) 45%, transparent 72%);
+  pointer-events: none;
+}
+
+/* Contact shadow where the feet meet the ground (~88% of the stage for both renderers). */
+.skin-shadow {
+  position: absolute;
+  top: 88%;
+  left: 50%;
+  width: 34%;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0.24) 58%, transparent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.skin-fallback {
+  position: absolute;
+  inset: 14% 0 12%;
+  display: flex;
+  justify-content: center;
+}
+
+.skin-fallback img {
+  height: 100%;
+  width: auto;
+  max-width: none;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+}
+
+.skin-fallback span {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 140px;
+  height: 140px;
+  border-radius: 20px;
+  background: var(--surface-3);
+  font-size: 48px;
+  color: var(--text-2);
+}
+
+.home-signin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 340px;
+  padding: 22px 26px;
+  border-radius: var(--r-xl);
+  background: rgba(var(--bg-rgb), 0.78);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* ---------- Side column: news, then one line for friends ---------- */
+.home-side {
+  grid-area: side;
+  justify-self: end;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: clamp(240px, 22vw, 316px);
+  min-width: 0;
+  animation: launch-in var(--t-page) 60ms var(--ease-out) both;
+}
+
+.side-news {
+  padding: 12px 6px 6px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--bg-rgb), 0.62);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+}
+
+[data-effects="full"] .side-news {
+  background: rgba(var(--bg-rgb), 0.5);
+  backdrop-filter: blur(18px) saturate(1.1);
+}
+
+.side-news > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 10px 4px;
+}
+
+.side-news h2 {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.side-news > header .faint {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.news-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+}
+
+.news-item img,
+.news-badge {
+  width: 44px;
+  height: 30px;
+  flex: none;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.news-badge {
+  display: grid;
+  place-items: center;
+  background: rgba(var(--ink-rgb), 0.07);
+  color: var(--text-2);
+}
+
+.news-item.is-flint .news-badge {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.news-item > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.news-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.news-item .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.news-loading {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.side-friends {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 6px 0 14px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--bg-rgb), 0.5);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.side-friends-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.side-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-2);
+  transition:
+    background-color var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease);
+}
+
+.side-link:hover {
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--fg);
+}
+
+.side-link-ext {
+  color: var(--text-3);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1180px) {
+  .home {
+    --figure-x: 66vw;
+  }
+  .home-layout {
+    grid-template-areas: "launch launch";
+  }
+  .home-side {
+    display: none;
+  }
+}
+
+@media (max-height: 780px) {
+  .home-layout {
+    padding-top: 60px;
+  }
+  .launch-title {
+    font-size: clamp(32px, 3vw, 46px);
+  }
+  .play-btn,
+  .launch-more.icon-btn {
+    height: 52px;
+  }
+  .launch-more.icon-btn {
+    width: 52px;
+  }
+  .launch-actions {
+    margin-top: 20px;
+  }
+}

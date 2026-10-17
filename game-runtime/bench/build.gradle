@@ -1,0 +1,44 @@
+plugins {
+	id "net.fabricmc.fabric-loom" version "${loom_version}"
+}
+
+base {
+	archivesName = project.archive_base_name
+}
+
+version = project.mod_version
+group = project.maven_group
+
+// Minecraft 26.x is unobfuscated, so there is no mappings line; no Fabric API either.
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	testImplementation platform("org.junit:junit-bom:5.14.0")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+processResources {
+	def modVersion = project.version
+	inputs.property "version", modVersion
+
+	filesMatching("fabric.mod.json") {
+		expand "version": modVersion
+	}
+}
+
+// Unit tests cover the pure parts (recording arrays, GC ring, JSON output, segment slicing).
+tasks.named("test") {
+	useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 25
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "flintqa",
+  "version": "${version}",
+  "name": "Flint QA Tour",
+  "description": "Dev-only QA driver: runs a scripted tour of Flint's screens and records screenshots. Inert unless -Dflintqa.script is set. Never shipped.",
+  "authors": [
+    "Flint Client Team"
+  ],
+  "license": "GPL-3.0-only",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.flintclient.qa.FlintQa"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "flintqa.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25"
+  }
+}

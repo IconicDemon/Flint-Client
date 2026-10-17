@@ -1,0 +1,3 @@
+module_preview_scene.png: the snowy mountains beyond a forest, an in-game Minecraft screenshot supplied by the Flint
+Client owner for module settings previews ("Snowy Mountains Beyond the Forest.png", 1086 x 1448), resized to 864 x 1152.
+Shown only inside settings previews, never during gameplay.

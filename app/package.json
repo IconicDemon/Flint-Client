@@ -1,0 +1,35 @@
+{
+  "name": "@flintclient/app",
+  "private": true,
+  "version": "0.5.0",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "build:perf": "npm run typecheck && vite build --mode perf",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "release": "node scripts/release-build.mjs",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
+    "dompurify": "^3.4.17",
+    "marked": "^15.0.12",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "skinview3d": "^3.4.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}

@@ -1,0 +1,14 @@
+// Standalone build for the flintbench probe mod (a dev-only benchmark tool, never shipped in the app).
+// Build from game-runtime with: ./gradlew -p bench build
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = 'flint-bench'

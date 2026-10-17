@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0908" />
+    <title>Flint Client</title>
+    <style>
+      /* Start-up screen: plain HTML and CSS so it shows before any script runs. React replaces it
+         once the app is ready. If start-up never finishes (for example a script fails to load),
+         a hint appears after a delay instead of leaving an empty window. */
+      html { background: #0a0908; }
+      .boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 18px;
+        background: #0a0908;
+        color: #fef3e2;
+        font: 500 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+        letter-spacing: 0.01em;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .boot svg { animation: boot-pulse 1.8s ease-in-out infinite; }
+      .boot-name { color: rgba(254, 243, 226, 0.56); }
+      .boot-slow {
+        max-width: 320px;
+        text-align: center;
+        color: rgba(254, 243, 226, 0.56);
+        opacity: 0;
+        animation: boot-show 0.4s ease 12s forwards;
+      }
+      @keyframes boot-pulse { 50% { opacity: 0.55; } }
+      @keyframes boot-show { to { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) {
+        .boot svg { animation: none; }
+        .boot-slow { animation-duration: 0s; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root">
+      <div class="boot" role="status" aria-live="polite">
+        <svg width="32" height="56" viewBox="150 50 212 370" aria-hidden="true">
+          <polygon points="256,60 351,228 256,312 161,228" fill="#B45309" />
+          <polygon points="256,60 351,228 256,186" fill="#D97706" />
+          <polygon points="239,172 318,284 239,410 194,284" fill="#FEF3E2" />
+        </svg>
+        <span class="boot-name">Flint Client</span>
+        <span class="boot-slow">Flint is taking longer than usual to start. If nothing changes, quit and reopen Flint.</span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

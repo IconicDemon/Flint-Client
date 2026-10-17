@@ -1,0 +1,268 @@
+/* Bundled fonts: all SIL Open Font License 1.1 (see src/assets/fonts/OFL-*.txt). */
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-LatinExt.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Outfit";
+  src: url("../assets/fonts/Outfit-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Monocraft";
+  src: url("../assets/fonts/Monocraft.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+/* ---------- Flint Ember (default): charcoal, warm off-white, muted amber ---------- */
+:root,
+[data-theme="ember"] {
+  --bg-rgb: 12, 11, 10;
+  --ink-rgb: 243, 236, 226;
+  --accent-rgb: 205, 139, 62;
+  --danger-rgb: 222, 108, 98;
+  --warning-rgb: 219, 168, 92;
+  --success-rgb: 116, 186, 140;
+
+  --bg: rgb(var(--bg-rgb));
+  --fg: rgb(var(--ink-rgb));
+  --rail: #070606;
+  --surface-1: #131211;
+  --surface-2: #191816;
+  --surface-3: #201e1c;
+  --surface-4: #2a2724;
+
+  --accent: rgb(var(--accent-rgb));
+  --accent-hover: #d99a50;
+  --accent-press: #b3752f;
+  --accent-ink: #1c1206;
+  --accent-text: #e2a961;
+
+  color-scheme: dark;
+}
+
+/* ---------- Flint Obsidian: layered black and graphite, no bright white ---------- */
+[data-theme="obsidian"] {
+  --bg-rgb: 8, 8, 9;
+  --ink-rgb: 214, 215, 220;
+  --accent-rgb: 168, 171, 182;
+  --danger-rgb: 214, 112, 104;
+  --warning-rgb: 206, 170, 106;
+  --success-rgb: 128, 178, 146;
+  --rail: #040405;
+  --surface-1: #0f0f11;
+  --surface-2: #151517;
+  --surface-3: #1b1b1e;
+  --surface-4: #242427;
+  --accent-hover: #b8bbc4;
+  --accent-press: #8f929c;
+  --accent-ink: #0c0c0e;
+  --accent-text: #c4c7cf;
+}
+
+/* ---------- Flint Bloodstone: near-black with deep, muted crimson ---------- */
+[data-theme="bloodstone"] {
+  --bg-rgb: 13, 10, 10;
+  --ink-rgb: 240, 229, 227;
+  --accent-rgb: 172, 56, 62;
+  /* Errors lean coral so they never read as the accent. */
+  --danger-rgb: 236, 128, 96;
+  --warning-rgb: 214, 168, 96;
+  --success-rgb: 120, 182, 140;
+  --rail: #070505;
+  --surface-1: #141010;
+  --surface-2: #1a1515;
+  --surface-3: #211b1b;
+  --surface-4: #2b2323;
+  --accent-hover: #bf4a50;
+  --accent-press: #93303a;
+  /* Light text on crimson: dark text on a deep red fails contrast. */
+  --accent-ink: #fff4f2;
+  --accent-text: #dc7f82;
+}
+
+/* ---------- Flint Dusk: deep charcoal with restrained plum-violet ---------- */
+[data-theme="dusk"] {
+  --bg-rgb: 11, 10, 14;
+  --ink-rgb: 232, 228, 240;
+  --accent-rgb: 146, 118, 186;
+  --danger-rgb: 220, 112, 108;
+  --warning-rgb: 212, 170, 102;
+  --success-rgb: 116, 182, 146;
+  --rail: #060509;
+  --surface-1: #131119;
+  --surface-2: #19161f;
+  --surface-3: #1f1b27;
+  --surface-4: #292432;
+  --accent-hover: #a287c7;
+  --accent-press: #7a619f;
+  --accent-ink: #120d1c;
+  --accent-text: #b9a3dc;
+}
+
+/* ---------- Flint Moss: charcoal, muted forest green, sage ---------- */
+[data-theme="moss"] {
+  --bg-rgb: 11, 12, 11;
+  --ink-rgb: 228, 234, 224;
+  --accent-rgb: 118, 152, 106;
+  --danger-rgb: 216, 110, 98;
+  --warning-rgb: 210, 172, 98;
+  --success-rgb: 124, 180, 128;
+  --rail: #060706;
+  --surface-1: #121412;
+  --surface-2: #171a17;
+  --surface-3: #1d211d;
+  --surface-4: #262b26;
+  --accent-hover: #87a979;
+  --accent-press: #61815a;
+  --accent-ink: #0b130a;
+  --accent-text: #a5c196;
+}
+
+:root {
+  --scrim: rgba(var(--bg-rgb), 0.72);
+
+  --line: rgba(var(--ink-rgb), 0.07);
+  --line-strong: rgba(var(--ink-rgb), 0.13);
+  --line-focus: rgba(var(--ink-rgb), 0.28);
+
+  --text: rgba(var(--ink-rgb), 0.94);
+  --text-2: rgba(var(--ink-rgb), 0.68);
+  --text-3: rgba(var(--ink-rgb), 0.48);
+  --text-4: rgba(var(--ink-rgb), 0.3);
+
+  --accent-soft: rgba(var(--accent-rgb), 0.13);
+  --accent-line: rgba(var(--accent-rgb), 0.42);
+
+  --success: rgb(var(--success-rgb));
+  --success-soft: rgba(var(--success-rgb), 0.12);
+  --danger: rgb(var(--danger-rgb));
+  --danger-soft: rgba(var(--danger-rgb), 0.12);
+  --warning: rgb(var(--warning-rgb));
+  --warning-soft: rgba(var(--warning-rgb), 0.12);
+
+  --hover: rgba(var(--ink-rgb), 0.05);
+  --press: rgba(var(--ink-rgb), 0.08);
+  --selected: rgba(var(--ink-rgb), 0.09);
+  --disabled-opacity: 0.45;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --shadow-3: 0 28px 70px rgba(0, 0, 0, 0.55);
+
+  /*
+   * Motion system: hover/press use --t-micro, small state changes --t-fast, popovers and dialogs
+   * --t-panel, page changes --t-page, wallpaper crossfades --t-wallpaper. Entrances use --ease-out,
+   * exits --ease-in. No springs or bounces.
+   */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --t-press: 70ms;
+  --t-micro: 120ms;
+  --t-exit: 110ms;
+  --t-fast: 160ms;
+  --t-route: 160ms;
+  --t-panel: 220ms;
+  --t-page: 240ms;
+  --t-slow: 260ms;
+  --t-wallpaper: 420ms;
+  /* Press feedback: labelled controls shrink a touch, icon-only ones a little more. */
+  --press-scale: 0.97;
+  --press-scale-icon: 0.92;
+
+  --font-body: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-ui: var(--font-body);
+  --font-display: "Outfit", var(--font-body);
+  --display-tracking: -0.02em;
+  --display-weight: 600;
+  --body-tracking: -0.006em;
+  --numeric: normal;
+
+  --rail-w: 64px;
+  --rail-inset: 14px;
+  --content-left: calc(var(--rail-w) + var(--rail-inset) * 2);
+  --gutter: clamp(18px, 1.6vw, 30px);
+  --chrome-top: 0px;
+  /* --accent-text is each theme's legible accent tint; Bloodstone's base crimson is under 3:1 on its surfaces. */
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-text);
+}
+
+/* ---------- Typography presets ---------- */
+[data-font-preview="default"] {
+  --font-body: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Outfit", var(--font-body);
+  --display-tracking: -0.02em;
+  --display-weight: 600;
+  --body-tracking: -0.006em;
+  --numeric: normal;
+}
+
+/* Monocraft is drawn on a pixel grid: headings only, regular weight, no synthesized bold. */
+[data-font="minecraft"],
+[data-font-preview="minecraft"] {
+  --font-body: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Monocraft", var(--font-body);
+  --display-tracking: 0;
+  --display-weight: 400;
+  --numeric: normal;
+}
+
+/* ---------- Motion ---------- */
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Balanced and Minimal never blur what's behind a panel; panels get a near-solid fill instead. */
+[data-effects="balanced"] *,
+[data-effects="minimal"] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+[data-font="minecraft"] :is(h1, h2, h3, h4, .play-btn, .skin-hi, .launch-title) {
+  font-synthesis: none;
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

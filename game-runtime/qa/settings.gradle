@@ -1,0 +1,14 @@
+// Standalone build for the flintqa test-tour mod (a dev-only QA driver, never shipped in the app).
+// Build from game-runtime with: ./gradlew -p qa build
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = 'flint-qa'

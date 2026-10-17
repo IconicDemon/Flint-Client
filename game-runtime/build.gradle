@@ -1,0 +1,96 @@
+import groovy.json.JsonSlurper
+
+plugins {
+	id "net.fabricmc.fabric-loom" version "${loom_version}"
+}
+
+// The runtime is versioned with the Flint app, so the in-game menu shows the installed Flint version.
+// Read through `providers` so the configuration cache tracks the file and a version bump is never missed.
+def appPackage = new JsonSlurper().parseText(
+	providers.fileContents(layout.projectDirectory.file("../app/package.json")).asText.get())
+
+base {
+	archivesName = project.archive_base_name
+}
+
+version = appPackage.version
+group = project.maven_group
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"flintclient" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	testImplementation platform("org.junit:junit-bom:5.14.0")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+// Unit tests cover the client code's pure logic (geometry, colours, layout rules).
+sourceSets.test {
+	compileClasspath += sourceSets.client.output + sourceSets.client.compileClasspath
+	runtimeClasspath += sourceSets.client.output + sourceSets.client.runtimeClasspath
+}
+
+tasks.named("test") {
+	useJUnitPlatform()
+}
+
+def generatedResources = layout.buildDirectory.dir("generated/flint-resources")
+
+// The launcher's release notes, bundled for the in-game "What's new" card (one source for both).
+def generateFlintResources = tasks.register("generateFlintResources") {
+	def notes = file("../app/src/data/releaseNotes.json")
+	inputs.file(notes)
+	outputs.dir(generatedResources)
+	doLast {
+		def root = generatedResources.get().asFile
+		root.deleteDir()
+		def target = new File(root, "assets/flintclient/whats_new.json")
+		target.parentFile.mkdirs()
+		target.text = notes.text
+	}
+}
+
+sourceSets.client.resources.srcDir(generatedResources)
+
+processResources {
+	def modVersion = project.version
+	inputs.property "version", modVersion
+
+	filesMatching("fabric.mod.json") {
+		expand "version": modVersion
+	}
+}
+
+processClientResources {
+	dependsOn generateFlintResources
+}
+
+// Source jars include the client resources, generated ones included.
+tasks.configureEach { task ->
+	if (task.name.toLowerCase().contains("sourcesjar")) {
+		task.dependsOn generateFlintResources
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 25
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+	withSourcesJar()
+}

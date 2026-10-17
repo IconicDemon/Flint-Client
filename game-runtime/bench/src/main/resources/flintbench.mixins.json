@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.flintclient.bench.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "DebugScreenOverlayMixin",
+    "MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

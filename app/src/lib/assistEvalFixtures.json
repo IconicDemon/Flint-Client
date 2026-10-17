@@ -1,0 +1,1815 @@
+{
+ "about": "Recorded for the offline Flint AI evaluation (assistEval.test.ts): staging answers from @cf/openai/gpt-oss-20b (old Worker prompt) on 2026-10-14, hand-written answers in the new contract, and Modrinth projects and search hits for Minecraft 1.21.11 recorded on 2026-10-14.",
+ "recorded": {
+  "fps": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For smoother, steadier frame rates in the game.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium",
+      "ferrite-core",
+      "immediatelyfast",
+      "entityculling",
+      "dynamic-fps"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "pvp": {
+   "goals": [
+    {
+     "category": "pvp",
+     "kind": "mod",
+     "label": "PvP & HUD",
+     "why": "For better 1v1 duel experience with useful HUD and performance tweaks.",
+     "searches": [],
+     "projects": [
+      "zoomify",
+      "armor-hud",
+      "status-effect-bars"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "fps+pvp": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For smoother, steadier frame rates in all situations.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium",
+      "ferrite-core",
+      "immediatelyfast",
+      "entityculling"
+     ]
+    },
+    {
+     "category": "pvp",
+     "kind": "mod",
+     "label": "PvP & HUD",
+     "why": "For better combat visibility and control during fights.",
+     "searches": [],
+     "projects": [
+      "zoomify",
+      "armor-hud",
+      "status-effect-bars",
+      "betterf3"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "named": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For smoother, steadier frame rates with Sodium.",
+     "searches": [],
+     "projects": [
+      "sodium"
+     ]
+    },
+    {
+     "category": "shaders",
+     "kind": "mod",
+     "label": "Shader enhancements",
+     "why": "For immersive visuals with Iris shaders.",
+     "searches": [],
+     "projects": [
+      "iris"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "shaders": {
+   "goals": [
+    {
+     "category": "shaders",
+     "kind": "mod",
+     "label": "High‑quality shaders",
+     "why": "For visually impressive shaders that still run smoothly.",
+     "searches": [],
+     "projects": [
+      "iris"
+     ]
+    },
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance boost",
+     "why": "For keeping frame rates high while using shaders.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "packs": {
+   "goals": [
+    {
+     "category": "visual",
+     "kind": "resourcepack",
+     "label": "Lower Fire & Small Shield",
+     "why": "For a lower fire overlay and a smaller shield on screen.",
+     "searches": [],
+     "projects": [
+      "low-on-fire",
+      "low-shield-pack"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "low-end": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For smoother, steadier frame rates on a low‑end laptop.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium",
+      "ferrite-core",
+      "immediatelyfast",
+      "entityculling"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": true,
+    "ramGb": 4,
+    "keepVanilla": false
+   },
+   "exclude": [
+    "shaders"
+   ],
+   "note": "Mods need a Fabric profile.",
+   "model": "@cf/openai/gpt-oss-20b"
+  },
+  "noise": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For smoother, steadier frame rates and better overall performance.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium"
+     ]
+    },
+    {
+     "category": "visual",
+     "kind": "mod",
+     "label": "Visual enhancements",
+     "why": "For a cooler, more immersive visual experience.",
+     "searches": [],
+     "projects": [
+      "lambdynamiclights",
+      "better-clouds"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null,
+   "model": "@cf/openai/gpt-oss-20b"
+  }
+ },
+ "contract": {
+  "fps+pvp": {
+   "goals": [
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance essentials",
+     "why": "For higher, steadier FPS.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium"
+     ]
+    },
+    {
+     "category": "pvp",
+     "kind": "mod",
+     "label": "PvP & HUD",
+     "why": "For clearer fights.",
+     "searches": [],
+     "projects": [
+      "armor-hud",
+      "status-effect-bars",
+      "zoomify"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null
+  },
+  "forgotten": {
+   "goals": [
+    {
+     "category": "other",
+     "kind": "mod",
+     "lookup": true,
+     "nameHint": "L",
+     "label": "The mod you described",
+     "why": "The one mod you remember.",
+     "searches": [
+      "low fire",
+      "low shield",
+      "no pumpkin blur",
+      "no fog"
+     ],
+     "projects": []
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null
+  },
+  "shaders": {
+   "goals": [
+    {
+     "category": "shaders",
+     "kind": "shader",
+     "label": "Light shader packs",
+     "why": "For good-looking lighting that keeps FPS.",
+     "searches": [
+      "lightweight shaders"
+     ],
+     "projects": [
+      "complementary-reimagined",
+      "iris",
+      "makeup-ultra-fast-shaders"
+     ]
+    },
+    {
+     "category": "performance",
+     "kind": "mod",
+     "label": "Performance",
+     "why": "For FPS headroom.",
+     "searches": [],
+     "projects": [
+      "sodium",
+      "lithium"
+     ]
+    }
+   ],
+   "constraints": {
+    "lowEndHardware": false,
+    "ramGb": null,
+    "keepVanilla": false
+   },
+   "exclude": [],
+   "note": null
+  }
+ },
+ "projects": {
+  "ferrite-core": {
+   "project_id": "uXXizFIs",
+   "slug": "ferrite-core",
+   "title": "FerriteCore",
+   "description": "Memory usage optimizations",
+   "project_type": "mod"
+  },
+  "betterf3": {
+   "project_id": "8shC1gFX",
+   "slug": "betterf3",
+   "title": "BetterF3",
+   "description": "BetterF3 is a mod that replaces Minecraft's original debug HUD with a highly customizable, more human-readable HUD.",
+   "project_type": "mod"
+  },
+  "sodium": {
+   "project_id": "AANobbMI",
+   "slug": "sodium",
+   "title": "Sodium",
+   "description": "A high-performance rendering engine replacement for Minecraft, which greatly improves frame rates and reduces micro-stutter.",
+   "project_type": "mod"
+  },
+  "lambdynamiclights": {
+   "project_id": "yBW8D80W",
+   "slug": "lambdynamiclights",
+   "title": "LambDynamicLights - Dynamic Lights",
+   "description": "Adds dynamic lights to Minecraft as the most feature-complete and optimized dynamic lighting mod.",
+   "project_type": "mod"
+  },
+  "complementary-reimagined": {
+   "project_id": "HVnmMxH1",
+   "slug": "complementary-reimagined",
+   "title": "Complementary Shaders - Reimagined",
+   "description": "Preserving the elements of Minecraft with exceptional quality, detail, and performance.",
+   "project_type": "shader"
+  },
+  "entityculling": {
+   "project_id": "NNAgCjsB",
+   "slug": "entityculling",
+   "title": "Entity Culling",
+   "description": "Using async path-tracing to hide Block-/Entities that are not visible",
+   "project_type": "mod"
+  },
+  "low-shield-pack": {
+   "project_id": "CZrLuVQo",
+   "slug": "low-shield-pack",
+   "title": "Low Shield",
+   "description": "Lower your shield for a visible view!",
+   "project_type": "resourcepack"
+  },
+  "dynamic-fps": {
+   "project_id": "LQ3K71Q1",
+   "slug": "dynamic-fps",
+   "title": "Dynamic FPS",
+   "description": "Reduce resource usage while Minecraft is in the background, idle, or on battery.",
+   "project_type": "mod"
+  },
+  "zoomify": {
+   "project_id": "w7ThoJFB",
+   "slug": "zoomify",
+   "title": "Zoomify (Zoom)",
+   "description": "A zoom mod with infinite customizability.",
+   "project_type": "mod"
+  },
+  "status-effect-bars": {
+   "project_id": "x02cBj9Y",
+   "slug": "status-effect-bars",
+   "title": "Status Effect Bars",
+   "description": "Adds customizable bars to the status effects overlay to show the remaining duration of effects.",
+   "project_type": "mod"
+  },
+  "immediatelyfast": {
+   "project_id": "5ZwdcRci",
+   "slug": "immediatelyfast",
+   "title": "ImmediatelyFast",
+   "description": "Speed up immediate mode rendering in Minecraft",
+   "project_type": "mod"
+  },
+  "better-clouds": {
+   "project_id": "5srFLIaK",
+   "slug": "better-clouds",
+   "title": "Better Clouds",
+   "description": "Beautiful clouds in touch with the vanilla style",
+   "project_type": "mod"
+  },
+  "lithium": {
+   "project_id": "gvQqBUqZ",
+   "slug": "lithium",
+   "title": "Lithium",
+   "description": "No-compromises game logic optimization mod, useful for both single-player games and multi-player servers.",
+   "project_type": "mod"
+  },
+  "armor-hud": {
+   "project_id": "AghHBZC5",
+   "slug": "armor-hud",
+   "title": "Armor Hud",
+   "description": "The Armor HUD Mod adds a visual overlay to Minecraft that displays your armor's condition with color-coded durability bars. This makes it easier to keep track of your armor’s health during gameplay.",
+   "project_type": "mod"
+  },
+  "low-on-fire": {
+   "project_id": "RRxvWKNC",
+   "slug": "low-on-fire",
+   "title": "Low On Fire",
+   "description": "Low fire on your screen! Vanilla Friendly",
+   "project_type": "resourcepack"
+  },
+  "bsl-shaders": {
+   "project_id": "Q1vvjJYV",
+   "slug": "bsl-shaders",
+   "title": "BSL Shaders",
+   "description": "Shaderpack for Minecraft: Java Edition. It's bright, colorful, and distinct.",
+   "project_type": "shader"
+  },
+  "iris": {
+   "project_id": "YL57xq9U",
+   "slug": "iris",
+   "title": "Iris Shaders",
+   "description": "A modern shader pack loader for Minecraft intended to be compatible with existing OptiFine shader packs",
+   "project_type": "mod"
+  },
+  "makeup-ultra-fast-shaders": {
+   "project_id": "izsIPI7a",
+   "slug": "makeup-ultra-fast-shaders",
+   "title": "MakeUp - Ultra Fast",
+   "description": "MakeUp aims to provide the best quality / performance ratio, building a shader that can be adapted to anyone's resources.",
+   "project_type": "shader"
+  }
+ },
+ "searches": {
+  "mod|5|toggle sprint": [
+   {
+    "project_id": "N8Pmw3EX",
+    "slug": "toggle-sprint-magiccc",
+    "title": "Toggle Sprint",
+    "description": "Mod that toggles automatic sprint when pressing a custom keybind, displaying an on-screen indicator while active.",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "gQ6IIk5e",
+    "slug": "toggle-sprint",
+    "title": "Toggle Sprint",
+    "description": "Allows you to keep sprinting when sprint is toggled.",
+    "categories": [
+     "fabric",
+     "forge",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "i9xRThb3",
+    "slug": "polysprint",
+    "title": "PolySprint (Toggle Sprint / Sneak)",
+    "description": "Toggle sprint and sneak mod",
+    "categories": [
+     "fabric",
+     "forge",
+     "ornithe",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "shVMaevq",
+    "slug": "toggle-sprint-display",
+    "title": "Toggle Sprint Display",
+    "description": "Shows whether you're actually sprinting in the HUD.",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "eByvfL7B",
+    "slug": "toggle-toggle-sprint",
+    "title": "Toggle Toggle Sprint",
+    "description": "A toggle-sprint mod for modern versions of Minecraft using the existing control toggles",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|keystrokes": [
+   {
+    "project_id": "1yIQcc2b",
+    "slug": "evergreenhud",
+    "title": "EvergreenHUD (FPS / CPS / Keystrokes HUD)",
+    "description": "Improves your heads up display.",
+    "categories": [
+     "fabric",
+     "forge",
+     "ornithe",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "5xqElbjw",
+    "slug": "clean-keystrokes",
+    "title": "Clean Keystrokes",
+    "description": "A clean and customizable keystroke display HUD for Minecraft. Displays WASD, spacebar, sneak, sprint, and mouse buttons with a mouse movement tracker.",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "etqPFIW7",
+    "slug": "keystrokes-plus",
+    "title": "Keystrokes+",
+    "description": "Modern customizable HUD with Keystrokes, CPS, Armor, Status",
+    "categories": [
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "Chfc6Hpk",
+    "slug": "modern-keystrokes",
+    "title": "Modern Keystrokes",
+    "description": "A fabric mod that display keystrokes and CPS (26.3-1.20.1)",
+    "categories": [
+     "decoration",
+     "fabric",
+     "management",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "akiH6xH1",
+    "slug": "advanced-keystrokes",
+    "title": "Advanced Keystrokes",
+    "description": "The Advanced Keystrokes Mod is an on-screen heads-up display (HUD) that tracks and shows your real-time keyboard and mouse inputs, including WASD/movement keys, the spacebar, left-click (LMB), right-click (RMB), and your clicks per second (CPS).",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|armor hud": [
+   {
+    "project_id": "AghHBZC5",
+    "slug": "armor-hud",
+    "title": "Armor Hud",
+    "description": "The Armor HUD Mod adds a visual overlay to Minecraft that displays your armor's condition with color-coded durability bars. This makes it easier to keep track of your armor’s health during gameplay.",
+    "categories": [
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "wAk5JZkv",
+    "slug": "w-armor-hud",
+    "title": "Armor HUD",
+    "description": "Armor HUD (or Armour HUD) adds armor durability display to your screen with HUD Lib.",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "lsiKJeVm",
+    "slug": "armor-hud-mod",
+    "title": "Armor HUD",
+    "description": "This mod puts armor in view next to the offhand slot, allowing you to always be able to see your durability.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "G1Ou8IYH",
+    "slug": "zephrodaks-armor-hud",
+    "title": "Armor HUD",
+    "description": "Armor HUD adds a clean, modern overlay that displays your armor durability, protection level, and equipped gear status directly on screen. Designed for PvP and survival players, it helps you track armor wear in real time without opening your inventory.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "management",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "wF189hn9",
+    "slug": "ukus-armor-hud",
+    "title": "uku's Armor HUD",
+    "description": "Minimalist vanilla-like widget to display your armor items and their durability. Forked by uku.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|crosshair": [
+   {
+    "project_id": "ZcR9weSm",
+    "slug": "dynamiccrosshair",
+    "title": "Dynamic Crosshair",
+    "description": "A mod that hides or changes the crosshair dependent on context",
+    "categories": [
+     "fabric",
+     "forge",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "EwPIWPJ9",
+    "slug": "dynamiccrosshaircompat",
+    "title": "Dynamic Crosshair Compat",
+    "description": "Mod compatibility for Dynamic Crosshair",
+    "categories": [
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "zLAdIOH7",
+    "slug": "crosshair-indicator",
+    "title": "Crosshair Indicator",
+    "description": "This mod causes your crosshair to display differently when you can swing at a Player's Hitbox",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "QrKEZXN9",
+    "slug": "crosshair-addons-public",
+    "title": "Crosshair Addons Public",
+    "description": "Provides helpful icons around the crosshair when certain conditions are met.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "management",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "xUTHly0N",
+    "slug": "centered-crosshair",
+    "title": "Centered Crosshair",
+    "description": "Centers the crosshair to be perfectly in the middle of the screen",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|fire shield pumpkin blur fog": [
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|low fire": [
+   {
+    "project_id": "9ZPMzrQQ",
+    "slug": "low-fire-reborn",
+    "title": "Low Fire Reborn",
+    "description": "This mod lets you lower first person fire!",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "lbgzvsEa",
+    "slug": "low-fire-model",
+    "title": "Low Fire model",
+    "description": "Modifies entity fire height, so nametags aren't obscured",
+    "categories": [
+     "decoration",
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "4KS1JH7I",
+    "slug": "low-static-fire",
+    "title": "Low Static Fire",
+    "description": "Low Static Fire is a small client-side Fabric mod that replaces vanilla fire and soul fire with low, static flames.",
+    "categories": [
+     "decoration",
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "dmRZ3797",
+    "slug": "drypted-pvp-essentials",
+    "title": "PVP Essentials",
+    "description": "Essential client side PvP features, including armor, potion, damage indicators, low fire & shield, no explosion particles and much more!",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "magic",
+     "management",
+     "optimization",
+     "technology",
+     "utility",
+     "worldgen"
+    ]
+   },
+   {
+    "project_id": "OiTCWlzn",
+    "slug": "fullbright-pluslowfire-pluslowshield",
+    "title": "Fullbright+Lowfire+Lowshield",
+    "description": "Three classic PvP/visibility tweaks in one: Fullbright, Low Fire and Low Shield.",
+    "categories": [
+     "equipment",
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "COuwlde5",
+    "slug": "autorocket-plus",
+    "title": "Auto Rocket+",
+    "description": "This project has been archived due to low downloads and no motivation to continue updating.\n\nAuto Rocket+ automatically equips fireworks while flying with an Elytra and restores your previous offhand item when you land. Toggle it anytime with R.",
+    "categories": [
+     "adventure",
+     "cursed",
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "magic",
+     "management",
+     "transportation",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "xsHqamix",
+    "slug": "wtzos-cpvp-tweaks",
+    "title": "Wtzo's Cpvp Tweaks",
+    "description": "Wtzo's Cpvp Tweaks is a simple Fabric mod for crystal PvP. This mod provides more customizable sliders that replaces all the texture packs like low fire, totem size, no pop effect for totem, etc.",
+    "categories": [
+     "fabric",
+     "optimization",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|low shield": [
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "dmRZ3797",
+    "slug": "drypted-pvp-essentials",
+    "title": "PVP Essentials",
+    "description": "Essential client side PvP features, including armor, potion, damage indicators, low fire & shield, no explosion particles and much more!",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "magic",
+     "management",
+     "optimization",
+     "technology",
+     "utility",
+     "worldgen"
+    ]
+   },
+   {
+    "project_id": "OiTCWlzn",
+    "slug": "fullbright-pluslowfire-pluslowshield",
+    "title": "Fullbright+Lowfire+Lowshield",
+    "description": "Three classic PvP/visibility tweaks in one: Fullbright, Low Fire and Low Shield.",
+    "categories": [
+     "equipment",
+     "fabric"
+    ]
+   }
+  ],
+  "mod|10|no pumpkin blur": [
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|low fog": [
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|fire": [
+   {
+    "project_id": "owUiXPam",
+    "slug": "creeper-firework",
+    "title": "Creeper Firework",
+    "description": "Creepers explode harmlessly and beautifully",
+    "categories": [
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "mobs",
+     "neoforge",
+     "quilt"
+    ]
+   },
+   {
+    "project_id": "d6MhxwRo",
+    "slug": "soul-fire-d",
+    "title": "Soul Fire'd",
+    "description": "Let Soul Fire burn!",
+    "categories": [
+     "adventure",
+     "equipment",
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "magic",
+     "neoforge"
+    ]
+   },
+   {
+    "project_id": "9ZPMzrQQ",
+    "slug": "low-fire-reborn",
+    "title": "Low Fire Reborn",
+    "description": "This mod lets you lower first person fire!",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "Y2cfRBmm",
+    "slug": "fireclient-smp",
+    "title": "FireClient",
+    "description": "A client side utility mod, specifically made for SMPs",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "LIYB1RfI",
+    "slug": "firehud",
+    "title": "FireHud",
+    "description": "Customize the visuals of fire to your exact needs and beyond",
+    "categories": [
+     "decoration",
+     "fabric",
+     "management",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "cBuR63rJ",
+    "slug": "camp-fires-cook-mobs",
+    "title": "Camp Fires Cook Mobs",
+    "description": "Mobs that die on camp fires drop cooked meat.",
+    "categories": [
+     "fabric",
+     "food",
+     "quilt",
+     "technology",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "ING0LAPF",
+    "slug": "fireplace-lib",
+    "title": "Fireplace Lib",
+    "description": "A library of common functionality used by my mods, in one place for easier maintenance and faster updates.",
+    "categories": [
+     "fabric",
+     "forge",
+     "library",
+     "quilt"
+    ]
+   },
+   {
+    "project_id": "RdiVEh3O",
+    "slug": "creeper-fireworks-mod",
+    "title": "Creeper Fireworks Mod",
+    "description": "Fine tuned creeper mob griefing that changes how creeper explosions are handled. Fireworks still work even if mob griefing is disabled.\n\nThis is a mod, not a datapack, so all other mods are supported that modify or extend creepers.",
+    "categories": [
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "mobs",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "8qTXCUq0",
+    "slug": "dynamic-fire-overlay",
+    "title": "Dynamic Fire Overlay",
+    "description": "Hides the fire overlay if you have the fire resistance effect.",
+    "categories": [
+     "decoration",
+     "fabric",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "GlhPy70K",
+    "slug": "fire-extinguisher",
+    "title": "Fire Extinguisher 🧯",
+    "description": "Essential items like a fire extinguisher, fire axe, and other useful tools are necessary to effectively extinguish a fire.",
+    "categories": [
+     "decoration",
+     "equipment",
+     "fabric",
+     "forge",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|shield": [
+   {
+    "project_id": "GfoMZ9Ly",
+    "slug": "shield-statuses",
+    "title": "Shield Statuses",
+    "description": "Shows shield states, represented by color. This mod was ported forward and improved on by Walksy.",
+    "categories": [
+     "decoration",
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "management",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "HfLFMeJe",
+    "slug": "complete-shield-fixes",
+    "title": "Shield Fixes",
+    "description": "Resolves issues with shield sounds and corrects the animation glitch where the player's shield doesn't display blocking properly.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "management",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "iQBrasyH",
+    "slug": "passive-shield",
+    "title": "Passive Shield",
+    "description": "🛡 The shield is hidden and provides protection passively when held idle in the offhand.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "forge",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "CW2WWDUy",
+    "slug": "more-shield-variants",
+    "title": "More Shield Variants",
+    "description": "Shields for every kind of wood",
+    "categories": [
+     "decoration",
+     "equipment",
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "wwBZjeHd",
+    "slug": "shieldbreaker",
+    "title": "Shield Breaker",
+    "description": "Don't waste time in PvP. When your opponent raises their shield, Shield Breaker will think for you.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "YEjvcorf",
+    "slug": "amethyst-shield",
+    "title": "Amethyst Shield",
+    "description": "A mod which adds Blockixels Amethyst shield concept.",
+    "categories": [
+     "adventure",
+     "equipment",
+     "fabric",
+     "magic",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "gD9OBTtF",
+    "slug": "shieldscale",
+    "title": "Custom Shield Scale",
+    "description": "Allows you to customize the shield scale, along with other things like height left/right and more! For both you and others.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "fVvOG8t3",
+    "slug": "anchors-no-shield-delay",
+    "title": "Anchor's No Shield Delay",
+    "description": "Stop the lag! Anchor's No Shield Delay removes the 5-tick warm-up, providing frame-perfect, instant shield protection for Fabric 1.21.10.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "O1RWpkQ0",
+    "slug": "shield-statuses-fixes",
+    "title": "Shield Status Fixes",
+    "description": "This mod provides a fix to a bug in the popular mod \"Walksy's Shield Statuses\". Sometimes the mod can show the opponents shield as red even when it has not been disabled, what this mod does is double check to make sure the shield has been disabled.",
+    "categories": [
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "ded5u7eL",
+    "slug": "shielddisruptor",
+    "title": "ShieldDisruptor",
+    "description": "A simple fabric mod to hide shields while not defending or to hide other offhand items",
+    "categories": [
+     "equipment",
+     "fabric",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|pumpkin blur": [
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|fog": [
+   {
+    "project_id": "p1WH6sHr",
+    "slug": "from-the-fog",
+    "title": "From The Fog",
+    "description": "Enter a world of fear and mystery with From The Fog, a Minecraft mod that brings the legendary Herobrine to life in a spooky and immersive way true to the legend.",
+    "categories": [
+     "adventure",
+     "cursed",
+     "datapack",
+     "fabric",
+     "forge",
+     "neoforge",
+     "worldgen"
+    ]
+   },
+   {
+    "project_id": "46n24c6r",
+    "slug": "clear-fog",
+    "title": "No Fog",
+    "description": "Removes the fog so you can see in the nether",
+    "categories": [
+     "adventure",
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "neoforge",
+     "technology",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "Glp1bwYc",
+    "slug": "simplefog",
+    "title": "Simple Fog Control",
+    "description": "Allows simple control over water, nether and terrain fog.",
+    "categories": [
+     "fabric",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "PmLlAay9",
+    "slug": "disable-fog",
+    "title": "Disable Fog",
+    "description": "Allows you to selectively disable different types of fog.",
+    "categories": [
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "neoforge",
+     "optimization",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "JRC9aXm9",
+    "slug": "void-fog",
+    "title": "Void Fog",
+    "description": "Brings back the void fog of versions prior to Minecraft 1.8 with some slight... improvements",
+    "categories": [
+     "fabric",
+     "quilt"
+    ]
+   },
+   {
+    "project_id": "3xM4aaA7",
+    "slug": "no-fog-plus-fullbright",
+    "title": "No Fog + FullBright",
+    "description": "This mod allows the user to disable fog and enable fullbright in game",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "1SzND5KW",
+    "slug": "foggy-border",
+    "title": "Foggy Border",
+    "description": "A more immersive Worldborder, which uses Fog instead of blue lines :)",
+    "categories": [
+     "adventure",
+     "decoration",
+     "fabric"
+    ]
+   },
+   {
+    "project_id": "ztUKf3vp",
+    "slug": "cave-fog-stabilizer",
+    "title": "Cave Fog Stabilizer",
+    "description": "Prevents time of day from affecting cave fog color",
+    "categories": [
+     "fabric",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "KtwO5TWA",
+    "slug": "no-fog-perfected",
+    "title": "No Fog Perfected",
+    "description": "Removes fog from Minecraft, perfected. Completely customizable, no bad-looking horizon lines. Includes options for clear water and lava.",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "Y5CKwQf4",
+    "slug": "liquid-fog-begone",
+    "title": "Liquid Fog Begone",
+    "description": "A simple mod that allows you to control how dense the fog is while underwater or in lava.",
+    "categories": [
+     "adventure",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   }
+  ],
+  "mod|10|no fog": [
+   {
+    "project_id": "46n24c6r",
+    "slug": "clear-fog",
+    "title": "No Fog",
+    "description": "Removes the fog so you can see in the nether",
+    "categories": [
+     "adventure",
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "neoforge",
+     "technology",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "3xM4aaA7",
+    "slug": "no-fog-plus-fullbright",
+    "title": "No Fog + FullBright",
+    "description": "This mod allows the user to disable fog and enable fullbright in game",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "KtwO5TWA",
+    "slug": "no-fog-perfected",
+    "title": "No Fog Perfected",
+    "description": "Removes fog from Minecraft, perfected. Completely customizable, no bad-looking horizon lines. Includes options for clear water and lava.",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "yuk2cAJ1",
+    "slug": "no-fog-plz",
+    "title": "No Fog Plz",
+    "description": "Removes fog that was added in 1.21.6 makes things much clearer!",
+    "categories": [
+     "decoration",
+     "fabric",
+     "neoforge",
+     "technology",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "wAEWD77L",
+    "slug": "the-nofog-mod",
+    "title": "The NoFog Mod",
+    "description": "A simple Fabric/(Neo)Forge mod that removes Minecraft's annoying fog.",
+    "categories": [
+     "decoration",
+     "fabric",
+     "forge",
+     "neoforge",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "2Ok6dkOD",
+    "slug": "bactromod",
+    "title": "BactroMod",
+    "description": "Fullbright, low fire, low shield, item scaling, no fog, no pumpkin blur and more all in one mod!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "T1E4i1qj",
+    "slug": "cameratweaks",
+    "title": "Camera Tweaks (zoom, freecam, fullbright and more!)",
+    "description": "A fancy mod with freecam, zoom, fullbright, freelook, no fog, custom third persons and more!",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "xCsS1xAo",
+    "slug": "fogcontrol",
+    "title": "FogControl",
+    "description": "Removes all fog in Minecraft with a single keybind toggle. Distance fog, nether fog, water fog, blindness, darkness — all of it. Press F (default) to toggle on/off. Client-side only, no server needed.",
+    "categories": [
+     "fabric",
+     "optimization",
+     "utility"
+    ]
+   }
+  ],
+  "resourcepack|5|low fire": [
+   {
+    "project_id": "1jZGHJ05",
+    "slug": "low-fire-pack",
+    "title": "Low Fire",
+    "description": "Lower your first-person fire to enhance visibility!",
+    "categories": [
+     "16x",
+     "blocks",
+     "combat",
+     "minecraft",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "uTDzmrU3",
+    "slug": "low-fire-8x",
+    "title": "Low Fire",
+    "description": "Shrink fire, boost your vision!",
+    "categories": [
+     "8x-",
+     "combat",
+     "environment",
+     "minecraft",
+     "models",
+     "simplistic",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "MTpodYmB",
+    "slug": "low-fire-alexin1337",
+    "title": "Low Fire",
+    "description": "Reduces fire on the ground and on the screen",
+    "categories": [
+     "combat",
+     "minecraft",
+     "simplistic",
+     "tweaks"
+    ]
+   },
+   {
+    "project_id": "1jxYIlns",
+    "slug": "low-fire-by-ciodey",
+    "title": "Low Fire",
+    "description": "A Low Fire pack for better pvp",
+    "categories": [
+     "combat",
+     "entities",
+     "minecraft",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "Vef79lEX",
+    "slug": "low-fire-mrsad",
+    "title": "Low Fire",
+    "description": "Low Fire Pixel reduces the first-person fire overlay to just 1 pixel, keeping your view completely clear while preserving the original block fire texture on the ground.",
+    "categories": [
+     "blocks",
+     "minecraft",
+     "simplistic",
+     "vanilla-like"
+    ]
+   }
+  ],
+  "resourcepack|5|low shield": [
+   {
+    "project_id": "CZrLuVQo",
+    "slug": "low-shield-pack",
+    "title": "Low Shield",
+    "description": "Lower your shield for a visible view!",
+    "categories": [
+     "combat",
+     "minecraft",
+     "models",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "t93oVrit",
+    "slug": "low-shields",
+    "title": "Low Shield",
+    "description": "This resource pack lowers the shield when hold, providing more space on screen.",
+    "categories": [
+     "16x",
+     "combat",
+     "equipment",
+     "items",
+     "minecraft",
+     "models",
+     "simplistic",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "wkZpo3af",
+    "slug": "low-shield-by-ciodey",
+    "title": "Low Shield",
+    "description": "Low Shield Pack for better pvp",
+    "categories": [
+     "combat",
+     "equipment",
+     "minecraft",
+     "tweaks",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "NxRZekdc",
+    "slug": "low-shield-xgomme",
+    "title": "Low Shield",
+    "description": "lowers the shield in first person for a less obstructed view",
+    "categories": [
+     "combat",
+     "environment",
+     "equipment",
+     "items",
+     "minecraft",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   },
+   {
+    "project_id": "HRkT4pDh",
+    "slug": "low-shield-legend242900",
+    "title": "Low Shield",
+    "description": "A clean, vanilla-friendly shield texture tweak for Minecraft: Java Edition.",
+    "categories": [
+     "combat",
+     "equipment",
+     "minecraft",
+     "models",
+     "tweaks",
+     "utility",
+     "vanilla-like"
+    ]
+   }
+  ],
+  "mod|5|boosting": [
+   {
+    "project_id": "4YqxO6Dq",
+    "slug": "deote",
+    "title": "Disable Elytra Outside The End",
+    "description": "Disables elytra or fireworks boosting outside the End dimension (customizable)",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "neoforge",
+     "transportation"
+    ]
+   },
+   {
+    "project_id": "KQ8Nb18T",
+    "slug": "better-player-visibility",
+    "title": "Better Player Visibility",
+    "description": "Control what you see in-game from hiding players to boosting visibility. All with Better Player Visibility.",
+    "categories": [
+     "fabric",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "qFSrgid8",
+    "slug": "bow-boostin",
+    "title": "Bow Boostin' (BETA)",
+    "description": "This is just a mod that makes bow boosting easier by automating it, there are multiple commands to help you customize it to ur liking, the default settings probably wouldn't work so feel free to customize anything and chekcing the settings with /bboost",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "optimization",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "gYBG3CJ4",
+    "slug": "blade-oil",
+    "title": "Blade Oil",
+    "description": "Adds oils that can be applied to weapons, boosting damage against certain mobs",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "mobs",
+     "quilt"
+    ]
+   },
+   {
+    "project_id": "FQDqnsQu",
+    "slug": "chestswapper",
+    "title": "Elytra Swapper",
+    "description": "Fast elytra and chestplate swapping with rocket boosting, built to feel as vanilla as possible.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "transportation",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|useful": [
+   {
+    "project_id": "VafD51Dc",
+    "slug": "usefulfood-reborn",
+    "title": "UsefulFood Reborn",
+    "description": "Adds more new food in minecraft. This is a newer version rewrite of UsefulFood.",
+    "categories": [
+     "fabric",
+     "food",
+     "forge",
+     "neoforge"
+    ]
+   },
+   {
+    "project_id": "OzlEq4Ya",
+    "slug": "useful-hats",
+    "title": "Useful Hats",
+    "description": "Hats with special abilities.",
+    "categories": [
+     "adventure",
+     "equipment",
+     "fabric",
+     "food",
+     "forge",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "uY1F4Eo5",
+    "slug": "useful-brush",
+    "title": "Useful Brush",
+    "description": "Adds more functionalities to the vanilla brush",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "K2zV8gTP",
+    "slug": "create-useful-recipes",
+    "title": "Create: Useful Recipes",
+    "description": "Create: Useful Recipes adds new recipes and items/blocks to make Create automation easier.",
+    "categories": [
+     "adventure",
+     "fabric",
+     "game-mechanics",
+     "technology"
+    ]
+   },
+   {
+    "project_id": "cnCHsQcb",
+    "slug": "more-useful-dragon-egg",
+    "title": "More useful Dragon Egg",
+    "description": "Makes Dragon egg useful.",
+    "categories": [
+     "adventure",
+     "bukkit",
+     "datapack",
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "magic",
+     "neoforge",
+     "paper",
+     "spigot",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|lets": [
+   {
+    "project_id": "Lpbw5xPo",
+    "slug": "lets-better-cpvp",
+    "title": "Lets Better CPvP",
+    "description": "PvP QoL Fabric is a client-side Fabric mod for Minecraft that improves Crystal and Anchor PvP with cleaner visuals, reduced effects, customizable settings, and no gameplay automation.",
+    "categories": [
+     "equipment",
+     "fabric",
+     "game-mechanics",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "yCBnCQ6f",
+    "slug": "lets-parkour",
+    "title": "Let's Parkour",
+    "description": "🦘 Adds various parkour related blocks to create an awesome track, made for ModFest: Carnival.",
+    "categories": [
+     "adventure",
+     "fabric",
+     "forge",
+     "game-mechanics",
+     "minigame",
+     "neoforge",
+     "quilt",
+     "technology"
+    ]
+   },
+   {
+    "project_id": "lxFUQqIU",
+    "slug": "so-lets-set-the-ore-on-fire",
+    "title": "So Let's Set The Ore On Fire",
+    "description": "Adds correct ore-specific fire colors and respective blocks, so they can burn brighter than the sun.",
+    "categories": [
+     "decoration",
+     "fabric",
+     "neoforge"
+    ]
+   },
+   {
+    "project_id": "3U4ceUCj",
+    "slug": "mc-truststore",
+    "title": "mc-truststore (Let's Encrypt & Sessionserver fix)",
+    "description": "Simple universal mod to use newer java cacerts alongside the (possibly outdated) current cacerts.",
+    "categories": [
+     "cursed",
+     "fabric",
+     "forge",
+     "management",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "HWZ351z2",
+    "slug": "lets-troll",
+    "title": "Let's Troll",
+    "description": "Troll your players with ghost mode, custom stands, and item-bound tools. Simple, fun, and server-friendly.",
+    "categories": [
+     "fabric",
+     "folia",
+     "game-mechanics",
+     "paper",
+     "purpur",
+     "quilt",
+     "social",
+     "utility"
+    ]
+   }
+  ],
+  "mod|5|game": [
+   {
+    "project_id": "cudtvDnd",
+    "slug": "in-game-account-switcher",
+    "title": "In-Game Account Switcher",
+    "description": "This mod allows you to change your logged in account in-game, without restarting Minecraft",
+    "categories": [
+     "fabric",
+     "forge",
+     "management",
+     "neoforge",
+     "quilt",
+     "social",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "Vr2eDeCw",
+    "slug": "nbtedit-reborn",
+    "title": "In-Game NBTEdit Reborn",
+    "description": "Minecraft In-Game NBTEdit is reborn now for 1.19 and more.",
+    "categories": [
+     "fabric",
+     "forge",
+     "management",
+     "neoforge",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "TR0G6vEd",
+    "slug": "packrule-menus",
+    "title": "Datapack/Gamerule Menus",
+    "description": "Makes the Datapack and Gamerule menus accessible from existing singleplayer worlds. Allows toggling experimental features.",
+    "categories": [
+     "fabric",
+     "game-mechanics",
+     "management",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "YWZbIwtC",
+    "slug": "current-game-music-track",
+    "title": "Current Game Music Track",
+    "description": "🎵 Temporarily show the song title of what's currently playing via the GUI.",
+    "categories": [
+     "fabric",
+     "forge",
+     "neoforge",
+     "quilt",
+     "utility"
+    ]
+   },
+   {
+    "project_id": "tHHcVWna",
+    "slug": "cobblemon-gameblers-nuggets",
+    "title": "Cobblemon Gamebler's Nuggets",
+    "description": "Adds classic Pokémon-inspired Nugget Ore with balanced, single-block world generation, allowing server owners to sell nuggets via CobbleDollars or use them in custom recipes.",
+    "categories": [
+     "adventure",
+     "decoration",
+     "economy",
+     "fabric",
+     "utility",
+     "worldgen"
+    ]
+   }
+  ]
+ }
+}

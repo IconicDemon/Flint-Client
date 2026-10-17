@@ -1,0 +1,58 @@
+# Flint Client beta: Windows build. Runs only when started by hand (Actions -> "Windows beta build" -> Run workflow).
+# It builds the in-game runtime jar and the NSIS installer on a real Windows runner and keeps them as a build
+# artifact for testing. It publishes nothing: no release, no upload anywhere else, no signing (no certificate is set
+# up yet, so Windows SmartScreen will warn).
+name: Windows beta build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 25 (game runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Game runtime tests
+        working-directory: game-runtime
+        run: .\gradlew.bat test
+
+      - name: Launcher tests
+        working-directory: app
+        run: |
+          npm ci
+          npm test
+          cd src-tauri
+          cargo test --no-default-features
+
+      - name: Release build (runtime jar + NSIS installer)
+        working-directory: app
+        run: npm run release
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: flint-client-windows-beta
+          path: |
+            app/src-tauri/target.noindex/release/bundle/nsis/*.exe
+          retention-days: 14
