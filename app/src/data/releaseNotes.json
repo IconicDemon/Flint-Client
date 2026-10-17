@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.5.1",
+    "date": "2026-10-17",
+    "title": "Flint on Windows",
+    "summary": "The first Flint build for Windows, plus artwork for every version.",
+    "points": [
+      "Flint Client now runs on Windows 10 and 11",
+      "Each Minecraft version has its own artwork in the version picker, Home and Profiles",
+      "Auto Sync saves settings correctly on Windows",
+      "Safer handling of file paths in Minecraft version data"
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-10-16",
     "title": "Beta 1 is here",

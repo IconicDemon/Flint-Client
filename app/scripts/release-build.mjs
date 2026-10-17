@@ -34,7 +34,7 @@ const windows = process.platform === "win32";
 
 // Flint's in-game runtime (game-runtime/) is embedded in the app, so it is built first; the release
 // fails rather than ship an app that silently lacks it. (Windows runs the batch wrappers through its shell.)
-const runtime = spawnSync(windows ? "gradlew.bat" : "./gradlew", ["build", "--quiet"], { cwd: "../game-runtime", stdio: "inherit", shell: windows });
+const runtime = spawnSync(windows ? ".\\gradlew.bat" : "./gradlew", ["build", "--quiet"], { cwd: "../game-runtime", stdio: "inherit", shell: windows });
 if (runtime.status !== 0) {
   console.error("The in-game runtime (game-runtime/) failed to build.");
   process.exit(runtime.status ?? 1);
