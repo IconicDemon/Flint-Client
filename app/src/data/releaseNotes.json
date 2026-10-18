@@ -5,8 +5,8 @@
     "title": "A cleaner right-click",
     "summary": "Right-clicking in Flint no longer opens the browser menu.",
     "points": [
-      "No more Back, Refresh, Save as and Print menu on right-click",
-      "Text boxes keep copy and paste"
+      "No more Back, Refresh, Save as and Print menu on right-click, anywhere in Flint",
+      "Copy and paste in text boxes with Ctrl+C and Ctrl+V"
     ]
   },
   {

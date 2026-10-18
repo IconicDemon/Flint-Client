@@ -20,12 +20,9 @@ import "./styles/onboarding.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
-// The web view's own menu (Back, Refresh, Save as, Print) doesn't belong in the app; text fields keep it for copy and paste.
-if (import.meta.env.PROD) {
-  window.addEventListener("contextmenu", (e) => {
-    if (!(e.target as Element).closest("input, textarea, [contenteditable='true']")) e.preventDefault();
-  });
-}
+// The web view's own menu (Back, Refresh, Save as, Print, Emoji…) doesn't belong in the app, text fields included;
+// Ctrl+C/Ctrl+V still copy and paste.
+if (import.meta.env.PROD) window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 perfMark("script");
 
