@@ -13,12 +13,19 @@ public final class KeyConflicts {
 
 	/**
 	 * The other key settings in {@code layout} bound to {@code key}, as "Module: setting", leaving out the setting
-	 * {@code settingId} of {@code moduleId} itself; empty for no key.
+	 * {@code settingId} of {@code moduleId} itself; empty for no key. A key read only in the open chat shares only with
+	 * others like it.
 	 */
 	public static List<String> flintUses(Layout layout, String key, String moduleId, String settingId) {
 		List<String> out = new ArrayList<>();
 		if (key.isEmpty()) {
 			return out;
+		}
+		boolean chat = false;
+		for (ModuleState module : layout.modules()) {
+			if (module.id().equals(moduleId) && module.descriptor().setting(settingId) instanceof KeySetting self) {
+				chat = self.chatOnly();
+			}
 		}
 		for (ModuleState module : layout.modules()) {
 			if (!module.enabled()) {
@@ -26,7 +33,7 @@ public final class KeyConflicts {
 			}
 			for (SettingDescriptor<?> setting : module.descriptor().settings()) {
 				if (setting instanceof KeySetting other && !(module.id().equals(moduleId) && other.id().equals(settingId))
-					&& key.equals(module.text(other))) {
+					&& other.chatOnly() == chat && key.equals(module.text(other))) {
 					out.add(module.descriptor().name() + ": " + other.label());
 				}
 			}

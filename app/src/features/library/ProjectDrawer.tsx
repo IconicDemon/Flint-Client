@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorText, type LibraryHit, type LibraryKind, type LibraryProject, type LibraryVersion, type Profile } from "../../lib/api";
 import { ago, bytes, compact, shortDate } from "../../lib/format";
+import { useT, type MessageKey } from "../../lib/i18n";
 import { Markdown } from "../../lib/markdown";
 import { Badge, Button, EmptyState, IconButton, Spinner, Tabs } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
@@ -8,8 +9,7 @@ import { KIND_LABEL, placementNote, ProjectIcon, type InstallTarget } from "./In
 
 type Section = "overview" | "gallery" | "versions" | "details";
 
-const SIDE: Record<string, string> = { required: "Required", optional: "Optional", unsupported: "Not used", unknown: "Unknown" };
-
+const SIDE: Record<string, MessageKey> = { required: "library.side.required", optional: "library.side.optional", unsupported: "library.side.unsupported", unknown: "library.side.unknown" };
 export function ProjectDrawer({
   hit,
   kind,
@@ -27,6 +27,7 @@ export function ProjectDrawer({
   onInstall: (target: InstallTarget) => void;
   onOpenProfile: (id: string) => void;
 }) {
+  const t = useT();
   const [project, setProject] = useState<LibraryProject | null>(null);
   const [versions, setVersions] = useState<LibraryVersion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,38 +94,40 @@ export function ProjectDrawer({
     <div className="drawer-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label={hit.title} tabIndex={-1}>
         <header className="drawer-head">
-          <ProjectIcon src={project?.iconUrl ?? hit.iconUrl} title={hit.title} size={64} />
+          <ProjectIcon src={project?.iconUrl ?? hit.iconUrl} title={hit.title} kind={kind ?? hit.projectType} size={64} />
           <div className="drawer-title">
             <span className="eyebrow">{KIND_LABEL[kind]}</span>
             <h2>{hit.title}</h2>
             <span className="faint">
-              by {project?.author ?? hit.author} · {compact(project?.downloads ?? hit.downloads)} downloads · {compact(project?.followers ?? hit.follows)} followers
+              {t("library.card.by", { author: project?.author ?? hit.author })} · {t("library.drawer.downloads", { downloads: compact(project?.downloads ?? hit.downloads) })} ·{" "}
+              {t("library.drawer.followers", { followers: compact(project?.followers ?? hit.follows) })}
             </span>
           </div>
-          <IconButton icon="x" label="Close" onClick={onClose} />
+          <IconButton icon="x" label={t("common.close")} onClick={onClose} />
         </header>
 
         <div className="drawer-cta">
           {installed ? (
             <>
               <span className="result-installed">
-                <Icon name="check" size={15} /> Installed in {profile?.name}
+                <Icon name="check" size={15} /> {t("library.drawer.installedIn", { profile: profile?.name ?? "" })}
               </span>
               {profile && (
                 <Button size="sm" variant="ghost" onClick={() => onOpenProfile(profile.id)}>
-                  Manage in profile
+                  {t("library.drawer.manage")}
                 </Button>
               )}
             </>
           ) : unavailable ? (
             <span className="drawer-unavailable">
               <Icon name="alert" size={15} />
-              Not available for Minecraft {profile?.gameVersion}
-              {kind === "mod" || kind === "shader" ? ` with ${kind === "shader" ? "Iris" : "Fabric"}` : ""}.
+              {t(kind === "shader" ? "library.drawer.unavailableIris" : kind === "mod" ? "library.drawer.unavailableFabric" : "library.drawer.unavailable", {
+                version: profile?.gameVersion ?? "",
+              })}
             </span>
           ) : (
             <Button variant="primary" icon="download" disabled={versions === null || (kind !== "modpack" && !profile)} onClick={() => onInstall(target(best))}>
-              {kind === "modpack" ? "Install as new profile" : profile ? `Install to ${profile.name}` : "Choose a profile to install"}
+              {kind === "modpack" ? t("library.drawer.installPack") : profile ? t("library.drawer.installTo", { profile: profile.name }) : t("library.drawer.chooseProfile")}
             </Button>
           )}
           <Button size="sm" variant="ghost" iconRight="external" onClick={() => void api.openExternal(url)}>
@@ -134,20 +137,20 @@ export function ProjectDrawer({
         <p className="drawer-note faint">{placementNote(kind)}</p>
 
         <Tabs
-          label="Project sections"
+          label={t("library.drawer.sections")}
           value={section}
           onChange={setSection}
           tabs={[
-            { value: "overview", label: "Overview" },
-            { value: "gallery", label: "Gallery", count: gallery.length || undefined },
-            { value: "versions", label: "Versions", count: versions?.length || undefined },
-            { value: "details", label: "Details" },
+            { value: "overview", label: t("library.drawer.overview") },
+            { value: "gallery", label: t("library.drawer.gallery"), count: gallery.length || undefined },
+            { value: "versions", label: t("library.drawer.versions"), count: versions?.length || undefined },
+            { value: "details", label: t("library.drawer.details") },
           ]}
         />
 
         <div className="drawer-body scroll">
           {error ? (
-            <EmptyState icon="wifiOff" title="Couldn't load this project" body={error} compact />
+            <EmptyState icon="wifiOff" title={t("library.drawer.loadFailed")} body={error} compact />
           ) : !project ? (
             <div className="drawer-loading">
               <Spinner />
@@ -155,11 +158,11 @@ export function ProjectDrawer({
           ) : section === "overview" ? (
             <>
               <p className="drawer-summary">{project.description}</p>
-              {project.body ? <Markdown source={project.body} /> : <p className="faint">No description provided.</p>}
+              {project.body ? <Markdown source={project.body} /> : <p className="faint">{t("library.drawer.noDescription")}</p>}
             </>
           ) : section === "gallery" ? (
             gallery.length === 0 ? (
-              <EmptyState icon="image" title="No gallery images" compact />
+              <EmptyState icon="image" title={t("library.drawer.noGallery")} compact />
             ) : (
               <div className="gallery">
                 {gallery.map((g) => (
@@ -175,13 +178,13 @@ export function ProjectDrawer({
               {profile && kind !== "modpack" && (
                 <label className="version-toggle">
                   <input type="checkbox" checked={allVersions} onChange={(e) => setAllVersions(e.target.checked)} />
-                  Show versions for other Minecraft releases
+                  {t("library.drawer.otherReleases")}
                 </label>
               )}
               {versions === null ? (
                 <Spinner />
               ) : versions.length === 0 ? (
-                <EmptyState icon="info" title={profile ? `No versions for Minecraft ${profile.gameVersion}` : "No versions"} compact />
+                <EmptyState icon="info" title={profile ? t("library.drawer.noVersionsFor", { version: profile.gameVersion }) : t("library.drawer.noVersions")} compact />
               ) : (
                 <ul className="version-list">
                   {versions.map((v) => {
@@ -196,7 +199,7 @@ export function ProjectDrawer({
                           </span>
                           {fits && !installed && (kind === "modpack" || profile) && (
                             <Button size="sm" variant="ghost" icon="download" onClick={() => onInstall(target(v))}>
-                              Install
+                              {t("library.card.install")}
                             </Button>
                           )}
                         </div>
@@ -207,7 +210,7 @@ export function ProjectDrawer({
                         {v.changelog && (
                           <>
                             <button type="button" className="version-changelog-toggle" aria-expanded={expanded === v.id} onClick={() => setExpanded(expanded === v.id ? null : v.id)}>
-                              {expanded === v.id ? "Hide changelog" : "Changelog"}
+                              {t(expanded === v.id ? "library.drawer.hideChangelog" : "library.drawer.changelog")}
                             </button>
                             {expanded === v.id && <Markdown source={v.changelog} className="is-small" />}
                           </>
@@ -220,51 +223,53 @@ export function ProjectDrawer({
             </>
           ) : (
             <dl className="details">
-              <dt>License</dt>
+              <dt>{t("library.details.license")}</dt>
               <dd>
                 {project.license?.url ? (
                   <button type="button" className="link" onClick={() => void api.openExternal(project.license!.url!)}>
                     {project.license.name || project.license.id}
                   </button>
                 ) : (
-                  project.license?.name || project.license?.id || "Not specified"
+                  project.license?.name || project.license?.id || t("library.details.notSpecified")
                 )}
               </dd>
-              <dt>Client</dt>
-              <dd>{SIDE[project.clientSide] ?? project.clientSide}</dd>
-              <dt>Server</dt>
-              <dd>{SIDE[project.serverSide] ?? project.serverSide}</dd>
-              <dt>Loaders</dt>
+              <dt>{t("library.details.client")}</dt>
+              <dd>{SIDE[project.clientSide] ? t(SIDE[project.clientSide]) : project.clientSide}</dd>
+              <dt>{t("library.details.server")}</dt>
+              <dd>{SIDE[project.serverSide] ? t(SIDE[project.serverSide]) : project.serverSide}</dd>
+              <dt>{t("library.details.loaders")}</dt>
               <dd>{project.loaders.join(", ") || "—"}</dd>
-              <dt>Minecraft</dt>
+              <dt>{t("library.details.minecraft")}</dt>
               <dd>{project.gameVersions.length ? `${project.gameVersions[0]} – ${project.gameVersions[project.gameVersions.length - 1]}` : "—"}</dd>
-              <dt>Categories</dt>
+              <dt>{t("library.categories.label")}</dt>
               <dd>{[...project.categories, ...(project.additionalCategories ?? [])].join(", ") || "—"}</dd>
-              <dt>Updated</dt>
+              <dt>{t("library.details.updated")}</dt>
               <dd>
                 {shortDate(project.updated)} ({ago(project.updated)})
               </dd>
-              <dt>Published</dt>
+              <dt>{t("library.details.published")}</dt>
               <dd>{shortDate(project.published)}</dd>
               {project.members.length > 0 && (
                 <>
-                  <dt>Team</dt>
+                  <dt>{t("library.details.team")}</dt>
                   <dd>{project.members.map((m) => `${m.username}${m.role ? ` (${m.role})` : ""}`).join(", ")}</dd>
                 </>
               )}
               {(project.sourceUrl || project.issuesUrl || project.wikiUrl) && (
                 <>
-                  <dt>Links</dt>
+                  <dt>{t("library.details.links")}</dt>
                   <dd className="detail-links">
-                    {[
-                      ["Source", project.sourceUrl],
-                      ["Issues", project.issuesUrl],
-                      ["Wiki", project.wikiUrl],
-                    ]
+                    {(
+                      [
+                        ["library.details.source", project.sourceUrl],
+                        ["library.details.issues", project.issuesUrl],
+                        ["library.details.wiki", project.wikiUrl],
+                      ] as const
+                    )
                       .filter(([, href]) => href && href.startsWith("https://"))
                       .map(([label, href]) => (
                         <button key={label} type="button" className="link" onClick={() => void api.openExternal(href!)}>
-                          {label}
+                          {t(label)}
                         </button>
                       ))}
                   </dd>

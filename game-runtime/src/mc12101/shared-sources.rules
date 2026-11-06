@@ -1,0 +1,437 @@
+# How Minecraft 1.21.1 builds the sources, on top of the 1.21.10 overlay (overlay.properties): these rules apply to the shared
+# sources as 1.21.11's and 1.21.10's rules left them and to their own files; files in java/ replace those of the same path.
+# Rule forms: legacy/buildSrc/src/main/java/SharedSources.java. Every rule must still match.
+#
+# 1.21.1 predates most of what the shared sources draw with: GUI render state and strata (1.21.6), render pipelines and the GPU
+# device (1.21.5), item models (1.21.4), entity render states (1.21.2), input events and submit nodes (1.21.9). The GUI is
+# bridged (compat/GraphicsBridge, compat/Pose2D, compat/RenderPipelines, compat/input); features 1.21.1 can't have are
+# switched off with the reason on their page (compat/McCompat.unavailable).
+
+# ---------- input events: 1.21.9's records are Flint's own here (compat/input), and the overrides take 1.21.1's raw values ----------
+replace net.minecraft.client.input. com.flintclient.client.compat.input.
+s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean keyPressed\(((?:[\w.]+\.)?KeyEvent) (\w+)\) \{ => public boolean keyPressed(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\t$1 $2 = new $1(flint\$key, flint\$scancode, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean keyReleased\(KeyEvent (\w+)\) \{ => public boolean keyReleased(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\tKeyEvent $1 = new KeyEvent(flint\$key, flint\$scancode, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean charTyped\(CharacterEvent (\w+)\) \{ => public boolean charTyped(char flint\$char, int flint\$modifiers) {\n\t\tCharacterEvent $1 = new CharacterEvent(flint\$char, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseClicked\(MouseButtonEvent (\w+), boolean (\w+)\) \{ => public boolean mouseClicked(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);\n\t\tboolean $2 = com.flintclient.client.compat.input.Events.doubleClick(flint\$x, flint\$y, flint\$button);
+s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseReleased\(MouseButtonEvent (\w+)\) \{ => public boolean mouseReleased(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
+s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseDragged\(MouseButtonEvent (\w+), double (\w+), double (\w+)\) \{ => public boolean mouseDragged(double flint\$x, double flint\$y, int flint\$button, double $2, double $3) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
+s-in ui/widget/*.java public void onPress\(InputWithModifiers \w+\) \{ => public void onPress() {
+s-in ui/widget/*.java super\.onPress\(\w+\) => super.onPress()
+# …and their calls on the screens and widgets they extend, in 1.21.1's form.
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.keyPressed\((\w+)\) => super.keyPressed($1.key(), $1.scancode(), $1.modifiers())
+s-in {ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.charTyped\((\w+)\) => super.charTyped((char) $1.codepoint(), $1.modifiers())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseClicked\((\w+|MenuScale\.toMenu\(\w+\)), \w+\) => super.mouseClicked(($1).x(), ($1).y(), ($1).button())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseReleased\((\w+|MenuScale\.toMenu\(\w+\))\) => super.mouseReleased(($1).x(), ($1).y(), ($1).button())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseDragged\((\w+|MenuScale\.toMenu\(\w+\)), ((?:MenuScale\.toMenu\()?\w+\)?), ((?:MenuScale\.toMenu\()?\w+\)?)\) => super.mouseDragged(($1).x(), ($1).y(), ($1).button(), $2, $3)
+
+# ---------- GUI drawing (compat/GraphicsBridge): the 2D pose, pipelines, colours, fonts, textures ----------
+s-in ** \b(graphics|g|guiGraphics|graphics\(\))\.pose\(\) => $1.pose2d()
+replace net.minecraft.client.renderer.RenderPipelines com.flintclient.client.compat.RenderPipelines
+replace net.minecraft.util.ARGB com.flintclient.client.compat.ARGB
+replace net.minecraft.network.chat.FontDescription com.flintclient.client.compat.FontDescription
+# 1.21.1's dynamic textures have no debug label.
+s-in ** new DynamicTexture\((?:\(\) -> (?:"[^"]*"|[^,"])+|\w+::toString), => new DynamicTexture(
+s-in {platform/Texture.java,control/platform/Mc263Overlay.java} super\((?:\(\) -> \w+|\w+::toString), (\w+)\); => super($1);
+# 26.x maps a scissor rectangle through the pose; 1.21.1 takes it as given.
+s-in platform/Frame.java graphics\.enableScissor\( => graphics.flintScissor(
+# 1.21.1's GUI scale is a double (always a whole number): compat/Bridges.Window.
+s-in ** \.getGuiScale\(\) => .guiScaleInt()
+s-in platform/AtlasImage.java writeRows\(texture\.getTexture\(\), => writeRows(texture,
+
+# ---------- keys and the mouse ----------
+s-in {control/ControlCenter.java,platform/MenuHost.java} \.matches\((event)\) => .matches($1.key(), $1.scancode())
+s-in {control/ControlCenter.java,platform/MenuHost.java} \.matchesMouse\((event)\) => .matchesMouse($1.button())
+s-in ** InputConstants\.getKey\((event)\) => InputConstants.getKey($1.key(), $1.scancode())
+# 1.21.1's key categories are translation keys.
+s-in ** (\w+)\.getCategory\(\)\.label\(\)\.getString\(\) => net.minecraft.client.resources.language.I18n.get($1.getCategory())
+replace Minecraft.getInstance().hasShiftDown() net.minecraft.client.gui.screens.Screen.hasShiftDown()
+
+# ---------- render states: 1.21.1 draws entities straight from the game; Flint's hooks fill stand-ins (compat/state) ----------
+replace net.minecraft.client.renderer.entity.state. com.flintclient.client.compat.state.
+replace net.minecraft.client.renderer.state. com.flintclient.client.compat.state.
+replace net.minecraft.client.renderer.SubmitNodeCollector com.flintclient.client.compat.state.SubmitNodeCollector
+replace net.minecraft.client.renderer.item.ItemModelResolver com.flintclient.client.compat.state.ItemModelResolver
+# 1.21.1's PlayerSkin names its texture and model directly.
+s-in ** \.body\(\)\.texturePath\(\) => .texture()
+s-in ** \bPlayerModelType\.(SLIM|WIDE) => net.minecraft.client.resources.PlayerSkin.Model.$1
+s-in ** import net\.minecraft\.world\.entity\.player\.PlayerModelType;\n =>
+
+# ---------- names 1.21.2 to 1.21.9 changed ----------
+word getDeltaTracker getTimer
+replace net.minecraft.world.entity.player.PlayerSkin net.minecraft.client.resources.PlayerSkin
+# authlib 6's GameProfile has getters.
+s-in ** (getGameProfile|getProfile|profile)\(\)\.name\(\) => $1().getName()
+s-in ** (getGameProfile|getProfile|profile)\(\)\.id\(\) => $1().getId()
+replace SharedConstants.getCurrentVersion().name() SharedConstants.getCurrentVersion().getName()
+# Level heights: 1.21.2 renamed the build limits (getMaxY is the top block, one under the build height).
+s-in {control/platform/ambient/AmbientEnvironment.java,control/platform/Mc263GameData.java,control/platform/Mc263Maps.java,control/platform/Mc263MapScanner.java,control/platform/Mc263World.java,control/platform/sound/SoundLevel.java} \.getMinY\(\) => .getMinBuildHeight()
+s-in {control/platform/ambient/AmbientEnvironment.java,control/platform/Mc263GameData.java,control/platform/Mc263World.java} (\w+)\.getMaxY\(\) => ($1.getMaxBuildHeight() - 1)
+s-in control/platform/ambient/AmbientEnvironment.java \.getMinSectionY\(\) => .getMinSection()
+s-in control/platform/sound/SoundLevel.java public int getMinY\(\) => public int getMinBuildHeight()
+# 1.21.1's isSolidRender asks the block's place (it doesn't matter for the blocks asked about).
+s-in ** \.isSolidRender\(\) => .isSolidRender(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, net.minecraft.core.BlockPos.ZERO)
+s-in ** Direction\.getApproximateNearest\( => Direction.getNearest(
+s-in {control/platform/Mc263SoundFilters.java,control/platform/sound/SoundPhysics.java} mainCamera\(\)\.position\(\) => mainCamera().getPosition()
+replace SoundSource.UI SoundSource.MASTER
+replace Screenshot.takeScreenshot( com.flintclient.client.compat.McCompat.takeScreenshot(
+# 1.21.1 keeps item cooldowns per item.
+s-in {control/platform/Mc263GameData.java,control/platform/Mc263LookMods.java,control/platform/Mc263Overlay.java} (cooldowns|getCooldowns\(\))\.(isOnCooldown|getCooldownPercent)\((\w+)(\)|, ) => $1.$2($3.getItem()$4
+s-in control/platform/Mc263GameData.java cooldowns\.getCooldownGroup\((\w+(?:\[\w+\])?)\) => net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey($1.getItem())
+# 1.21.1's key categories are translation keys.
+s-in control/platform/ControlKeys.java public static final KeyMapping\.Category CATEGORY = .*; => public static final String CATEGORY = "key.category.flintclient.main";
+s-in control/platform/Mc263ControlPlatform.java mapping\.getCategory\(\) == KeyMapping\.Category\.(\w+) => KeyMapping.CATEGORY_$1.equals(mapping.getCategory())
+
+# ---------- modules 1.21.1 can't have: their page says why, and they can't be turned on (compat/ModuleAvailability) ----------
+file control/model/ModuleDescriptor.java
+# (after the settings are built, so the page keeps every row the catalog names, shown off with the reason). Module
+# descriptions are built on Flint's settings thread while Minecraft is still starting (ControlState.readAhead), so what
+# this asks touches nothing of Minecraft's: McCompat would, and the two threads could wait on each other for good.
+s (\t\tthis\.status = Objects\.requireNonNull\(status\);\n) => \t\tString flint\$unavailable = com.flintclient.client.compat.ModuleAvailability.unavailable(id);\n\t\tif (flint\$unavailable != null) {\n\t\t\tstatus = Status.BLOCKED;\n\t\t\tstatusNote = flint\$unavailable;\n\t\t}\n$1
+
+# ---------- tooltip images: 1.21.1's take no font for their height and no size to draw in ----------
+s-in {control/platform/Mc263Food.java,control/platform/Mc263Containers.java} public int getHeight\(Font font\) => public int getHeight()
+s-in {control/platform/Mc263Food.java,control/platform/Mc263Containers.java} public void renderImage\(Font font, int (\w+), int (\w+), int \w+, int \w+, GuiGraphics graphics\) => public void renderImage(Font font, int $1, int $2, GuiGraphics graphics)
+
+# ---------- Saturation (AppleSkin): 1.21.1 keeps food on the FOOD component alone, and its F3 screen is fixed ----------
+file control/platform/Mc263Food.java
+s import com\.flintclient\.client\.mixin\.feature\.DebugScreenEntriesInvoker;\n =>
+s import net\.minecraft\.client\.gui\.components\.debug\.\w+;\n =>
+s* import net\.minecraft\.client\.gui\.components\.debug\.\w+;\n =>
+s import net\.minecraft\.world\.item\.component\.Consumable;\n =>
+s import net\.minecraft\.world\.item\.component\.TooltipDisplay;\n =>
+s* import net\.minecraft\.world\.item\.consume_effects\.\w+;\n =>
+s stack\.has\(DataComponents\.CONSUMABLE\) \? stack\.get\(DataComponents\.FOOD\) : null => stack.get(DataComponents.FOOD)
+s (?s)(private static boolean rotten\(ItemStack stack\) \{\n).*?\n\t\}\n => $1\t\treturn com.flintclient.client.compat.FoodEffects.harmful(stack);\n\t}\n
+s (?s)\t\tConsumable consumable = stack\.get\(DataComponents\.CONSUMABLE\);\n\t\tif \(consumable != null\) \{.*?\n\t\t\}\n(\t\treturn health;) => \t\thealth += com.flintclient.client.compat.FoodEffects.regeneration(stack);\n$1
+s stack\.getOrDefault\(DataComponents\.TOOLTIP_DISPLAY, TooltipDisplay\.DEFAULT\)\.hideTooltip\(\) => stack.has(DataComponents.HIDE_TOOLTIP)
+# The food line in F3: 1.21.1's debug screen is a fixed list, so it is added to the game information (mixin.feature.DebugOverlayFoodMixin) whenever the setting isn't Never.
+s (?s)\tstatic final class Debug implements DebugScreenEntry \{.*\n\t\}\n\}\n?$ => \tstatic final class Debug {\n\t\tprivate static final DecimalFormat SATURATION = new DecimalFormat("#.##");\n\t\tprivate static final DecimalFormat EXHAUSTION = new DecimalFormat("0.00");\n\t\tprivate static final DecimalFormat EXHAUSTION_MAX = new DecimalFormat("#.##");\n\n\t\tstatic void sync(ModuleState state) {\n\t\t}\n\n\t\t/** The line for the F3 screen's game information, or null. */\n\t\tstatic @Nullable String line() {\n\t\t\tPlayer player = Minecraft.getInstance().player;\n\t\t\tif (player == null || !GUARD.on() || !Mods.on(MODULE) || Mods.state(MODULE).option(Saturation.DEBUG) == 0) {\n\t\t\t\treturn null;\n\t\t\t}\n\t\t\treturn "hunger: " + player.getFoodData().getFoodLevel() + ", sat: " + SATURATION.format(saturation(player)) + ", exh: "\n\t\t\t\t+ EXHAUSTION.format(exhaustion(player)) + "/" + EXHAUSTION_MAX.format(FoodRegen.MAX_EXHAUSTION);\n\t\t}\n\t}\n\n\t/** Saturation's line on the F3 screen, or null. */\n\tpublic static @Nullable String debugLine() {\n\t\treturn Debug.line();\n\t}\n}\n
+
+# ---------- toasts: 1.21.1's ToastComponent asks a toast to draw and say whether it stays in one call ----------
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} toasts\.ToastManager; => toasts.ToastComponent;
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} @Override\n\tpublic Visibility getWantedVisibility\(\) => public Visibility getWantedVisibility()
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} @Override\n\tpublic void update\(ToastManager manager, long visibleMillis\) => public void update(ToastComponent manager, long visibleMillis)
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} public void render\(GuiGraphics graphics, Font font, long visibleMillis\) \{ => public Visibility render(GuiGraphics graphics, ToastComponent manager, long visibleMillis) {\n\t\tupdate(manager, visibleMillis);\n\t\tflint\$render(graphics, manager.getMinecraft().font, visibleMillis);\n\t\treturn getWantedVisibility();\n\t}\n\n\tprivate void flint\$render(GuiGraphics graphics, Font font, long visibleMillis) {
+
+# ---------- items: components 1.21.2 to 1.21.5 added ----------
+s-in ** stack\.get\(net\.minecraft\.core\.component\.DataComponents\.EQUIPPABLE\) != null => (stack.getItem() instanceof net.minecraft.world.item.Equipable)
+replace ItemRenderer.ENCHANTED_GLINT_ARMOR ItemRenderer.ENCHANTED_GLINT_ENTITY
+
+file control/platform/Mc263Overlay.java
+s using\.get\(net\.minecraft\.core\.component\.DataComponents\.BLOCKS_ATTACKS\) != null => using.getItem() instanceof net.minecraft.world.item.ShieldItem
+s using\.get\(net\.minecraft\.core\.component\.DataComponents\.BLOCKS_ATTACKS\)\.blockDelayTicks\(\) => 5
+s using\.get\(net\.minecraft\.core\.component\.DataComponents\.CONSUMABLE\) != null => (using.has(net.minecraft.core.component.DataComponents.FOOD) || using.getUseAnimation() == net.minecraft.world.item.UseAnim.DRINK)
+
+file control/platform/BuiltInResources.java
+# 1.21.1 reads pack metadata through serializers; the pack section is the only one asked for.
+s (?s)\t\t@Override\n\t\tpublic <T> @Nullable T getMetadataSection\(MetadataSectionType<T> type\) \{.*?\n\t\t\}\n => \t\t@Override\n\t\t@SuppressWarnings("unchecked")\n\t\tpublic <T> @Nullable T getMetadataSection(net.minecraft.server.packs.metadata.MetadataSectionSerializer<T> type) {\n\t\t\tif (type != PackMetadataSection.TYPE) {\n\t\t\t\treturn null;\n\t\t\t}\n\t\t\treturn (T) new PackMetadataSection(Component.literal("Flint Client's built-in assets"), SharedConstants.getCurrentVersion().getPackVersion(PackType.CLIENT_RESOURCES), Optional.empty());\n\t\t}\n
+
+file control/platform/Mc263ChatScreen.java
+s search\.mouseClicked\(event, false\) => com.flintclient.client.compat.input.Events.mouseClicked(search, event, false)
+s box\.keyPressed\(event\) => com.flintclient.client.compat.input.Events.keyPressed(box, event)
+s search\.charTyped\(event\) => com.flintclient.client.compat.input.Events.charTyped(search, event)
+
+file control/platform/Mc263Inventory.java
+s search\.keyPressed\(event\) => com.flintclient.client.compat.input.Events.keyPressed(search, event)
+
+file control/platform/Mc263ControlPlatform.java
+s getNarrator\(\)\.saySystemNow\(text\) => getNarrator().sayNow(text)
+
+file control/platform/Mc263MapTiles.java
+s writeRows\(tile\.texture\.getTexture\(\), => writeRows(tile.texture,
+
+file control/platform/Mc263Nametags.java
+s entity\.getYRot\(partialTick\) => net.minecraft.util.Mth.lerp(partialTick, entity.yRotO, entity.getYRot())
+
+file control/platform/Mc263BetterF3.java
+# Custom F3 on 1.21.1's fixed F3 screen: its open switch is the debug overlay's (compat/DebugEntries).
+s net\.minecraft\.client\.gui\.components\.debug\.DebugScreenEntries => com.flintclient.client.compat.DebugScreenEntries
+s (Minecraft\.getInstance\(\)|mc)\.debugEntries => com.flintclient.client.compat.DebugEntries.get()
+s server\.getForceLoadedChunks\(\) => server.getForcedChunks()
+s level\.isInsideBuildHeight\(pos\.getY\(\)\) => !level.isOutsideBuildHeight(pos.getY())
+s registryAccess\(\)\.lookupOrThrow\(Registries\.BIOME\) => registryAccess().registryOrThrow(Registries.BIOME)
+
+file control/platform/Mc263HealthIndicators.java
+s Minecraft\.getInstance\(\)\.getAtlasManager\(\)\.getAtlasOrThrow\(GUI_ATLAS_ID\) => (TextureAtlas) Minecraft.getInstance().getTextureManager().getTexture(GUI_ATLAS)
+
+file control/platform/Mc263LookMods.java
+s import net\.minecraft\.client\.renderer\.feature\.ItemFeatureRenderer;\n =>
+s super\(id::toString, image\); => super(image);
+
+file control/platform/Mc263Skins.java
+s pose\.transformNormal\(FACE_NORMALS\[f\], => pose.transformNormal(new Vector3f(FACE_NORMALS[f]),
+# 1.21.1's models don't hand out their root: the head's parts are set before the model is made.
+s head = new SkullModel\(SkullModel\.createHumanoidHeadLayer\(\)\.bakeRoot\(\)\);\n(\t+)set\(head\.root\(\)\.getChild\("head"\)\.getChild\("hat"\), mesh\.skullHat\(\)\); => net.minecraft.client.model.geom.ModelPart flint\$root = SkullModel.createHumanoidHeadLayer().bakeRoot();\n$1set(flint\$root.getChild("head").getChild("hat"), mesh.skullHat());\n$1head = new SkullModel(flint\$root);
+
+file control/platform/TierSearchScreen.java
+# 1.21.1 looks a profile up by name through the skull cache, and a skin through the skin manager.
+s mc\.services\(\)\.profileResolver\(\)\.fetchByName\(query\) => net.minecraft.world.level.block.entity.SkullBlockEntity.fetchGameProfile(query).join()
+s mc\.getSkinManager\(\)\.createLookup\(profile, true\) => mc.getSkinManager().lookupInsecure(profile)
+
+# ---------- mixins: names 1.21.1 has differently ----------
+file mixin/LoadingOverlayFadeMixin.java
+# 1.21.1 has no isReadyToFadeOut: a pack reload waits two fade-in lengths inside render, which the shorter fade-in already cuts.
+s (?s)\t/\*\* A finished pack reload.*?\n\t\}\n\n =>
+
+file mixin/FontManagerMixin.java
+# 1.21.1 makes a font set and then loads its providers (createFontSet came later).
+s (?s)\t@Shadow\n\tprivate FontSet createFontSet\(.*?\n\t\}\n => \t@Shadow\n\t@Final\n\tprivate net.minecraft.client.renderer.texture.TextureManager textureManager;\n
+s FontSet set = createFontSet\(id, providers, Set\.of\(\)\); => FontSet set = new FontSet(textureManager, id);\n\t\t\tset.reload(providers, Set.of());
+
+file mixin/MinecraftMixin.java
+# 1.21.1's window keeps its GUI scale as a double.
+s Window;setGuiScale\(I\)V => Window;setGuiScale(D)V
+s private int flint\$guiScaleChosen\(int guiScale\) \{\n\t\tFontPreload\.guiScaleChosen\(guiScale\); => private double flint\$guiScaleChosen(double guiScale) {\n\t\tFontPreload.guiScaleChosen((int) guiScale);
+
+file mixin/feature/ChatListenerBubblesMixin.java
+s sender\.id\(\) => sender.getId()
+
+file mixin/feature/EntitySoundMixin.java
+s sound\.location\(\) => sound.getLocation()
+# 1.21.1's level plays a sound "except for" a player, not any entity.
+s Level;playSound\(Lnet/minecraft/world/entity/Entity; => Level;playSound(Lnet/minecraft/world/entity/player/Player;
+s flint\$eyeHeight\(@Nullable Entity except, => flint\$eyeHeight(net.minecraft.world.entity.player.@Nullable Player except,
+
+file mixin/ncr/NcrServerDataMixin.java
+s tag\.getBooleanOr\("preventsChatReports", false\) => tag.getBoolean("preventsChatReports")
+
+file mixin/network/ClientHandshakePacketListenerImplMixin.java
+# 1.21.1 finishes the login in handleGameProfile and keeps the kick reason behind a getter.
+s method = "handleLoginFinished" => method = "handleGameProfile"
+s packet\.reason\(\) => packet.getReason()
+
+file mixin/network/ClientPacketListenerMixin.java
+s packet\.gameTime\(\) => packet.getGameTime()
+
+file mixin/servers/JoinMultiplayerScreenMixin.java
+# 1.21.1's server list doesn't declare repositionElements: a resize runs init again, which places the Quick Play button.
+s (?s)\t@Inject\(method = "repositionElements".*?\n\t\}\n\n =>
+
+# ---------- Chat Heads: 1.21.1 has no object text (1.21.9's head glyph), so the head is drawn before the line instead ----------
+# (compat.ChatHeadLines from ChatComponentMixin). Who sent a message is found as on 26.x; Before Name says why it can't be.
+file control/platform/Mc263ChatHeads.java
+s import net\.minecraft\.client\.renderer\.entity\.player\.AvatarRenderer;\n =>
+s import net\.minecraft\.network\.chat\.contents\.ObjectContents;\n =>
+s import net\.minecraft\.network\.chat\.contents\.objects\.PlayerSprite;\n =>
+s sender\.id\(\) => sender.getId()
+s part\.getContents\(\) instanceof ObjectContents object && object\.contents\(\) instanceof PlayerSprite => false
+s part\.getStyle\(\)\.getClickEvent\(\) instanceof ClickEvent\.SuggestCommand suggest\) \{\n(\t+)String command = suggest\.command\(\); => part.getStyle().getClickEvent() != null && part.getStyle().getClickEvent().getAction() == ClickEvent.Action.SUGGEST_COMMAND) {\n$1String command = part.getStyle().getClickEvent().getValue();
+s (?s)(private static MutableComponent head\(PlayerInfo info, Component message\) \{\n).*?\n\t\}\n => $1\t\treturn Component.empty();\n\t}\n
+s head\[0\] = style\.getFont\(\) instanceof FontDescription\.PlayerSprite; => head[0] = false;
+s (?s)\t/\*\* The head glyph's width: Minecraft's 8 plus.*?\n\t\}\n\n =>
+s AvatarRenderer\.isPlayerUpsideDown\(player\) => net.minecraft.client.renderer.entity.LivingEntityRenderer.isEntityUpsideDown(player)
+s if \(owner\.showHat\(\)\) \{ => {
+s (\tprivate static boolean offsetEnabled\(\) \{) => \t/** Heads are on and the server allows them (1.21.1 draws them before the line, compat.ChatHeadLines). */\n\tpublic static boolean flint\$active() {\n\t\treturn on() && !serverDisabled;\n\t}\n\n\t/** A head's width with its padding and 3D hat. */\n\tpublic static int flint\$headWidth() {\n\t\treturn headWidth(Mods.state(CHAT));\n\t}\n\n$1
+
+file control/platform/Mc263Chat.java
+s (\tprivate static Kind kind\(GuiMessage message\) \{) => \t/** Who sent {@code message}, as Flint found it (1.21.1's chat heads draw that player's head before the line), or null. */\n\tpublic static @Nullable UUID flint\$sender(GuiMessage message) {\n\t\treturn kind(message).sender;\n\t}\n\n$1
+
+# ---------- the combat and visual mods (Falling Leaves, Wavy Capes, Crosshair, Hitbox, Fog, Zoom) on 1.21.1 ----------
+file control/platform/FallingLeafParticle.java
+# 1.21.1's sprite particles are TextureSheetParticles, drawn in the translucent particle sheet.
+s import net\.minecraft\.client\.particle\.SingleQuadParticle; => import net.minecraft.client.particle.ParticleRenderType;\nimport net.minecraft.client.particle.TextureSheetParticle;
+s extends SingleQuadParticle => extends TextureSheetParticle
+s super\(level, x, y, z, 0, 0, 0, sprite\); => super(level, x, y, z, 0, 0, 0);\n\t\tthis.setSprite(sprite);
+s (?s)\t@Override\n\tprotected Layer getLayer\(\) \{\n\t\treturn Layer\.TRANSLUCENT;\n\t\} => \t@Override\n\tpublic ParticleRenderType getRenderType() {\n\t\treturn ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT;\n\t}
+
+file control/platform/Mc263FallingLeaves.java
+# 1.21.1's particle atlas is a texture of its own; it has no falling-leaf sprites of Minecraft's (1.21.5 added them), so Flint's are drawn.
+s Minecraft\.getInstance\(\)\.getAtlasManager\(\)\.getAtlasOrThrow\(PARTICLES_ATLAS\) => (TextureAtlas) Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_PARTICLES)
+s s\.bool\(FallingLeaves\.VANILLA_TEXTURES\) \? null : LEAF_SPRITES => LEAF_SPRITES
+
+file control/platform/Mc263Capes.java
+# 1.21.1 keeps the cloak's trailing position on the player itself.
+s import net\.minecraft\.client\.entity\.ClientAvatarEntity;\n =>
+s living instanceof ClientAvatarEntity avatar => living instanceof net.minecraft.world.entity.player.Player avatar
+s avatar\.avatarState\(\)\.getInterpolatedCloakX\(partial\) => net.minecraft.util.Mth.lerp(partial, avatar.xCloakO, avatar.xCloak)
+s avatar\.avatarState\(\)\.getInterpolatedCloakZ\(partial\) => net.minecraft.util.Mth.lerp(partial, avatar.zCloakO, avatar.zCloak)
+
+file control/platform/Mc263Crosshair.java
+s Minecraft\.getInstance\(\)\.debugEntries\.isF3Visible\(\) => Minecraft.getInstance().gui.getDebugOverlay().showDebugScreen()
+s getCooldownPercent\(item\.getDefaultInstance\(\), => getCooldownPercent(item,
+
+file control/platform/Mc263Hitbox.java
+# The toggle key flips 1.21.1's hitbox switch, which the entity render dispatcher keeps.
+s import net\.minecraft\.client\.gui\.components\.debug\.DebugScreenEntries;\n =>
+s Minecraft\.getInstance\(\)\.debugEntries\.toggleStatus\(DebugScreenEntries\.ENTITY_HITBOXES\); => Minecraft.getInstance().getEntityRenderDispatcher().setRenderHitBoxes(!Minecraft.getInstance().getEntityRenderDispatcher().shouldRenderHitBoxes());
+
+file control/platform/Mc263Fog.java
+s import net\.minecraft\.client\.renderer\.fog\.FogData; => import com.flintclient.client.compat.FogData;
+
+file control/platform/Mc263Items.java
+s mainCamera\(\)\.yaw\(\) => mainCamera().getYRot()
+
+file mixin/feature/ZoomMixin.java
+# 1.21.1's bobView reads the bob straight from the player (one lerp).
+s Lnet/minecraft/client/entity/ClientAvatarState;getInterpolatedBob\(F\)F => Lnet/minecraft/util/Mth;lerp(FFF)F
+
+file mixin/feature/ChatHeadsSuggestionsMixin.java
+# 1.21.1's drawString answers the width it drew.
+s Ljava/lang/String;III\)V" => Ljava/lang/String;III)I"
+
+file control/model/mods/ParityReasons.java
+# Settings 1.21.1 can't honour say why (McCompat.settingUnavailable).
+s (public static @Nullable String reason\(ModuleState module, SettingDescriptor<\?> setting\) \{\n) => $1\t\tString flint\$version = com.flintclient.client.compat.McCompat.settingUnavailable(setting);\n\t\tif (flint\$version != null) {\n\t\t\treturn flint\$version;\n\t\t}\n
+
+file control/platform/Mc263LookMods.java
+# 1.21.1's getTexture loads an unregistered id from a file (and logs it missing): asked with a fallback instead.
+s textures\.getTexture\(WHITE\) instanceof DynamicTexture => textures.getTexture(WHITE, null) instanceof DynamicTexture
+
+# ---------- Animations (Not Enough Animations) and Loot Beams on 1.21.1 ----------
+file control/platform/Mc263Animations.java
+# 1.21.1's boats are Boat, its use animations UseAnim (1.21.2 renamed both).
+s import net\.minecraft\.world\.entity\.vehicle\.AbstractBoat;\n =>
+s instanceof AbstractBoat => instanceof net.minecraft.world.entity.vehicle.Boat
+s import net\.minecraft\.world\.item\.ItemUseAnimation; => import net.minecraft.world.item.UseAnim;
+s ItemUseAnimation => UseAnim
+# Held items (a map in the hand, a hanging lantern, the off hand hidden while drawing a bow) are drawn from 1.21.2's
+# held-item render states: 1.21.1 has none, so that part is left out and its rows say why (McCompat.settingUnavailable).
+s import com\.flintclient\.client\.compat\.state\.ArmedEntityRenderState;\n =>
+s import com\.flintclient\.client\.compat\.state\.MapRenderState;\n =>
+s (?s)\t// ---------- held items ----------\n.*?(\t// ---------- helpers \(Not Enough Animations' maths\) ----------) => \t// ---------- held items: not on 1.21.1 (see shared-sources.rules) ----------\n\n$1
+
+file control/platform/Mc263LootBeams.java
+# 1.21.1 knows wearables by their item (Equipable), for any wearer.
+s import net\.minecraft\.world\.item\.equipment\.Equippable;\n =>
+s (?s)Equippable equippable = stack\.get\(DataComponents\.EQUIPPABLE\);\n\t+LocalPlayer player = mc\(\)\.player;\n\t+if \(equippable != null && player != null\n\t+&& equippable\.allowedEntities\(\)\.map\(set -> set\.contains\(player\.getType\(\)\.builtInRegistryHolder\(\)\)\)\.orElse\(true\)\) \{ => if (item instanceof net.minecraft.world.item.Equipable) {
+# 1.21.1 draws a tooltip at once (no deferred tooltips).
+s graphics\.setTooltipForNextFrame\(mc\.font, stack, x, y\);\n(\t+)// Minecraft draws a deferred tooltip only for screens: drawn here, on the HUD, now\.\n\t+graphics\.renderDeferredElements\(\); => graphics.renderTooltip(mc.font, stack, x, y);
+s graphics\.setTooltipForNextFrame\(mc\.font, lines, stack\.getTooltipImage\(\), x, y\);\n\t+graphics\.renderDeferredElements\(\); => graphics.renderTooltip(mc.font, lines, stack.getTooltipImage(), x, y);
+
+file mixin/feature/LivingEntityMixin.java
+# 1.21.1's tickHeadTurn takes the walk's turn too and answers the body's running turn: skipped, that turn comes back unchanged.
+s private void flint\$ladderBody\(float yBodyRot, CallbackInfo callback\) \{\n(\t+)if \((.*?)\) \{\n\t+callback\.cancel\(\); => private void flint\$ladderBody(float yBodyRot, float turn, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Float> callback) {\n$1if ($2) {\n$1\tcallback.setReturnValue(turn);
+
+file control/platform/Mc263HudExtras.java
+# Player Model: the corners are already mapped through the GUI pose (26.x's pictures ignore it), and 1.21.1 draws the entity
+# (and its scissor) through that same pose: it is drawn with the pose cleared, so the model lands where it was mapped.
+s (\t+)InventoryScreen\.renderEntityInInventoryFollowsMouse\(graphics, x0, y0, x1, y1, size, 0\.0625F, cx - 26, mouseY, player\); => $1graphics.pose().pushPose();\n$1graphics.pose().setIdentity();\n$1try {\n$1\tInventoryScreen.renderEntityInInventoryFollowsMouse(graphics, x0, y0, x1, y1, size, 0.0625F, cx - 26, mouseY, player);\n$1} finally {\n$1\tgraphics.pose().popPose();\n$1}
+
+# ---------- mixins 1.21.1 can't take: what they change doesn't exist there (the modules they serve say so, McCompat.unavailable) ----------
+skip mixin/feature/DebugScreenEntriesInvoker.java
+skip mixin/feature/DebugScreenEntryListMixin.java
+skip mixin/feature/GuiGraphicsStateAccessor.java
+skip mixin/ncr/NcrLenientJsonParserMixin.java
+# 1.21.1 numbers player chat per sender, inside the signed chain: there is no global index to give back.
+skip mixin/ncr/NcrServerGameListenerAccessor.java
+skip mixin/fx/ColorGradeMixin.java
+# Minecraft's own falling leaves (1.21.5): 1.21.1 has none, so Falling Leaves always drops its own.
+skip mixin/feature/FallingLeavesVanillaMixin.java
+# Render states and nametag submits: 1.21.1 has none; compat.state's stand-ins carry Flint's room, and EntityRendererMixin
+# (java/) draws the nametag with Nametags' look, size and shadow.
+skip mixin/feature/ItemEntityRenderStateMixin.java
+skip mixin/feature/LivingEntityRenderStateMixin.java
+skip mixin/feature/NameTagShadowMixin.java
+skip mixin/feature/SubmitNodeCollectionMixin.java
+# Worn equipment (EquipmentLayerRenderer, 1.21.2): 1.21.1 draws armor in HumanoidArmorLayer (ArmorHurtMixin, java/). Chat lines: 1.21.1's
+# chat draws each line in ChatComponent.render, where ChatComponentMixin (java/) moves, fades and heads it.
+skip mixin/feature/EquipmentOverlayMixin.java
+skip mixin/feature/ChatLineMixin.java
+# Animations' held items (ItemInHandLayer with 1.21.2's armed render state): not on 1.21.1, its rows say why.
+skip mixin/feature/ItemInHandLayerMixin.java
+# Chat Heads' head glyph (object text, 1.21.9): 1.21.1 draws the head before the line instead (compat.ChatHeadLines).
+skip mixin/feature/ChatHeadsGlyphMixin.java
+skip mixin/feature/ChatHeadsGuiMixin.java
+skip mixin/feature/ChatHeadsQuadMixin.java
+skip mixin/feature/ChatHeadsShadowMixin.java
+skip mixin/feature/ChatHeadsSpriteMixin.java
+# Custom F3's debug entries (1.21.9): 1.21.1's F3 screen is fixed (custom_f3 says so, McCompat.unavailable).
+skip mixin/feature/CustomF3Mixin.java
+
+file control/rshift/Catalog.java
+# A module that can't work here keeps its card, which says Unavailable and why (ModsPage), with its rows shown off: Flint's
+# own modules too, which 26.x leaves out only when they wait on another company's permission. A HUD look row the catalog
+# names for such a module is off with the reason (the module has no panel look while it can't be on).
+s (\t\t\tModuleDescriptor module = ModuleRegistry\.get\(owner\);\n)(\t\t\tif \(!panelLook\(module\)\) \{) => $1\t\t\tif (!module.status().usable()) {\n\t\t\t\treturn new Row(label, kind, null, null, false, false, module.statusNote());\n\t\t\t}\n$2
+s (\t\t\t// A module Flint keeps switched off \(it needs another company's permission\) gets no card\.\n\t\t\tif \(!module\.status\(\)\.usable\(\))\) \{ => $1 && module.statusNote() != null && !module.statusNote().equals(com.flintclient.client.compat.McCompat.unavailable(module.id()))) {
+
+# ---------- single lines ----------
+file control/platform/Mc263Features.java
+# 1.21.1 has no fog data or input records: Flint's own carry the same values (compat/FogData, compat/Input).
+s net\.minecraft\.client\.renderer\.fog\.FogData => com.flintclient.client.compat.FogData
+s net\.minecraft\.world\.entity\.player\.Input; => com.flintclient.client.compat.Input;
+s McCompat\.hud\(\)\.clearTitles\(\) => McCompat.hud().clear()
+
+file control/platform/Mc263GameOptions.java
+s mc\.disconnectFromWorld\(ClientLevel\.DEFAULT_QUIT_MESSAGE\) => com.flintclient.client.compat.McCompat.leaveWorld(mc)
+
+file control/platform/Mc263Inventory.java
+s mc\.schedule\( => mc.execute(
+
+file control/platform/Mc263Maps.java
+s chunk\.tryMarkSaved\(\); => chunk.setUnsaved(false);
+
+file control/platform/Mc263HudData.java
+s Minecraft\.getInstance\(\)\.debugEntries\.isF3Visible\(\) => Minecraft.getInstance().gui.getDebugOverlay().showDebugScreen()
+s screen != null && screen\.showsActiveEffects\(\) => screen instanceof net.minecraft.client.gui.screens.inventory.EffectRenderingInventoryScreen<?> effects && effects.canSeeEffects()
+
+file control/platform/Mc263HudExtras.java
+s state\.getCloneItemStack\(mc\.level, pos, false\) => state.getBlock().getCloneItemStack(mc.level, pos, state)
+
+file control/platform/ambient/AmbientEnvironment.java
+s coldEnoughToSnow\(player\.blockPosition\(\), level\.getSeaLevel\(\)\) => coldEnoughToSnow(player.blockPosition())
+
+file control/platform/ambient/BiomeEnvironment.java
+s getPrecipitationAt\(pos, level\.getSeaLevel\(\)\) => getPrecipitationAt(pos)
+
+file control/platform/ambient/AmbientEntityCondition.java
+s TagParser\.parseCompoundFully\(text\) => TagParser.parseTag(text)
+
+file control/platform/ambient/AmbientCompat.java
+s (?s)TagValueOutput output = .*?return output\.buildResult\(\); => CompoundTag tag = new CompoundTag();\n\t\tentity.saveWithoutId(tag);\n\t\treturn tag;
+s import net\.minecraft\.world\.level\.storage\.TagValueOutput;\n =>
+
+file control/platform/Mc263Chat.java
+s style\.getHoverEvent\(\) instanceof HoverEvent\.ShowEntity show\n\t+&& show\.entity\(\)\.type == (.*?) \? Optional\.of\(show\.entity\(\)\.uuid\) => style.getHoverEvent() != null && style.getHoverEvent().getValue(HoverEvent.Action.SHOW_ENTITY) instanceof HoverEvent.EntityTooltipInfo show\n\t\t\t&& show.type == $1 ? Optional.of(show.id)
+
+file control/platform/Mc263WaypointShare.java
+s new ClickEvent\.RunCommand\(command\) => new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)
+s new HoverEvent\.ShowText\( => new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+s-in platform/Services.java AbstractWidget\.playButtonClickSound\(Minecraft\.getInstance\(\)\.getSoundManager\(\)\) => Minecraft.getInstance().getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK, 1.0F))
+
+file platform/HostScreen.java
+s minecraft\.getNarrator\(\)\.saySystemNow\(text\) => minecraft.getNarrator().sayNow(text)
+s minecraft\.mouseHandler\.getScaledXPos\(window\) => minecraft.mouseHandler.xpos() * window.getGuiScaledWidth() / window.getScreenWidth()
+s minecraft\.mouseHandler\.getScaledYPos\(window\) => minecraft.mouseHandler.ypos() * window.getGuiScaledHeight() / window.getScreenHeight()
+
+file ui/Backdrop.java
+# 1.21.1 has no TextureContents (compat/TextureContents decodes the image the same way).
+s net\.minecraft\.client\.renderer\.texture\.TextureContents => com.flintclient.client.compat.TextureContents
+s SimpleTexture texture = new SimpleTexture\(ARTWORK\);\n\t\ttexture\.apply\(contents\); => net.minecraft.client.renderer.texture.DynamicTexture texture = contents.texture();
+
+file control/keys/KeyBindsSearchScreen.java
+# 1.21.1's list entries are told where they are as they draw.
+s (?s)public void renderContent\(GuiGraphics graphics, int mouseX, int mouseY, boolean hovered, float partialTick\) \{\n\t+int left = getX\(\);\n\t+int top = getY\(\);\n\t+int lineWidth = getWidth\(\);\n\t+int lineHeight = getHeight\(\); => public void render(GuiGraphics graphics, int index, int top, int left, int lineWidth, int lineHeight, int mouseX, int mouseY, boolean hovered, float partialTick) {
+s rebind\.mouseClicked\(event, doubleClick\) => com.flintclient.client.compat.input.Events.mouseClicked(rebind, event, doubleClick)
+
+file ui/screen/ChatSafetyScreens.java
+s new ChatScreen\("", false\) => new ChatScreen("")
+
+file ui/screen/FlintTitleScreen.java
+s storeClose\.keyPressed\(event\) => com.flintclient.client.compat.input.Events.keyPressed(storeClose, event)
+s storeVisit\.keyPressed\(event\) => com.flintclient.client.compat.input.Events.keyPressed(storeVisit, event)
+s storeClose\.mouseClicked\(event, doubleClick\) => com.flintclient.client.compat.input.Events.mouseClicked(storeClose, event, doubleClick)
+s storeVisit\.mouseClicked\(event, doubleClick\) => com.flintclient.client.compat.input.Events.mouseClicked(storeVisit, event, doubleClick)
+
+file module/servers/ServerShortcuts.java
+s SharedConstants\.getCurrentVersion\(\)\.protocolVersion\(\) => SharedConstants.getCurrentVersion().getProtocolVersion()
+
+file module/account/AccountSkin.java
+# 1.21.1's skin manager answers with the skin itself.
+s minecraft\.getSkinManager\(\)\.get\(profile\) => minecraft.getSkinManager().getOrLoad(profile).thenApply(Optional::of)
+
+file compat/gizmos/Gizmos.java
+s camera\.position\(\) => camera.getPosition()
+
+file control/platform/Mc263StoreCapes.java
+# 1.21.1's PlayerSkin names its textures by their path, with the skin's address beside them; a Store cape is a texture path.
+s import net\.minecraft\.core\.ClientAsset;\n =>
+s new PlayerSkin\(skin\.body\(\), new ClientAsset\.ResourceTexture\(cape, cape\), skin\.elytra\(\), skin\.model\(\), skin\.secure\(\)\) => new PlayerSkin(skin.texture(), skin.textureUrl(), cape, skin.elytraTexture(), skin.model(), skin.secure())
+# The cape an elytra takes its texture from is a texture path too.
+s public static ClientAsset\.@Nullable Texture wingsCape\(PlayerSkin skin, ClientAsset\.@Nullable Texture cape\) => public static @Nullable ResourceLocation wingsCape(PlayerSkin skin, @Nullable ResourceLocation cape)
+s s\.vanilla\(\)\.cape\(\) => s.vanilla().capeTexture()
+
+file control/platform/Mc263SoundActivity.java
+# 1.21.1's camera names its place and yaw getPosition and getYRot.
+s camera\.position\(\) => camera.getPosition()
+s camera\.yaw\(\) => camera.getYRot()

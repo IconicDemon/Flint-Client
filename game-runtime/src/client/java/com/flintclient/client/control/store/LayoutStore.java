@@ -194,6 +194,21 @@ public final class LayoutStore {
 		return add(id, layout);
 	}
 
+	/**
+	 * Makes and saves a fresh layout called {@code name}: every mod off, every setting and the HUD look at their defaults
+	 * (a new profile starts clean; Clone copies one). Doesn't switch to it.
+	 */
+	public LayoutResult createBlank(String name) {
+		load();
+		String error = nameError(name, null);
+		if (error != null) {
+			return LayoutResult.failed(error);
+		}
+		String cleaned = LayoutNames.clean(name);
+		String id = LayoutNames.uniqueId(cleaned, this::idTaken);
+		return add(id, new Layout(id, cleaned));
+	}
+
 	/** Saves a copy of a layout as "<name> copy" (numbered when taken). Doesn't switch to it. */
 	public LayoutResult duplicate(String id) {
 		Entry source = entry(id);
@@ -291,19 +306,19 @@ public final class LayoutStore {
 	public LayoutResult importText(@Nullable String text) {
 		load();
 		if (text == null || text.isBlank()) {
-			return LayoutResult.failed("The clipboard is empty. Copy a Flint profile first.");
+			return LayoutResult.failed("Paste a profile code first.");
 		}
 		if (text.length() > MAX_IMPORT_CHARS) {
-			return LayoutResult.failed("That's too long to be a Flint profile.");
+			return LayoutResult.failed("That's too long to be a Flint profile code.");
 		}
 		com.google.gson.JsonElement parsed;
 		try {
 			parsed = com.google.gson.JsonParser.parseString(text.strip());
-		} catch (RuntimeException e) {
-			return LayoutResult.failed("The clipboard doesn't hold a Flint profile.");
+		} catch (RuntimeException | LinkageError e) {
+			return LayoutResult.failed("That isn't a Flint profile code.");
 		}
 		if (!parsed.isJsonObject() || !parsed.getAsJsonObject().has("modules") || !parsed.getAsJsonObject().get("modules").isJsonObject()) {
-			return LayoutResult.failed("The clipboard doesn't hold a Flint profile.");
+			return LayoutResult.failed("That isn't a Flint profile code.");
 		}
 		com.google.gson.JsonObject root = parsed.getAsJsonObject();
 		com.google.gson.JsonElement schema = root.get(JsonStore.SCHEMA_KEY);
@@ -321,6 +336,49 @@ public final class LayoutStore {
 		Layout layout = LayoutCodec.read(root, id);
 		layout.setName(name);
 		return add(id, layout);
+	}
+
+	/** Layout {@code id} as a profile code to send ({@link ShareCodes}: a new code each time); null when it can't be read. */
+	public @Nullable String shareCode(String id) {
+		Entry entry = entry(id);
+		if (entry == null || entry.layout == null) {
+			return null;
+		}
+		return ShareCodes.encode(entry.layout);
+	}
+
+	/**
+	 * What a code for layout {@code id} holds, as JSON ({@link ShareCodes#payloadJson}), for a short code's server to keep;
+	 * null when it can't be read.
+	 */
+	public @Nullable String sharePayload(String id) {
+		Entry entry = entry(id);
+		if (entry == null || entry.layout == null) {
+			return null;
+		}
+		return ShareCodes.payloadJson(entry.layout);
+	}
+
+	/**
+	 * A new layout from a long profile code ({@link #shareCode}), or from a profile's JSON as {@link #exportText} wrote it. A
+	 * short code ({@link ShortCodes}) is fetched first ({@link ProfileShareClient#fetch}), then its JSON read with
+	 * {@link #importText}.
+	 */
+	public LayoutResult importCode(@Nullable String text) {
+		if (ShortCodes.isShortCode(text)) {
+			return LayoutResult.failed("That's a short code: Flint has to fetch it from its servers first.");
+		}
+		if (ShortCodes.looksMistyped(text)) {
+			return LayoutResult.failed("Codes never use 0, O, 1, I or L. Check the code and try again.");
+		}
+		if (ShareCodes.looksLikeCode(text)) {
+			String json = ShareCodes.decode(text);
+			if (json == null) {
+				return LayoutResult.failed("That code isn't a whole Flint profile code. Copy all of it and try again.");
+			}
+			return importText(json);
+		}
+		return importText(text);
 	}
 
 	/**

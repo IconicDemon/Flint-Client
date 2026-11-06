@@ -25,10 +25,13 @@ public final class BoxStyle {
 	public final RgbSetting borderColor;
 	public final IntSetting borderThickness;
 	public final IntSetting cornerRadius;
+	/** Room beside and above/below the text in a Dynamic box, in units (the box always had 4 and 1). */
+	public final IntSetting horizontalPadding;
+	public final IntSetting verticalPadding;
 
 	/** A counter that starts as a dynamic box {@code height} units tall, {@code width} wide when made static. */
 	public BoxStyle(int width, int height) {
-		this(width, height, FpsSizing.DYNAMIC, 0xFFFFFF, true);
+		this(width, height, FpsSizing.DYNAMIC, 0xFFFFFF, false);
 	}
 
 	public BoxStyle(int defaultWidth, int defaultHeight, FpsSizing sizing, int textRgb, boolean shadow) {
@@ -51,11 +54,15 @@ public final class BoxStyle {
 		borderColor = new RgbSetting("borderColor", "Border color", null, 0x6B6157);
 		borderThickness = new IntSetting("borderThickness", "Border thickness", "In half units: 1 is a hairline", 1, 1, 4, 1, "");
 		cornerRadius = new IntSetting("cornerRadius", "Corner radius", "At 1× size", 3, 0, 8, 1, "");
+		horizontalPadding = new IntSetting("horizontalPadding", "Horizontal padding", "Room beside the text in a Dynamic box", 4, 0, 25, 1, "");
+		verticalPadding = new IntSetting("verticalPadding", "Vertical padding", "Room above and below the text in a Dynamic box", 1, 0, 25,
+			1, "");
 	}
 
 	/** The "Style" section's settings, in the reference order. */
 	public SettingDescriptor<?>[] main() {
-		return new SettingDescriptor<?>[] {displayMode, background, backgroundType, width, height, border, textColor, textShadow};
+		return new SettingDescriptor<?>[] {displayMode, background, backgroundType, width, height, horizontalPadding, verticalPadding, border,
+			textColor, textShadow};
 	}
 
 	/** The box details, for a folded section. */
@@ -84,7 +91,7 @@ public final class BoxStyle {
 	private boolean boxOnly(SettingDescriptor<?> setting) {
 		return setting == background || setting == backgroundType || setting == width || setting == height || setting == border
 			|| setting == align || setting == backgroundColor || setting == backgroundOpacity || setting == borderColor
-			|| setting == borderThickness || setting == cornerRadius;
+			|| setting == borderThickness || setting == cornerRadius || setting == horizontalPadding || setting == verticalPadding;
 	}
 
 	/** Why {@code setting} (one of this style's) changes nothing as {@code module} is set now, or null. Allocation-free. */
@@ -95,6 +102,9 @@ public final class BoxStyle {
 		boolean dynamic = module.choice(backgroundType) == FpsSizing.DYNAMIC;
 		if (setting == width && dynamic) {
 			return "Automatic in Dynamic: the box fits the text";
+		}
+		if ((setting == horizontalPadding || setting == verticalPadding) && !dynamic) {
+			return "Only for a Dynamic background";
 		}
 		if (setting == align && dynamic) {
 			return "In Dynamic the box fits the text exactly";

@@ -1,21 +1,15 @@
 package com.flintclient.client.render;
 
-import com.flintclient.client.FlintClient;
 import com.flintclient.client.graphics.GpuResourceTracker;
-import com.mojang.blaze3d.platform.NativeImage;
-import com.mojang.blaze3d.systems.RenderSystem;
-import java.nio.ByteBuffer;
+import com.flintclient.client.platform.AtlasImage;
+import com.flintclient.client.platform.GlyphRaster;
+import com.flintclient.client.platform.Texture;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
-import org.lwjgl.system.MemoryUtil;
 
 /**
  * One small texture holding every antialiased shape the Flint screens draw at the current GUI scale:
@@ -39,7 +33,7 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class MaskAtlas {
 	/** A region of a texture, in pixels. */
-	public record Entry(Identifier texture, int u, int v, int width, int height, int textureWidth, int textureHeight) {
+	public record Entry(Texture texture, int u, int v, int width, int height, int textureWidth, int textureHeight) {
 	}
 
 	private record Key(String kind, int size, Object detail) {
@@ -55,7 +49,7 @@ public final class MaskAtlas {
 	}
 
 	/** A replaced texture waiting to be freed, with its size for the GPU resource count. */
-	private record Retired(Identifier id, long bytes) {
+	private record Retired(Texture texture, long bytes) {
 	}
 
 	private static final MaskAtlas INSTANCE = new MaskAtlas();
@@ -65,10 +59,10 @@ public final class MaskAtlas {
 	private final Map<Key, Entry> entries = new HashMap<>();
 	private final List<Retired> retired = new ArrayList<>();
 	private final AtlasLayout layout = new AtlasLayout();
-	private Identifier current;
+	private Texture current;
 	private long currentBytes;
-	/** The batched atlas's texture (its image is the CPU copy new shapes are written into). */
-	private @Nullable DynamicTexture texture;
+	/** The batched atlas's texture and the CPU copy new shapes are written into. */
+	private @Nullable AtlasImage texture;
 	private boolean batching;
 	/** Between {@link #beginFrame} and {@link #endFrame}: new shapes wait for the end-of-frame upload. */
 	private boolean framing;
@@ -92,7 +86,7 @@ public final class MaskAtlas {
 
 	/** Called at the start of every Flint frame: frees replaced textures and resets on a GUI scale change. */
 	public void beginFrame(int guiScale) {
-		freeRetired(Minecraft.getInstance().getTextureManager());
+		freeRetired();
 		if (guiScale != scale) {
 			scale = guiScale;
 			shapes.clear();
@@ -129,6 +123,17 @@ public final class MaskAtlas {
 		}
 	}
 
+	/**
+	 * Uploads the shapes added so far in this frame now, and goes on batching. For an engine that draws as it goes (1.8.9's
+	 * immediate mode draws a batch the moment it ends): its draws need their shapes in the texture before they are drawn, not
+	 * at the end of the frame. Cheap when nothing is new.
+	 */
+	public void uploadPending() {
+		if (framing && layout.dirty()) {
+			flush();
+		}
+	}
+
 	/** Between a begin (or resume) and the end of a frame part: new shapes wait for {@link #endFrame}. */
 	boolean framing() {
 		return framing;
@@ -141,7 +146,7 @@ public final class MaskAtlas {
 	public void release() {
 		// The current texture goes last, as it always has.
 		retireCurrent();
-		freeRetired(Minecraft.getInstance().getTextureManager());
+		freeRetired();
 		texture = null;
 		shapes.clear();
 		entries.clear();
@@ -187,6 +192,16 @@ public final class MaskAtlas {
 		return batching ? find(MaskKey.of(MaskKey.ICON, sizePx, icon.ordinal(), 1, 0)) : lookup(new Key("filled", sizePx, icon));
 	}
 
+	/** A mod card's line icon ({@link CardIcons}): the ICON kind with {@code c} = 2. */
+	public Entry cardIcon(int index, int sizePx) {
+		return batching ? find(MaskKey.of(MaskKey.ICON, sizePx, index, 2, 0)) : lookup(new Key("card", sizePx, index));
+	}
+
+	/** A Font Awesome Solid glyph, one em of {@code sizePx} ({@link GlyphRaster}): the ICON kind with {@code c} = 3. */
+	public Entry glyph(int codepoint, int sizePx) {
+		return batching ? find(MaskKey.of(MaskKey.ICON, sizePx, codepoint, 3, 0)) : lookup(new Key("glyph", sizePx, codepoint));
+	}
+
 	/** The Flint mark, {@code heightPx} tall, in its own colours. */
 	public Entry mark(int heightPx) {
 		return batching ? find(MaskKey.of(MaskKey.MARK, heightPx, 0, 0, 0)) : lookup(new Key("mark", heightPx, null));
@@ -228,10 +243,11 @@ public final class MaskAtlas {
 			row = Math.max(row, shape.height);
 		}
 		int atlasHeight = y + row + 1;
-		NativeImage image = new NativeImage(atlasWidth, atlasHeight, true);
-		Identifier id = Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, "dynamic/mask_atlas_" + (++version));
+		AtlasImage image = new AtlasImage(atlasWidth, atlasHeight);
+		String path = "dynamic/mask_atlas_" + (++version);
 		entries.clear();
-		for (Map.Entry<Key, int[]> e : at.entrySet()) {
+		List<Map.Entry<Key, int[]>> placed = new ArrayList<>(at.entrySet());
+		for (Map.Entry<Key, int[]> e : placed) {
 			Shape shape = shapes.get(e.getKey());
 			int u = e.getValue()[0];
 			int v = e.getValue()[1];
@@ -243,17 +259,21 @@ public final class MaskAtlas {
 					}
 				}
 			}
-			entries.put(e.getKey(), new Entry(id, u, v, shape.width, shape.height, atlasWidth, atlasHeight));
 		}
-		Minecraft.getInstance().getTextureManager().register(id, new DynamicTexture(() -> "Flint mask atlas", image));
-		makeCurrent(id, GpuResourceTracker.rgba8(atlasWidth, atlasHeight));
+		image.upload(0, atlasHeight);
+		Texture registered = image.register(path);
+		for (Map.Entry<Key, int[]> e : placed) {
+			Shape shape = shapes.get(e.getKey());
+			entries.put(e.getKey(), new Entry(registered, e.getValue()[0], e.getValue()[1], shape.width, shape.height, atlasWidth, atlasHeight));
+		}
+		makeCurrent(registered, GpuResourceTracker.rgba8(atlasWidth, atlasHeight));
 	}
 
-	/** {@code id} was just registered ({@code bytes} big): it becomes current, and the one before is freed next frame. */
-	private void makeCurrent(Identifier id, long bytes) {
+	/** {@code texture} was just registered ({@code bytes} big): it becomes current, and the one before is freed next frame. */
+	private void makeCurrent(Texture texture, long bytes) {
 		GpuResourceTracker.get().register(GpuResourceTracker.Kind.ATLAS, bytes);
 		retireCurrent();
-		current = id;
+		current = texture;
 		currentBytes = bytes;
 	}
 
@@ -265,10 +285,10 @@ public final class MaskAtlas {
 	}
 
 	/** Frees the textures replaced so far (an index loop: this runs every frame and allocates nothing). */
-	private void freeRetired(TextureManager textures) {
+	private void freeRetired() {
 		for (int i = 0; i < retired.size(); i++) {
 			Retired old = retired.get(i);
-			textures.release(old.id());
+			old.texture().release();
 			GpuResourceTracker.get().release(GpuResourceTracker.Kind.ATLAS, old.bytes());
 		}
 		retired.clear();
@@ -292,7 +312,7 @@ public final class MaskAtlas {
 			replaceTexture(change, pendingTop, pendingBottom, usedBefore);
 		}
 		AtlasLayout.Slot slot = layout.get(key);
-		NativeImage pixels = texture.getPixels();
+		AtlasImage pixels = texture;
 		for (int py = 0; py < shape.height; py++) {
 			for (int px = 0; px < shape.width; px++) {
 				int argb = shape.argb[py * shape.width + px];
@@ -310,44 +330,29 @@ public final class MaskAtlas {
 
 	/** Moves to a new texture of the layout's size, carrying the kept shapes' pixels over from the old one. */
 	private void replaceTexture(AtlasLayout.Change change, int pendingTop, int pendingBottom, int usedBefore) {
-		DynamicTexture old = texture;
+		AtlasImage old = texture;
 		// Draws already collected this frame sample the old texture, so it gets its pending rows first.
 		if (old != null && pendingBottom > pendingTop) {
 			upload(old, pendingTop, pendingBottom);
 		}
 		// Created without an upload: the end-of-frame flush uploads the used rows once.
-		DynamicTexture next = new DynamicTexture(() -> "Flint mask atlas", layout.width(), layout.height(), true);
+		AtlasImage next = new AtlasImage(layout.width(), layout.height());
 		if (old != null) {
-			NativeImage from = old.getPixels();
-			NativeImage to = next.getPixels();
 			if (change == AtlasLayout.Change.GROWN) {
-				copyRows(from, to, Math.min(usedBefore, from.getHeight()));
+				next.copyRows(old, usedBefore);
 			} else {
 				for (AtlasLayout.Slot slot : layout.slots()) {
 					if (slot.fromU >= 0) {
-						from.copyRect(to, slot.fromU, slot.fromV, slot.u, slot.v, slot.width, slot.height, false, false);
+						next.copyRect(old, slot.fromU, slot.fromV, slot.u, slot.v, slot.width, slot.height);
 					}
 				}
 			}
 		}
-		Identifier id = Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, "dynamic/mask_atlas_" + (++version));
-		Minecraft.getInstance().getTextureManager().register(id, next);
-		makeCurrent(id, GpuResourceTracker.rgba8(layout.width(), layout.height()));
+		Texture registered = next.register("dynamic/mask_atlas_" + (++version));
+		makeCurrent(registered, GpuResourceTracker.rgba8(layout.width(), layout.height()));
 		texture = next;
 		for (AtlasLayout.Slot slot : layout.slots()) {
-			slot.entry = new Entry(id, slot.u, slot.v, slot.width, slot.height, layout.width(), layout.height());
-		}
-	}
-
-	/**
-	 * Copies the top {@code rows} rows of {@code from} to the same place in {@code to} (as wide or wider),
-	 * one memory copy per row. (NativeImage.copyFrom copies only part of each row when the widths differ.)
-	 */
-	private static void copyRows(NativeImage from, NativeImage to, int rows) {
-		long fromRow = (long) from.getWidth() * from.format().components();
-		long toRow = (long) to.getWidth() * to.format().components();
-		for (int y = 0; y < rows; y++) {
-			MemoryUtil.memCopy(from.getPointer() + y * fromRow, to.getPointer() + y * toRow, fromRow);
+			slot.entry = new Entry(registered, slot.u, slot.v, slot.width, slot.height, layout.width(), layout.height());
 		}
 	}
 
@@ -358,12 +363,9 @@ public final class MaskAtlas {
 		layout.clean();
 	}
 
-	/** Uploads rows [top, bottom) of a texture's image: whole rows sit together in memory, so it's one write. */
-	private static void upload(DynamicTexture texture, int top, int bottom) {
-		NativeImage pixels = texture.getPixels();
-		int rowBytes = pixels.getWidth() * pixels.format().components();
-		ByteBuffer rows = pixels.getPixelBytes().slice(top * rowBytes, (bottom - top) * rowBytes);
-		RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture.getTexture(), rows, 0, 0, 0, top, pixels.getWidth(), bottom - top);
+	/** Uploads rows [top, bottom) of an atlas image in one write. */
+	private static void upload(AtlasImage texture, int top, int bottom) {
+		texture.upload(top, bottom);
 	}
 
 	/** Without batching: the shape for a record key (the original path). */
@@ -382,6 +384,8 @@ public final class MaskAtlas {
 			case "notch" -> notchPixels(key.size);
 			case "icon" -> iconPixels((Icon) key.detail, key.size);
 			case "filled" -> filledPixels((FilledIcon) key.detail, key.size);
+			case "card" -> cardPixels((Integer) key.detail, key.size);
+			case "glyph" -> new Shape(key.size, key.size, GlyphRaster.pixels((Integer) key.detail, key.size));
 			case "mark" -> markPixels(key.size);
 			default -> throw new IllegalArgumentException("Unknown mask " + key.kind);
 		};
@@ -396,7 +400,12 @@ public final class MaskAtlas {
 			case MaskKey.ROUND_RECT -> roundRectPixels(a, MaskKey.b(key), MaskKey.c(key));
 			case MaskKey.RING -> ringPixels(a, MaskKey.b(key), MaskKey.c(key), MaskKey.d(key));
 			case MaskKey.RING_CORNER -> ringCornerPixels(a, MaskKey.d(key));
-			case MaskKey.ICON -> MaskKey.c(key) == 0 ? iconPixels(Icon.values()[MaskKey.b(key)], a) : filledPixels(FilledIcon.values()[MaskKey.b(key)], a);
+			case MaskKey.ICON -> switch (MaskKey.c(key)) {
+				case 0 -> iconPixels(Icon.values()[MaskKey.b(key)], a);
+				case 1 -> filledPixels(FilledIcon.values()[MaskKey.b(key)], a);
+				case 3 -> new Shape(a, a, GlyphRaster.pixels(MaskKey.b(key), a));
+				default -> cardPixels(MaskKey.b(key), a);
+			};
 			case MaskKey.MARK -> markPixels(a);
 			default -> throw new IllegalArgumentException("Unknown mask kind " + MaskKey.kind(key));
 		};
@@ -468,6 +477,21 @@ public final class MaskAtlas {
 		Sdf.Path path = icon.path();
 		float unit = size / Icon.UNITS;
 		float half = Icon.STROKE / 2.0F;
+		int[] argb = new int[size * size];
+		for (int py = 0; py < size; py++) {
+			for (int px = 0; px < size; px++) {
+				float d = path.distance((px + 0.5F) / unit, (py + 0.5F) / unit) - half;
+				argb[py * size + px] = white(Sdf.coverage(d * unit));
+			}
+		}
+		return new Shape(size, size, argb);
+	}
+
+	/** A card icon's outline, as {@link #iconPixels} with the cards' stroke. */
+	private static Shape cardPixels(int index, int size) {
+		Sdf.Path path = CardIcons.path(index);
+		float unit = size / Icon.UNITS;
+		float half = CardIcons.STROKE / 2.0F;
 		int[] argb = new int[size * size];
 		for (int py = 0; py < size; py++) {
 			for (int px = 0; px < size; px++) {

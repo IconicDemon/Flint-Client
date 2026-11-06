@@ -1,8 +1,7 @@
 package com.flintclient.client.ui;
 
+import com.flintclient.client.platform.Frame;
 import com.flintclient.client.render.MaskAtlas;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -42,7 +41,7 @@ public final class FlintFrame {
 		@Override
 		public void start() {
 			Motion.tickFrame();
-			MaskAtlas.get().beginFrame(Math.max(1, Minecraft.getInstance().getWindow().getGuiScale()));
+			MaskAtlas.get().beginFrame(Frame.windowGuiScale());
 		}
 
 		@Override
@@ -67,7 +66,7 @@ public final class FlintFrame {
 	}
 
 	/** Starts Flint's drawing for this frame; only the first call in a frame ticks motion and starts the atlas frame. */
-	public static void begin(GuiGraphicsExtractor graphics) {
+	public static void begin(Object graphics) {
 		GATE.begin(frame, graphics);
 	}
 

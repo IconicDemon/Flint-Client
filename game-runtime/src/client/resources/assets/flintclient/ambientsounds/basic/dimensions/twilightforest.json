@@ -1,0 +1,20 @@
+{
+	"name": "twilightforest",
+	"dimension-names": [
+		"twilightforest"
+	],
+	"surface-selector": {
+		"regions": [
+			"surface"
+		]
+	},
+	"regions": [
+		{
+			"name": "unknown",
+			"volume": 0.2,
+			"sound-collections": [
+				"suspense"
+			]
+		}
+	]
+}

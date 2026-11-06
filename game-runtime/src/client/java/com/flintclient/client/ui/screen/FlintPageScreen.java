@@ -1,5 +1,6 @@
 package com.flintclient.client.ui.screen;
 
+import com.flintclient.client.platform.Frame;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.FlintFonts;
 import com.flintclient.client.render.Icon;
@@ -10,10 +11,10 @@ import com.flintclient.client.ui.Backdrop;
 import com.flintclient.client.ui.FlintFrame;
 import com.flintclient.client.ui.FlintTooltip;
 import com.flintclient.client.ui.MenuScale;
-import net.minecraft.client.input.MouseButtonEvent;
 import com.flintclient.client.ui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
@@ -60,7 +61,7 @@ public abstract class FlintPageScreen extends Screen {
 	@Override
 	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		FlintFrame.begin(graphics);
-		Canvas c = Canvas.beginAtGuiScale(graphics, MenuScale.pixels());
+		Canvas c = Canvas.beginAtGuiScale(Frame.of(graphics), MenuScale.pixels());
 		try {
 			Backdrop.paint(c, width, height, Backdrop.PAGE);
 		} finally {
@@ -71,7 +72,7 @@ public abstract class FlintPageScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int guiMouseX, int guiMouseY, float partialTick) {
 		// Everything draws in menu units, inside one frame at the menu's scale; the widgets' canvases follow it.
-		Canvas c = Canvas.beginAtGuiScale(graphics, MenuScale.pixels());
+		Canvas c = Canvas.beginAtGuiScale(Frame.of(graphics), MenuScale.pixels());
 		try {
 			c.text(heading, c.px(MARGIN + HEADER_H + 6), c.baselineFor(heading, c.px(MARGIN + HEADER_H / 2.0F)), Palette.TEXT);
 			paintPage(c);

@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "./api";
+import { isLanguageSetting, type LanguageSetting } from "./i18n";
 import { sound } from "./sound";
+import { DOWNLOAD_LIMITS, limitSetting } from "./storage";
 
 export type ThemeId = "ember" | "obsidian" | "moss" | "bloodstone" | "dusk";
 export type FontId = "default" | "minecraft";
 export type EffectsLevel = "full" | "balanced" | "minimal";
+export type GameStartBehavior = "minimize" | "keep" | "tray";
 
 export const THEMES: { id: ThemeId; name: string; note: string; swatch: [string, string, string] }[] = [
   { id: "ember", name: "Ember", note: "Signature amber", swatch: ["#0c0b0a", "#2a2724", "#cd8b3e"] },
@@ -42,7 +45,12 @@ export type Settings = {
   launchAtLogin: boolean;
   memoryMb: number;
   javaPath: string;
-  minimizeOnLaunch: boolean;
+  /** What Flint does once the game window shows: minimize (default), stay open, or hide to the tray. */
+  gameStartBehavior: GameStartBehavior;
+  /** Open the game maximized (windowed, not exclusive fullscreen) unless Minecraft's own fullscreen is on. */
+  gameMaximized: boolean;
+  /** Settings → Java and memory: extra Java arguments for every launch (checked by the launcher before saving). */
+  jvmArgs: string;
   /** New Fabric profiles start with Flint's performance mods. */
   performanceMods: boolean;
   /** Flint Performance Core picks Java settings per Minecraft version and runs the in-game runtime's optimization modules; off uses Flint 0.4.0's Java flags and turns those modules off. */
@@ -55,10 +63,27 @@ export type Settings = {
   discordPresence: boolean;
   /** Include the Minecraft version and loader in that activity. */
   discordDetails: boolean;
-  aiGatewayUrl: string;
   aiEffort: "low" | "medium" | "high";
   /** Auto Sync keeps compatible game settings, packs, shaders and mod settings consistent across profiles. */
   autoSync: boolean;
+  /** How the Profiles page shows profiles: the card deck or a grid of every profile. */
+  profilesView: "deck" | "grid";
+  /** The sidebar's profile list under Profiles is open (kept as left, across restarts). */
+  sidebarProfilesOpen: boolean;
+  /** Settings → General: an Import button above Settings in the sidebar, for profiles from other launchers. */
+  importInSidebar: boolean;
+  /** The Friends button in the sidebar (Settings → General); off by default. */
+  friendsInSidebar: boolean;
+  /** Settings → Language: the interface language, or "system" to follow the computer (lib/i18n.ts). */
+  language: LanguageSetting;
+  /** Settings → Storage: game files an install downloads at a time (1–32; Modrinth's at most 8). Read by each install. */
+  maxDownloads: number;
+  /** Settings → Storage: installs, updates, imports and exports that run at once (1–4). Read when Flint starts. */
+  maxInstalls: number;
+  /** Friends: a note when a friend comes online. */
+  friendsNotifyOnline: boolean;
+  /** Friends: the soft sounds for messages, requests and friends coming online (and sending). */
+  friendsSounds: boolean;
   fontVersion: 2;
 };
 
@@ -74,16 +99,26 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
   memoryMb: 4096,
   javaPath: "",
-  minimizeOnLaunch: false,
+  gameStartBehavior: "minimize",
+  gameMaximized: true,
+  jvmArgs: "",
   performanceMods: true,
   automaticOptimization: true,
   flintAssist: true,
   inGameMenu: true,
   discordPresence: true,
   discordDetails: true,
-  aiGatewayUrl: "",
   aiEffort: "medium",
   autoSync: true,
+  profilesView: "deck",
+  sidebarProfilesOpen: false,
+  importInSidebar: false,
+  friendsInSidebar: false,
+  language: "system",
+  maxDownloads: DOWNLOAD_LIMITS.maxDownloads.default,
+  maxInstalls: DOWNLOAD_LIMITS.maxInstalls.default,
+  friendsNotifyOnline: true,
+  friendsSounds: true,
   fontVersion: 2,
 };
 
@@ -170,5 +205,20 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
   s.performanceMods = s.performanceMods !== false;
   s.automaticOptimization = s.automaticOptimization !== false;
   s.autoSync = s.autoSync !== false;
+  if (!["minimize", "keep", "tray"].includes(s.gameStartBehavior)) s.gameStartBehavior = "minimize";
+  s.gameMaximized = s.gameMaximized !== false;
+  s.sidebarProfilesOpen = s.sidebarProfilesOpen === true;
+  s.importInSidebar = s.importInSidebar === true;
+  s.friendsInSidebar = s.friendsInSidebar === true;
+  if (!isLanguageSetting(s.language)) s.language = "system";
+  s.jvmArgs = typeof s.jvmArgs === "string" ? s.jvmArgs : "";
+  // Retired: the on/off minimize switch (now gameStartBehavior) and the AI gateway address.
+  delete (s as Record<string, unknown>).minimizeOnLaunch;
+  delete (s as Record<string, unknown>).aiGatewayUrl;
+  s.profilesView = s.profilesView === "grid" ? "grid" : "deck";
+  s.maxDownloads = limitSetting(raw.maxDownloads, DOWNLOAD_LIMITS.maxDownloads);
+  s.maxInstalls = limitSetting(raw.maxInstalls, DOWNLOAD_LIMITS.maxInstalls);
+  s.friendsNotifyOnline = s.friendsNotifyOnline !== false;
+  s.friendsSounds = s.friendsSounds !== false;
   return s;
 }

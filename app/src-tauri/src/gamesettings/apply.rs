@@ -465,13 +465,15 @@ mod tests {
     fn a_file_outside_what_auto_sync_manages_is_never_written() {
         let dir = TestDir::new();
         std::fs::write(dir.0.join("options.txt"), b"version:5023\nfov:0.0\n").unwrap();
-        for rel in ["saves/World/level.dat", "servers.dat", "../escape.txt", "resourcepacks/../../x.zip", "config/flint-performance.json"] {
+        // servers.dat, hotbar.nbt and command_history.txt are Auto Sync's (Settings → Syncing); Minecraft's own
+        // backup of the server list, its account caches and worlds never are.
+        for rel in ["saves/World/level.dat", "servers.dat_old", "usercache.json", "launcher_accounts.json", "../escape.txt", "resourcepacks/../../x.zip", "config/flint-performance.json"] {
             let stray = FileWrite::bytes(rel, b"x".to_vec(), None);
             let result = commit(&dir.0, &[options_write(&dir.0, "version:5023\nfov:0.5\n"), stray], "Auto Sync", &Hooks::default());
             assert!(matches!(&result, Err(TxnError::Refused(m)) if m.contains(rel)), "{rel}: {result:?}");
         }
         assert_eq!(std::fs::read(dir.0.join("options.txt")).unwrap(), b"version:5023\nfov:0.0\n");
-        assert!(!dir.0.join("saves").exists() && !dir.0.join("servers.dat").exists());
+        assert!(!dir.0.join("saves").exists() && !dir.0.join("servers.dat_old").exists());
         assert!(backup::list(&dir.0).is_empty());
     }
 }

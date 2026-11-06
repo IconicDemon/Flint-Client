@@ -1,0 +1,36 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.flintclient.legacy.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "LoginRetryMixin",
+    "ButtonWidgetAccessor",
+    "ClientPlayerEntityMixin",
+    "ChatScreenMixin",
+    "EntityRendererMixin",
+    "GameGuiAccessor",
+    "GameGuiMixin",
+    "GameOptionsMixin",
+    "GameRendererMixin",
+    "InteractionManagerMixin",
+    "ItemEntityRendererMixin",
+    "KeyBindingAccessor",
+    "KeyBindingMixin",
+    "LivingEntityMixin",
+    "LivingEntityRendererMixin",
+    "MinecraftMixin",
+    "PlayerTabOverlayMixin",
+    "PrimedTntRendererMixin",
+    "SoundEngineMixin",
+    "SoundManagerAccessor",
+    "SurvivalInventoryScreenMixin",
+    "TextRendererAccessor",
+    "TitleScreenMixin",
+    "ToastGuiAccessor",
+    "WorldRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

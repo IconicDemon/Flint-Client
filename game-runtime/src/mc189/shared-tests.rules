@@ -1,0 +1,17 @@
+# Minecraft 1.8.9: the shared unit tests of the platform-free sources (shared-sources.rules), run by legacy189's test task on
+# Java 21 against 1.8.9's libraries and Flint's relocated Gson.
+include control/model/**
+include control/store/**
+include control/hud/*.java
+include control/feature/**
+include module/account/LauncherLinkMediaTest.java
+include control/rshift/CatalogTest.java
+include control/rshift/MenuMathTest.java
+# The HUD's and the HUD editor's own rules (HudFormatTest compares with Minecraft's own formatting: newer lines only).
+include control/hud/render/*.java
+skip control/hud/render/HudFormatTest.java
+include control/editor/**
+# Motion Blur's shared rules.
+include control/fx/NmbTimingTest.java
+# It compares against ui.Motion, which reads Minecraft's clock.
+skip control/model/OpenStateTest.java

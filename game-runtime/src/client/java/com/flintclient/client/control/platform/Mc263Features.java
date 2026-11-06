@@ -4,9 +4,9 @@ import com.flintclient.client.FlintClient;
 import com.flintclient.client.control.feature.CombatTracker;
 import com.flintclient.client.control.feature.CooldownDurations;
 import com.flintclient.client.control.feature.Features;
+import com.flintclient.client.control.feature.FogPlan;
 import com.flintclient.client.control.feature.Mods;
 import com.flintclient.client.control.feature.Waypoint;
-import com.flintclient.client.control.feature.ZoomState;
 import com.flintclient.client.control.fx.MotionBlur;
 import com.flintclient.client.control.model.KeySetting;
 import com.flintclient.client.control.model.ModuleState;
@@ -30,6 +30,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.fog.FogData;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
@@ -56,7 +57,6 @@ import org.jspecify.annotations.Nullable;
  */
 public final class Mc263Features {
 	// Module indices, looked up once.
-	private static final int ZOOM = Mods.index(PlayerMods.Zoom.ID);
 	private static final int FREELOOK = Mods.index(PlayerMods.Freelook.ID);
 	private static final int SPRINT = Mods.index(PlayerMods.ToggleSprint.ID);
 	private static final int FOV = Mods.index(VisualMods.FovChanger.ID);
@@ -66,14 +66,13 @@ public final class Mc263Features {
 	private static final int MENU_BLUR = Mods.index(VisualMods.MenuBlur.ID);
 	private static final int GUI_SCALE = Mods.index(VisualMods.GuiScale.ID);
 	private static final int MOTION_BLUR = Mods.index(VisualMods.MotionBlur.ID);
-	private static final int HURT_CAM = Mods.index(PlayerMods.HurtCam.ID);
 	private static final int KILL_SOUNDS = Mods.index(PlayerMods.KillSounds.ID);
 	private static final int TITLES = Mods.index(UtilityMods.Titles.ID);
 	private static final int WAYPOINTS = Mods.index(UtilityMods.Waypoints.ID);
-	private static final int NAMETAGS = Mods.index(VisualMods.Nametags.ID);
 	private static final int MOMENTUM = Mods.index(VisualMods.Momentum.ID);
 	private static final int SCREENSHOTS = Mods.index(UtilityMods.Screenshots.ID);
 	private static final int COLOR_GRADE = Mods.index(VisualMods.ColorSaturation.ID);
+	private static final int DEATH_INFO = Mods.index(UtilityMods.DeathInfo.ID);
 
 	private static final HookGuard TICK = guard("feature tick");
 	private static final HookGuard CAMERA = guard("camera");
@@ -86,17 +85,14 @@ public final class Mc263Features {
 	private static final Map<String, InputConstants.Key> KEYS = new HashMap<>();
 
 	private static @Nullable ClientLevel seenLevel;
-	private static boolean zoomKeyWas;
 	private static boolean freelookKeyWas;
 	private static boolean createKeyWas;
+	private static boolean menuKeyWas;
 	private static boolean toggleKeyWas;
-	private static boolean markersHidden;
+	/** The Hide key's step: 0 shows every waypoint, 1 only the near ones, 2 none (wWaypoints' hide cycle). */
+	private static int hideStep;
 	private static @Nullable CameraType freelookRestore;
-	private static boolean zoomCinematic;
-	private static boolean cinematicBefore;
 	private static int appliedGuiScale = Integer.MIN_VALUE;
-	private static int appliedBlur = -1;
-	private static int appliedBlurAmount = -1;
 	private static boolean wasDead;
 	private static @Nullable String lastActionbar;
 	private static long lastFrame;
@@ -113,7 +109,7 @@ public final class Mc263Features {
 	}
 
 	/** Whether the player is playing (in a world, no screen or overlay). */
-	private static boolean gameplay() {
+	static boolean gameplay() {
 		Minecraft mc = mc();
 		return mc.level != null && mc.player != null && mc.gui.screen() == null && mc.gui.overlay() == null;
 	}
@@ -127,7 +123,7 @@ public final class Mc263Features {
 		if (key == null) {
 			try {
 				key = InputConstants.getKey(name);
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				key = InputConstants.UNKNOWN;
 			}
 			KEYS.put(name, key);
@@ -135,19 +131,37 @@ public final class Mc263Features {
 		if (key == InputConstants.UNKNOWN) {
 			return false;
 		}
-		if (key.getType() == InputConstants.Type.KEYBOARD) {
+		if (key.getType() == com.flintclient.client.compat.McCompat.KEYBOARD) {
 			return Mc263ControlPlatform.keyDown(key.getValue());
 		}
-		var mouse = mc().mouseHandler;
-		return switch (key.getValue()) {
-			case InputConstants.MOUSE_BUTTON_LEFT -> mouse.isLeftPressed();
-			case InputConstants.MOUSE_BUTTON_RIGHT -> mouse.isRightPressed();
-			case InputConstants.MOUSE_BUTTON_MIDDLE -> mouse.isMiddlePressed();
-			default -> false;
-		};
+		// Every mouse button, side buttons included (Minecraft itself only tracks left, middle and right).
+		return Mc263ControlPlatform.mouseDown(key.getValue());
 	}
 
 	// ---------- the client tick ----------
+
+	/**
+	 * Each step of the client tick, in order. Every step has a guard of its own: one that fails (or can't link on this Minecraft)
+	 * turns itself off for the session and the others keep running, instead of one fault freezing every feature (a latched
+	 * Toggle Sprint or Sneak, say, that could no longer be let go).
+	 */
+	private static final String[] TICK_STEPS = {
+		"tickWorld", "tickMovement", "tickOptions", "tickWaypoints", "tickSpeed", "tickDeath", "ModKeys.tick", "Camera.tick",
+		"AutoHide.tick", "Reconnect.tick", "GameOptions.tick", "Visuals.tick", "World.tick", "Capes.tick", "Containers.tick",
+		"Nametags.tick", "Tiers.tick", "Presence.tick", "StoreCapes.tick", "Chat.tick", "MoreMods.tick", "HudExtras.tick",
+		"LookMods.tick", "LootBeams.tick", "Animations.tick", "Bars.tick", "DarkMode.tick", "Tools.tick", "BetterF3.tick",
+		"SoundFilters.tick", "SoundActivity.tick", "HurtCam.tick", "Zoom.tick", "Crosshair.tick", "ArmorHud.tick", "Toasts.tick",
+		"ScreenshotClipboard.tick", "OriginalHud.tick", "HealthIndicators.tick", "Maps.tick", "ModelFix.tick", "FallingLeaves.tick",
+		"Food.tick", "ChatSafety.tick", "sound.SoundPhysics.tick", "ambient.AmbientSounds.tick", "FriendNotices.tick"};
+	/** The step that latches Toggle Sprint and Sneak: while it is off, nothing is held for you. */
+	private static final int MOVEMENT_STEP = 1;
+	private static final HookGuard[] TICK_GUARDS = new HookGuard[TICK_STEPS.length];
+
+	static {
+		for (int i = 0; i < TICK_STEPS.length; i++) {
+			TICK_GUARDS[i] = guard("feature tick (" + TICK_STEPS[i] + ")");
+		}
+	}
 
 	/** From the start of every client tick. */
 	public static void tick() {
@@ -155,18 +169,89 @@ public final class Mc263Features {
 			return;
 		}
 		try {
-			tickWorld();
-			tickMovement();
-			tickOptions();
-			tickWaypoints();
-			tickSpeed();
-			tickDeathShot();
-			Mc263Visuals.tick();
-			Mc263World.tick();
-			Mc263Nametags.tick();
-			Mc263Chat.tick();
-		} catch (RuntimeException e) {
+			Mc263ControlPlatform.watchFocus();
+		} catch (RuntimeException | LinkageError e) {
 			TICK.fail(e);
+			return;
+		}
+		for (int i = 0; i < TICK_GUARDS.length; i++) {
+			HookGuard guard = TICK_GUARDS[i];
+			if (!guard.on()) {
+				continue;
+			}
+			try {
+				tickStep(i);
+			} catch (RuntimeException | LinkageError e) {
+				guard.fail(e);
+				stepFailed(i);
+			}
+		}
+	}
+
+	private static void tickStep(int step) {
+		switch (step) {
+			case 0 -> tickWorld();
+			case 1 -> tickMovement();
+			case 2 -> tickOptions();
+			case 3 -> tickWaypoints();
+			case 4 -> tickSpeed();
+			case 5 -> tickDeath();
+			case 6 -> ModKeys.tick(gameplay());
+			case 7 -> Mc263Camera.tick();
+			case 8 -> Mc263AutoHide.tick();
+			case 9 -> Mc263Reconnect.tick();
+			case 10 -> Mc263GameOptions.tick();
+			case 11 -> Mc263Visuals.tick();
+			case 12 -> Mc263World.tick();
+			case 13 -> Mc263Capes.tick();
+			case 14 -> Mc263Containers.tick();
+			case 15 -> Mc263Nametags.tick();
+			case 16 -> Mc263Tiers.tick();
+			case 17 -> Mc263Presence.tick();
+			case 18 -> Mc263StoreCapes.tick();
+			case 19 -> Mc263Chat.tick();
+			case 20 -> Mc263MoreMods.tick();
+			case 21 -> Mc263HudExtras.tick();
+			case 22 -> Mc263LookMods.tick();
+			case 23 -> Mc263LootBeams.tick();
+			case 24 -> Mc263Animations.tick();
+			case 25 -> Mc263Bars.tick();
+			case 26 -> Mc263DarkMode.tick();
+			case 27 -> Mc263Tools.tick();
+			case 28 -> Mc263BetterF3.tick(gameplay());
+			case 29 -> Mc263SoundFilters.tick();
+			case 30 -> Mc263SoundActivity.tick();
+			case 31 -> Mc263HurtCam.tick(gameplay());
+			case 32 -> Mc263Zoom.tick(gameplay());
+			case 33 -> Mc263Crosshair.tick(gameplay());
+			case 34 -> Mc263ArmorHud.tick();
+			case 35 -> Mc263Toasts.tick();
+			case 36 -> Mc263ScreenshotClipboard.tick();
+			case 37 -> Mc263OriginalHud.tick();
+			case 38 -> Mc263HealthIndicators.tick();
+			case 39 -> Mc263Maps.tick();
+			case 40 -> Mc263ModelFix.tick();
+			case 41 -> Mc263FallingLeaves.tick();
+			case 42 -> Mc263Food.tick();
+			case 43 -> Mc263ChatSafety.tick();
+			case 44 -> com.flintclient.client.control.platform.sound.SoundPhysics.tick();
+			case 45 -> com.flintclient.client.control.platform.ambient.AmbientSounds.tick();
+			case 46 -> Mc263FriendNotices.tick();
+			default -> {
+			}
+		}
+	}
+
+	/** A step that failed lets go of what it held: Toggle Sprint and Sneak's latches, keys Keybind Search pressed. */
+	private static void stepFailed(int step) {
+		try {
+			if (step == MOVEMENT_STEP) {
+				Features.MOVEMENT.reset();
+			} else if (TICK_STEPS[step].equals("Tools.tick")) {
+				Mc263Tools.releaseAll();
+			}
+		} catch (RuntimeException | LinkageError ignored) {
+			// Nothing more can be done for a step that is off.
 		}
 	}
 
@@ -177,7 +262,7 @@ public final class Mc263Features {
 			seenLevel = level;
 			Features.worldChanged(level != null);
 			Features.waypoints().enter(level == null ? null : worldKey(mc));
-			markersHidden = false;
+			hideStep = 0;
 			if (Features.FREELOOK.active()) {
 				stopFreelook();
 			}
@@ -204,11 +289,10 @@ public final class Mc263Features {
 			return;
 		}
 		ModuleState sprint = Mods.state(SPRINT);
-		// Only presses made while playing count (typing in chat never toggles anything).
-		boolean play = gameplay();
-		Features.MOVEMENT.tick(play && Mc263ControlPlatform.physicallyDown(mc.options.keySprint),
-			play && Mc263ControlPlatform.physicallyDown(mc.options.keyShift), sprint.bool(PlayerMods.ToggleSprint.SPRINT),
-			sprint.bool(PlayerMods.ToggleSprint.SNEAK));
+		// Only presses made while playing count (typing in chat never toggles anything, and a key held through a screen
+		// closing isn't a tap).
+		Features.MOVEMENT.tick(Mc263ControlPlatform.physicallyDown(mc.options.keySprint), Mc263ControlPlatform.physicallyDown(mc.options.keyShift),
+			sprint.bool(PlayerMods.ToggleSprint.SPRINT), sprint.bool(PlayerMods.ToggleSprint.SNEAK), gameplay());
 	}
 
 	/** Momentum's speed: where you are at the end of this tick (only while the module is on). */
@@ -225,14 +309,10 @@ public final class Mc263Features {
 	private static void tickOptions() {
 		Minecraft mc = mc();
 		// Motion blur.
-		int blur = Mods.on(MOTION_BLUR) ? 1 : 0;
-		int amount = Mods.state(MOTION_BLUR).integer(VisualMods.MotionBlur.AMOUNT);
-		if (blur != appliedBlur || amount != appliedBlurAmount) {
-			appliedBlur = blur;
-			appliedBlurAmount = amount;
-			MotionBlur.setStrength(amount / 100.0F);
-			MotionBlur.setEnabled(blur == 1);
-		}
+		ModuleState motion = Mods.state(MOTION_BLUR);
+		MotionBlur.configure(Mods.on(MOTION_BLUR), motion.decimal(VisualMods.MotionBlur.STRENGTH), motion.option(VisualMods.MotionBlur.ALGORITHM),
+			motion.option(VisualMods.MotionBlur.PROFILE), motion.bool(VisualMods.MotionBlur.REFRESH_SCALING),
+			motion.option(VisualMods.MotionBlur.QUALITY), motion.bool(VisualMods.MotionBlur.MOVEMENT));
 		// Color Saturation: read each tick (five numbers), applied by the grading pass each frame.
 		ModuleState grade = Mods.state(COLOR_GRADE);
 		com.flintclient.client.control.fx.ColorGrade.set(Mods.on(COLOR_GRADE), grade.integer(VisualMods.ColorSaturation.HUE),
@@ -252,40 +332,120 @@ public final class Mc263Features {
 		if (player == null || !Mods.on(WAYPOINTS)) {
 			createKeyWas = false;
 			toggleKeyWas = false;
-			wasDead = false;
+			menuKeyWas = false;
 			return;
 		}
 		ModuleState state = Mods.state(WAYPOINTS);
 		boolean play = gameplay();
 		boolean create = play && keyHeld(state.text(UtilityMods.Waypoints.CREATE_KEY));
 		if (create && !createKeyWas) {
-			addWaypointHere(Features.waypoints().nextName("Waypoint"), 0xFF8139);
+			toggleWaypoint(mc, player);
 		}
 		createKeyWas = create;
+		boolean menu = play && keyHeld(state.text(UtilityMods.Waypoints.MENU_KEY));
+		if (menu && !menuKeyWas) {
+			com.flintclient.client.control.rshift.ModMenuScreen.showWaypoints();
+			com.flintclient.client.control.ControlCenter.openWindow(null);
+		}
+		menuKeyWas = menu;
 		boolean toggle = play && keyHeld(state.text(UtilityMods.Waypoints.TOGGLE_KEY));
 		if (toggle && !toggleKeyWas) {
-			markersHidden = !markersHidden;
+			int near = state.integer(UtilityMods.Waypoints.HIDE_WITHIN);
+			hideStep = hideStep == 0 && near > 0 ? 1 : hideStep == 2 ? 0 : 2;
+			actionbar(Component.literal(hideStep == 0 ? "Showing waypoints" : hideStep == 1 ? "Showing waypoints within " + near + " blocks"
+				: "Hiding waypoints"));
 		}
 		toggleKeyWas = toggle;
-		boolean dead = player.isDeadOrDying();
-		if (dead && !wasDead && state.bool(UtilityMods.Waypoints.ON_DEATH)) {
-			addWaypointHere(Features.waypoints().nextName("Death"), 0xE53935);
+		boolean nextSet = play && keyHeld(state.text(UtilityMods.Waypoints.NEXT_SET_KEY));
+		String dimension = dimension();
+		if (nextSet && !nextSetKeyWas && dimension != null) {
+			var store = Features.waypoints();
+			java.util.List<String> sets = store.sets(dimension);
+			String next = sets.get(Math.floorMod(sets.indexOf(store.activeSet(dimension)) + 1, sets.size()));
+			store.setActiveSet(dimension, next);
+			actionbar(Component.literal("Waypoint set: " + (next.isEmpty() ? "Default" : next)));
+		}
+		nextSetKeyWas = nextSet;
+		deathsReached(player, state, dimension);
+	}
+
+	/**
+	 * Death waypoints you've got back to go (Remove when reached): one counts once you've been away from it (more than twice
+	 * the distance) and then come within it, alive, in its dimension.
+	 */
+	private static void deathsReached(LocalPlayer player, ModuleState state, @Nullable String dimension) {
+		if (dimension == null || !state.bool(UtilityMods.Waypoints.DEATH_REACHED) || player.isDeadOrDying()) {
+			return;
+		}
+		int range = state.integer(UtilityMods.Waypoints.DEATH_RANGE);
+		var store = Features.waypoints();
+		java.util.List<Waypoint> all = store.all();
+		for (int i = 0; i < all.size(); i++) {
+			Waypoint w = all.get(i);
+			if (!w.death() || !w.dimension().equals(dimension)) {
+				continue;
+			}
+			double d = w.distanceTo(player.getX(), player.getY(), player.getZ());
+			if (d > range * 2 + 4) {
+				AWAY_FROM_DEATH.add(w);
+			} else if (d <= range && AWAY_FROM_DEATH.remove(w)) {
+				store.remove(i);
+				actionbar(Component.literal("Reached your death point"));
+				return;
+			}
+		}
+	}
+
+	/** Death waypoints you've been away from since they were made (or since the game started). */
+	private static final java.util.Set<Waypoint> AWAY_FROM_DEATH = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+	private static boolean nextSetKeyWas;
+
+	/**
+	 * The moment you die, once: Waypoints' death marker, Screenshot Uploader's death screenshot (as F2 takes it) and Death
+	 * Info's line in chat.
+	 */
+	private static void tickDeath() {
+		Minecraft mc = mc();
+		LocalPlayer player = mc.player;
+		boolean dead = player != null && player.isDeadOrDying();
+		if (dead && !wasDead) {
+			if (Mods.on(WAYPOINTS) && Mods.state(WAYPOINTS).bool(UtilityMods.Waypoints.ON_DEATH) && mc.level != null) {
+				// A death waypoint: shown whatever the active set, the newest few kept.
+				// wWaypoints' death waypoint: "Latest Death" with a skull (the one before becomes "Old Death"), grey, a label only.
+				var deaths = Features.waypoints();
+				java.util.List<Waypoint> all = deaths.all();
+				for (int i = 0; i < all.size(); i++) {
+					if (all.get(i).death() && all.get(i).name().equals(LATEST_DEATH)) {
+						deaths.set(i, all.get(i).withName(OLD_DEATH));
+					}
+				}
+				deaths.add(new Waypoint(LATEST_DEATH, Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()),
+					mc.level.dimension().identifier().toString(), DEATH_COLOR, true).withShows(true, true, false, false).withKind(Waypoint.DEATH));
+				Features.waypoints().trimDeaths(Mods.state(WAYPOINTS).integer(UtilityMods.Waypoints.DEATH_LIMIT));
+			}
+			if (Mods.on(SCREENSHOTS) && Mods.state(SCREENSHOTS).bool(UtilityMods.Screenshots.ON_DEATH)) {
+				net.minecraft.client.Screenshot.grab(mc.gameDirectory, com.flintclient.client.compat.McCompat.mainRenderTarget(),
+					message -> mc.execute(() -> com.flintclient.client.compat.McCompat.hud().getChat().addClientSystemMessage(message)));
+			}
+			if (Mods.on(DEATH_INFO) && Mods.state(DEATH_INFO).bool(UtilityMods.DeathInfo.CHAT)) {
+				com.flintclient.client.compat.McCompat.hud().getChat().addClientSystemMessage(Component.literal("You died at " + where(player)).withStyle(ChatFormatting.GRAY));
+			}
 		}
 		wasDead = dead;
 	}
 
-	private static boolean shotDead;
-
-	/** Screenshot Uploader's Screenshot on death: one screenshot the moment you die, as F2 takes it. */
-	private static void tickDeathShot() {
-		Minecraft mc = mc();
-		LocalPlayer player = mc.player;
-		boolean dead = player != null && player.isDeadOrDying();
-		if (dead && !shotDead && Mods.on(SCREENSHOTS) && Mods.state(SCREENSHOTS).bool(UtilityMods.Screenshots.ON_DEATH)) {
-			net.minecraft.client.Screenshot.grab(mc.gameDirectory, mc.gameRenderer.mainRenderTarget(),
-				message -> mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(message)));
+	/** Death Info's line on the death screen ({@code player} is the one who died), or null when it is off. */
+	public static @Nullable Component deathScreenLine(Player player) {
+		if (!Mods.on(DEATH_INFO) || !Mods.state(DEATH_INFO).bool(UtilityMods.DeathInfo.SCREEN)) {
+			return null;
 		}
-		shotDead = dead;
+		return Component.literal(where(player)).withStyle(ChatFormatting.GRAY);
+	}
+
+	/** "12, 64, -40 in the overworld": the block you are at and its dimension. */
+	private static String where(Player player) {
+		String dimension = player.level().dimension().identifier().getPath().replace('_', ' ');
+		return Mth.floor(player.getX()) + ", " + Mth.floor(player.getY()) + ", " + Mth.floor(player.getZ()) + " in the " + dimension;
 	}
 
 	/** Adds a waypoint at your block; returns its index or -1. */
@@ -295,14 +455,28 @@ public final class Mc263Features {
 		if (player == null || mc.level == null) {
 			return -1;
 		}
-		return Features.waypoints().add(new Waypoint(name, Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ()),
-			mc.level.dimension().identifier().toString(), rgb, true));
+		String dimension = mc.level.dimension().identifier().toString();
+		int[] at = blockPosition();
+		return Features.waypoints().add(new Waypoint(name, at[0], at[1], at[2], dimension, rgb, true)
+			.withGroup(Features.waypoints().activeSet(dimension)));
 	}
 
-	/** Your block position, or null outside a world. */
+	/** The block you stand on (wWaypoints' standing waypoint: under your feet, or the one you're sunk into), or null outside a world. */
+	public static double @Nullable [] position() {
+		LocalPlayer player = mc().player;
+		return player == null ? null : new double[] {player.getX(), player.getY(), player.getZ()};
+	}
+
+	/** The block you stand on, or null outside a world. */
 	public static int @Nullable [] blockPosition() {
 		LocalPlayer player = mc().player;
-		return player == null ? null : new int[] {Mth.floor(player.getX()), Mth.floor(player.getY()), Mth.floor(player.getZ())};
+		return player == null ? null : standing(player);
+	}
+
+	private static int[] standing(LocalPlayer player) {
+		double y = player.getY();
+		int floor = Mth.floor(y);
+		return new int[] {Mth.floor(player.getX()), !player.onGround() ? floor - 1 : y - floor >= 0.5 ? floor : floor - 1, Mth.floor(player.getZ())};
 	}
 
 	/** The dimension you're in ("minecraft:overworld"), or null outside a world. */
@@ -311,16 +485,110 @@ public final class Mc263Features {
 		return level == null ? null : level.dimension().identifier().toString();
 	}
 
-	/** Whether the waypoint markers are showing (the module is on and the toggle key hasn't hidden them). */
+	/** Whether the waypoint markers are showing (the module is on and the Hide key hasn't hidden them all). */
 	public static boolean markersShown() {
-		return Mods.on(WAYPOINTS) && !markersHidden;
+		return Mods.on(WAYPOINTS) && hideStep != 2;
+	}
+
+	/** While the Hide key shows only near waypoints: how near (blocks); otherwise -1. */
+	public static int shownWithin() {
+		return hideStep == 1 ? Mods.state(WAYPOINTS).integer(UtilityMods.Waypoints.HIDE_WITHIN) : -1;
+	}
+
+	public static final String LATEST_DEATH = "\u2620 Latest Death";
+	public static final String OLD_DEATH = "\u2620 Old Death";
+	public static final int DEATH_COLOR = 0xC8C8C8;
+	/** wWaypoints' waypoint palette without its white and black: new waypoints take the next one. */
+	private static final int[] PALETTE = {0xFF2F20, 0xFF9F1C, 0xFFE530, 0x21D85B, 0x19B7FF, 0x5D38FF, 0xF045B7};
+
+	/** The colour a new waypoint takes: the next of the palette (Random colors), else Flint orange. */
+	public static int nextWaypointColor() {
+		if (!Mods.state(WAYPOINTS).bool(UtilityMods.Waypoints.RANDOM_COLORS)) {
+			return 0xFF8139;
+		}
+		int made = 0;
+		for (Waypoint w : Features.waypoints().all()) {
+			if (!w.death()) {
+				made++;
+			}
+		}
+		return PALETTE[made % PALETTE.length];
+	}
+
+	/**
+	 * The Create key, as wWaypoints' quick waypoint: the block you stand on (sneaking: the block you look at, 16 blocks away at
+	 * most) gets a waypoint, or loses the one it has.
+	 */
+	private static void toggleWaypoint(Minecraft mc, LocalPlayer player) {
+		if (mc.level == null) {
+			return;
+		}
+		int bx;
+		int by;
+		int bz;
+		if (player.isShiftKeyDown()) {
+			net.minecraft.world.phys.HitResult hit = player.pick(16, 1, false);
+			if (!(hit instanceof net.minecraft.world.phys.BlockHitResult block) || hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK) {
+				actionbar(Component.literal("Look at a block within 16 blocks"));
+				return;
+			}
+			bx = block.getBlockPos().getX();
+			by = block.getBlockPos().getY();
+			bz = block.getBlockPos().getZ();
+		} else {
+			int[] at = standing(player);
+			bx = at[0];
+			by = at[1];
+			bz = at[2];
+		}
+		String dimension = mc.level.dimension().identifier().toString();
+		var store = Features.waypoints();
+		java.util.List<Waypoint> all = store.all();
+		for (int i = 0; i < all.size(); i++) {
+			Waypoint w = all.get(i);
+			if (!w.death() && w.x() == bx && w.y() == by && w.z() == bz && w.dimension().equals(dimension)) {
+				store.remove(i);
+				actionbar(Component.literal("Removed " + w.name()));
+				return;
+			}
+		}
+		String suggested = store.nextName("Waypoint");
+		int x = bx;
+		int y = by;
+		int z = bz;
+		com.flintclient.client.control.rshift.WaypointPromptScreen.Create make = (name, rgb) -> {
+			Waypoint made = new Waypoint(name, x, y, z, dimension, rgb, true).withGroup(store.activeSet(dimension));
+			if (store.add(made) >= 0) {
+				actionbar(Component.literal("Added " + made.name() + " at " + x + ", " + y + ", " + z));
+			}
+		};
+		if (Mods.state(WAYPOINTS).bool(UtilityMods.Waypoints.ASK_NAME)) {
+			// A small window asks for the name and colour first (Create or Cancel); the place is the one picked now.
+			mc.gui.setScreen(new com.flintclient.client.control.rshift.WaypointPromptScreen(null, suggested, bx, by, bz, placeName(dimension),
+				nextWaypointColor(), make));
+		} else {
+			make.create(suggested, nextWaypointColor());
+		}
+	}
+
+	/** A dimension's name for people ("Overworld", "The Nether", "The End", else its id's path in words). */
+	static String placeName(String dimension) {
+		return switch (dimension) {
+			case "minecraft:overworld" -> "Overworld";
+			case "minecraft:the_nether" -> "The Nether";
+			case "minecraft:the_end" -> "The End";
+			default -> {
+				String path = dimension.substring(dimension.indexOf(':') + 1).replace('_', ' ');
+				yield path.isEmpty() ? "" : Character.toUpperCase(path.charAt(0)) + path.substring(1);
+			}
+		};
 	}
 
 	// ---------- movement input ----------
 
 	/** From the end of {@code KeyboardInput.tick}: holds sprint or sneak while their toggle is latched. */
 	public static Input movementInput(Input keys) {
-		if (!INPUT.on()) {
+		if (!INPUT.on() || !TICK.on() || !TICK_GUARDS[MOVEMENT_STEP].on()) {
 			return keys;
 		}
 		try {
@@ -330,7 +598,7 @@ public final class Mc263Features {
 				return keys;
 			}
 			return new Input(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift() || sneak, keys.sprint() || sprint);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			INPUT.fail(e);
 			return keys;
 		}
@@ -349,70 +617,11 @@ public final class Mc263Features {
 				return;
 			}
 			lastFrame = now;
-			pollZoom(now);
 			pollFreelook();
-		} catch (RuntimeException e) {
+			Mc263Camera.pollViews(Features.FREELOOK.active());
+		} catch (RuntimeException | LinkageError e) {
 			CAMERA.fail(e);
 		}
-	}
-
-	private static void pollZoom(long now) {
-		boolean on = Mods.on(ZOOM) && mc().player != null;
-		ModuleState zoom = Mods.state(ZOOM);
-		boolean held = on && keyHeld(zoom.text(PlayerMods.Zoom.KEY));
-		boolean active = Features.ZOOM.active();
-		boolean want;
-		if (!on) {
-			want = false;
-		} else if (zoom.option(PlayerMods.Zoom.MODE) == 0) {
-			want = held && (active || gameplay());
-		} else {
-			want = active;
-			if (held && !zoomKeyWas && gameplay()) {
-				want = !active;
-			}
-		}
-		zoomKeyWas = held;
-		if (want && !active && !spyglassAllows(zoom.option(PlayerMods.Zoom.SPYGLASS))) {
-			want = false;
-		}
-		Features.ZOOM.set(want, zoom.integer(PlayerMods.Zoom.LEVEL), now);
-		if (want != active) {
-			Minecraft mc = mc();
-			if (want && zoom.bool(PlayerMods.Zoom.CINEMATIC)) {
-				zoomCinematic = true;
-				cinematicBefore = mc.options.smoothCamera;
-				mc.options.smoothCamera = true;
-			} else if (!want && zoomCinematic) {
-				zoomCinematic = false;
-				mc.options.smoothCamera = cinematicBefore;
-			}
-		}
-	}
-
-	/** The Zoom module's spyglass rule: 0 none, 1 anywhere in the inventory, 2 the hotbar, 3 a hand. */
-	private static boolean spyglassAllows(int rule) {
-		LocalPlayer player = mc().player;
-		if (rule == 0) {
-			return true;
-		}
-		if (player == null) {
-			return false;
-		}
-		if (player.getMainHandItem().is(Items.SPYGLASS) || player.getOffhandItem().is(Items.SPYGLASS)) {
-			return true;
-		}
-		if (rule == 3) {
-			return false;
-		}
-		Inventory inventory = player.getInventory();
-		int slots = rule == 2 ? Inventory.getSelectionSize() : inventory.getContainerSize();
-		for (int i = 0; i < slots; i++) {
-			if (inventory.getItem(i).is(Items.SPYGLASS)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private static void pollFreelook() {
@@ -463,7 +672,7 @@ public final class Mc263Features {
 
 	/**
 	 * Mouse movement about to turn the player: freelook takes it (returns true: don't turn the player); otherwise
-	 * {@link #turnScale()} slows it while zoomed.
+	 * Zoom slows it through the sensitivity option (Mc263Zoom).
 	 */
 	public static boolean freelookTurn(double dx, double dy) {
 		if (!Features.FREELOOK.active()) {
@@ -474,43 +683,22 @@ public final class Mc263Features {
 		return true;
 	}
 
-	/** How much mouse movement turns you now: 1, or 1/zoom while zoomed with Dynamic sensitivity. */
-	public static double turnScale() {
-		if (!Features.ZOOM.active() || !Mods.state(ZOOM).bool(PlayerMods.Zoom.LOWER_SENSITIVITY)) {
-			return 1;
-		}
-		return 1 / Math.max(1, currentZoom(System.nanoTime()));
-	}
-
-	private static float currentZoom(long now) {
-		ModuleState zoom = Mods.state(ZOOM);
-		long duration = zoom.bool(PlayerMods.Zoom.SMOOTH) && !com.flintclient.client.ui.kit.Kit.reduced()
-			? zoom.integer(PlayerMods.Zoom.DURATION) * 1_000_000L : 0;
-		return Features.ZOOM.factor(now, duration, ZoomState.Easing.of(zoom.option(PlayerMods.Zoom.EASING)));
-	}
-
-	/** From {@code Camera.calculateFov}: the field of view divided by the zoom. */
+	/** From {@code Camera.calculateFov}: the field of view divided by the zoom (Mc263Zoom). */
 	public static float fov(float fov) {
-		if (!CAMERA.on()) {
-			return fov;
-		}
-		try {
-			float factor = currentZoom(System.nanoTime());
-			return factor <= 1.0001F ? fov : fov / factor;
-		} catch (RuntimeException e) {
-			CAMERA.fail(e);
-			return fov;
-		}
+		return CAMERA.on() ? Mc263Zoom.fov(fov) : fov;
 	}
 
-	/** A mouse wheel notch while playing: true when the zoom took it (the hotbar doesn't move). */
+	/** A mouse wheel notch while playing: true when the zoom or the Camera module took it (the hotbar doesn't move). */
 	public static boolean scroll(double amount) {
-		if (!CAMERA.on() || amount == 0 || !Features.ZOOM.active() || !Mods.state(ZOOM).bool(PlayerMods.Zoom.SCROLL)) {
+		if (Mc263Camera.scroll(amount)) {
+			return true;
+		}
+		if (!CAMERA.on()) {
 			return false;
 		}
 		try {
-			return Features.ZOOM.scroll(amount > 0 ? 1 : -1, System.nanoTime());
-		} catch (RuntimeException e) {
+			return Mc263Zoom.scroll(amount);
+		} catch (RuntimeException | LinkageError e) {
 			CAMERA.fail(e);
 			return false;
 		}
@@ -545,7 +733,7 @@ public final class Mc263Features {
 				}
 			}
 			return Mth.lerp(effectScale, 1.0F, modifier);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			CAMERA.fail(e);
 			return Float.NaN;
 		}
@@ -553,10 +741,6 @@ public final class Mc263Features {
 
 	// ---------- how the world looks ----------
 
-	/** From {@code GameRenderer.bobHurt}: Minecraft's damage tilt times the Hurt Cam strength. */
-	public static double hurtTilt(double strength) {
-		return Mods.on(HURT_CAM) ? strength * Mods.state(HURT_CAM).integer(PlayerMods.HurtCam.STRENGTH) / 100.0 : strength;
-	}
 
 	/** From the lightmap: the brightness the Lighting module sets, or vanilla's. */
 	public static float brightness(float vanilla) {
@@ -579,47 +763,25 @@ public final class Mc263Features {
 
 	/** From {@code FogRenderer.setupFog}: the Fog Customizer's changes to the fog just computed. */
 	public static void fog(FogData fog, FogType type) {
+		fog(fog, type, false);
+	}
+
+	/**
+	 * The Fog Customizer's changes to the fog just computed (distances by control.feature.FogPlan, the same on every line).
+	 * {@code skyAndClouds}: 1.21.1's sky pass and its clouds, which No fog and the distance multiplier leave alone.
+	 */
+	public static void fog(FogData fog, FogType type, boolean skyAndClouds) {
 		if (!RENDER.on() || !Mods.on(FOG)) {
 			return;
 		}
 		try {
 			ModuleState state = Mods.state(FOG);
-			if (type == FogType.WATER) {
-				if (state.bool(VisualMods.FogCustomizer.CLEAR_WATER)) {
-					fog.environmentalStart = Math.max(fog.environmentalStart, 32);
-					fog.environmentalEnd = Math.max(fog.environmentalEnd, 256);
-					fog.skyEnd = fog.environmentalEnd;
-					fog.cloudEnd = fog.environmentalEnd;
-				}
-				return;
-			}
-			if (type == FogType.LAVA) {
-				if (state.bool(VisualMods.FogCustomizer.CLEAR_LAVA)) {
-					fog.environmentalStart = 0;
-					fog.environmentalEnd = Math.max(fog.environmentalEnd, 12);
-				}
-				return;
-			}
-			if (type != FogType.NONE) {
-				return;
-			}
-			if (state.bool(VisualMods.FogCustomizer.NO_FOG)) {
-				fog.environmentalStart = Float.MAX_VALUE / 4;
-				fog.environmentalEnd = Float.MAX_VALUE / 2;
-				fog.renderDistanceStart = Float.MAX_VALUE / 4;
-				fog.renderDistanceEnd = Float.MAX_VALUE / 2;
-			} else {
-				float k = state.integer(VisualMods.FogCustomizer.DISTANCE) / 100.0F;
-				fog.environmentalStart *= k;
-				fog.environmentalEnd *= k;
-				fog.renderDistanceStart *= k;
-				fog.renderDistanceEnd *= k;
-			}
-			if (state.bool(VisualMods.FogCustomizer.OVERRIDE_COLOR)) {
+			Mc263Fog.apply(fog, type, state, skyAndClouds);
+			if (FogPlan.overridesColor(Mc263Fog.medium(type), state)) {
 				int rgb = state.rgb(VisualMods.FogCustomizer.COLOR);
 				fog.color.set((rgb >> 16 & 0xFF) / 255.0F, (rgb >> 8 & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F, 1.0F);
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			RENDER.fail(e);
 		}
 	}
@@ -641,15 +803,6 @@ public final class Mc263Features {
 		return Math.floorDiv(vanilla, 24000L) * 24000L + timeOfDay;
 	}
 
-	/** Whether your own nametag shows in third person (the Nametags module), else vanilla's answer. */
-	public static boolean showOwnName(Entity entity, boolean vanilla) {
-		Minecraft mc = mc();
-		if (vanilla || entity != mc.player || !Mods.on(NAMETAGS) || !Mods.state(NAMETAGS).bool(VisualMods.Nametags.OWN)) {
-			return vanilla;
-		}
-		return !mc.options.getCameraType().isFirstPerson() && !mc.gui.hud.isHidden() && !entity.isInvisible();
-	}
-
 	// ---------- combat ----------
 
 	/** You attack {@code target}: remember the distance (eyes to the nearest point of its hitbox). */
@@ -660,10 +813,11 @@ public final class Mc263Features {
 		try {
 			double distance = Math.sqrt(target.getBoundingBox().distanceToSqr(player.getEyePosition()));
 			Features.COMBAT.swing(target.getId(), distance, Features.nowMs());
+			Mc263OriginalHud.attacked(target, distance);
 			if (Mc263Visuals.alwaysSharpness() && target instanceof LivingEntity && player.getMainHandItem().isEnchanted()) {
 				Minecraft.getInstance().particleEngine.createTrackingEmitter(target, net.minecraft.core.particles.ParticleTypes.ENCHANTED_HIT);
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			COMBAT.fail(e);
 		}
 	}
@@ -689,7 +843,7 @@ public final class Mc263Features {
 					lastHitKind.clear();
 				}
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			COMBAT.fail(e);
 		}
 	}
@@ -701,7 +855,7 @@ public final class Mc263Features {
 		}
 		try {
 			Features.COMBAT.hurt(hurtDir, Features.nowMs());
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			COMBAT.fail(e);
 		}
 	}
@@ -719,7 +873,7 @@ public final class Mc263Features {
 			if (Features.COMBAT.died(entity.getId(), Features.nowMs())) {
 				killSound(Features.COMBAT.killWasPlayer(), kind == null ? KILL_MELEE : kind);
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			COMBAT.fail(e);
 		}
 	}
@@ -806,10 +960,72 @@ public final class Mc263Features {
 	}
 
 	// ---------- titles ----------
+	// Title Tweaks' rules (scale, auto scale, offsets, opacity, shadow, clear on disconnect), adapted from Title Tweaks by
+	// Microcontrollers and Wyvest, LGPL-3.0: see META-INF/licenses/LGPL-3.0-TitleTweaks.txt.
 
-	/** Whether titles and subtitles are drawn (the Titles module can hide them). */
+	/** Whether titles and subtitles are drawn (Title Tweaks' Disable titles hides them). */
 	public static boolean showTitles() {
-		return !Mods.on(TITLES) || Mods.state(TITLES).bool(UtilityMods.Titles.SHOW);
+		return !Mods.on(TITLES) || !Mods.state(TITLES).bool(UtilityMods.Titles.DISABLE);
+	}
+
+	/** Whether Title Tweaks changes how titles are drawn (scale, place, opacity or shadow). */
+	public static boolean tweakTitles() {
+		return TEXT.on() && Mods.on(TITLES);
+	}
+
+	/**
+	 * Title Tweaks' extra scale for the title ({@code subtitle} false, drawn at 4×) or the subtitle (2×): Title Scale, made
+	 * smaller still when Automatically scale titles is on and it would run past the screen's sides (a title that is just one
+	 * or two private-use icon characters isn't).
+	 */
+	public static float titleScale(Font font, Component text, boolean subtitle, int guiWidth) {
+		ModuleState s = Mods.state(TITLES);
+		float scale = s.integer(UtilityMods.Titles.SCALE) / 100.0F;
+		if (s.bool(UtilityMods.Titles.AUTO_SCALE) && (subtitle || normalTitle(text))) {
+			float width = font.width(text) * (subtitle ? 2.0F : 4.0F) + 50.0F;
+			if (width > guiWidth) {
+				scale = guiWidth / width * s.integer(UtilityMods.Titles.SCALE) / 100.0F;
+			}
+		}
+		return scale;
+	}
+
+	/** Whether a title is text, not one or two private-use characters (an icon from a server's font). */
+	static boolean normalTitle(Component title) {
+		String text = title.getString();
+		if (text.isEmpty()) {
+			return true;
+		}
+		char c = text.charAt(0);
+		return !(c >= '' && c <= '') || text.length() > 2;
+	}
+
+	/** How far up the title ({@code subtitle} false) or the subtitle moves, in its own scaled units. */
+	public static int titleOffset(boolean subtitle) {
+		return Mods.state(TITLES).integer(subtitle ? UtilityMods.Titles.SUBTITLE_OFFSET : UtilityMods.Titles.TITLE_OFFSET);
+	}
+
+	/** The title's colour with its alpha held to Title Opacity. */
+	public static int titleColor(int color) {
+		int most = (int) (Mods.state(TITLES).integer(UtilityMods.Titles.OPACITY) / 100.0F * 255.0F);
+		int alpha = Math.min(color >>> 24, most);
+		return alpha << 24 | color & 0xFFFFFF;
+	}
+
+	/** Whether titles are drawn without their shadow (and backdrop). */
+	public static boolean titleNoShadow() {
+		return Mods.state(TITLES).bool(UtilityMods.Titles.NO_SHADOW);
+	}
+
+	/** Leaving a world or server: Clear on disconnect wipes a title that would otherwise stay on screen. */
+	public static void titlesDisconnect() {
+		if (TEXT.on() && Mods.on(TITLES) && Mods.state(TITLES).bool(UtilityMods.Titles.CLEAR_ON_DISCONNECT)) {
+			try {
+				com.flintclient.client.compat.McCompat.hud().clearTitles();
+			} catch (RuntimeException | LinkageError e) {
+				TEXT.fail(e);
+			}
+		}
 	}
 
 	/** A title or subtitle arrived; printed to your chat when asked. */
@@ -819,7 +1035,7 @@ public final class Mc263Features {
 		}
 		try {
 			print(subtitle ? "Subtitle" : "Title", text);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			TEXT.fail(e);
 		}
 	}
@@ -836,13 +1052,13 @@ public final class Mc263Features {
 			}
 			lastActionbar = plain;
 			print("Action bar", text);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			TEXT.fail(e);
 		}
 	}
 
 	private static void print(String kind, Component text) {
 		MutableComponent line = Component.literal("[" + kind + "] ").withStyle(ChatFormatting.DARK_GRAY).append(text.copy());
-		mc().gui.hud.getChat().addClientSystemMessage(line);
+		com.flintclient.client.compat.McCompat.hud().getChat().addClientSystemMessage(line);
 	}
 }

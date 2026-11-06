@@ -30,6 +30,48 @@ class FeatureLogicTest {
 	}
 
 	@Test
+	void aKeyHeldThroughAScreenClosingIsNotATap() {
+		MovementToggles m = new MovementToggles();
+		// Shift held in the inventory (shift-clicks), still held as the inventory closes: no sneak latched.
+		m.tick(false, true, true, true, false);
+		m.tick(false, true, true, true, false);
+		m.tick(false, true, true, true, true);
+		assertFalse(m.holdSneak(), "held since the screen: not a tap");
+		assertTrue(m.sneakKeyDown(), "but it is held while playing");
+		m.tick(false, false, true, true, true);
+		m.tick(false, true, true, true, true);
+		assertTrue(m.holdSneak(), "a real tap in the game latches");
+		// Ctrl (sprint) held through closing a screen doesn't let go of a latched sprint either.
+		m.tick(true, false, true, true, true);
+		assertTrue(m.holdSprint());
+		m.tick(false, false, true, true, true);
+		m.tick(true, false, true, true, false);
+		m.tick(true, false, true, true, true);
+		assertTrue(m.holdSprint(), "pressed in a screen, held out of it: still latched");
+		m.tick(false, false, true, true, true);
+		m.tick(true, false, true, true, true);
+		assertFalse(m.holdSprint(), "the next real tap lets go");
+		assertFalse(m.sneakKeyDown());
+		m.tick(false, true, true, true, false);
+		assertFalse(m.sneakKeyDown(), "a screen is open: not reported as held for the HUD");
+	}
+
+	@Test
+	void everyMouseButtonHasAState() {
+		MouseButtons.releaseAll();
+		MouseButtons.event(4, true);
+		assertTrue(MouseButtons.down(4), "a side button is seen held");
+		MouseButtons.event(4, false);
+		assertFalse(MouseButtons.down(4));
+		MouseButtons.event(3, true);
+		MouseButtons.event(-1, true);
+		MouseButtons.event(MouseButtons.COUNT, true);
+		assertFalse(MouseButtons.down(-1) || MouseButtons.down(MouseButtons.COUNT), "out of range: ignored");
+		MouseButtons.releaseAll();
+		assertFalse(MouseButtons.down(3), "let go of everything");
+	}
+
+	@Test
 	void zoomEasesToItsLevelAndBackExactly() {
 		ZoomState z = new ZoomState();
 		long ms = 1_000_000L;
@@ -86,6 +128,39 @@ class FeatureLogicTest {
 		assertEquals(1, s.count());
 		s.accept("other", false);
 		assertEquals(2, s.count(), "any recent copy stacks when not consecutive-only");
+	}
+
+	@Test
+	void theChatCalculatorWorksOutSums() {
+		ChatCalculator.Position at = new ChatCalculator.Position(10, 64, -3);
+		assertTrue(ChatCalculator.isSum("=2+2"));
+		assertFalse(ChatCalculator.isSum("="), "nothing after the =");
+		assertFalse(ChatCalculator.isSum("2+2"));
+		// Messages that start with "=" but aren't sums go out as typed; a sum with a typo stays the calculator's.
+		for (String chat : new String[] {"=)", "=D", "==>", "=]", "=o"}) {
+			assertTrue(ChatCalculator.chatAfterAll(chat, ChatCalculator.solve(chat, at)), chat);
+		}
+		for (String sum : new String[] {"=2+2", "=2+", "=pi", "=x*2"}) {
+			assertFalse(ChatCalculator.chatAfterAll(sum, ChatCalculator.solve(sum, at)), sum);
+		}
+		assertEquals(8, ChatCalculator.solve("=2+2*3", at).getFirst().value(), 1e-9);
+		assertEquals(-4, ChatCalculator.solve("=-2^2", at).getFirst().value(), 1e-9, "a sign binds looser than a power");
+		assertEquals(512, ChatCalculator.solve("=2^3^2", at).getFirst().value(), 1e-9, "powers read right to left");
+		assertEquals(0.25, ChatCalculator.solve("=sin(30)^2", at).getFirst().value(), 1e-9, "degrees; the power is on the sine");
+		assertEquals(4, ChatCalculator.solve("=sqrt 16", at).getFirst().value(), 1e-9);
+		assertEquals(77, ChatCalculator.solve("=x+y-z", at).getFirst().value(), 1e-9, "your position");
+		var two = ChatCalculator.solve("=1/3, (1+2)*4", at);
+		assertEquals(2, two.size(), "commas separate sums");
+		assertEquals("0.333", ChatCalculator.format(two.get(0).value(), 3));
+		assertEquals("12", ChatCalculator.format(two.get(1).value(), 3));
+		var bad = ChatCalculator.solve("=(1+2", at).getFirst();
+		assertEquals("A bracket isn't closed", bad.error());
+		assertEquals("No function called foo", ChatCalculator.solve("=foo(2)", at).getFirst().error());
+		assertEquals("No finite answer", ChatCalculator.solve("=1/0", at).getFirst().error());
+		assertEquals("rt(", ChatCalculator.completion("=sq"));
+		assertEquals("", ChatCalculator.completion("=2+2"));
+		assertEquals("-0.5", ChatCalculator.format(-0.5, 3));
+		assertEquals("0", ChatCalculator.format(-0.0001, 3), "no minus zero");
 	}
 
 	@Test

@@ -20,7 +20,8 @@ class EditorMathTest {
 	void draggingTheHandleScalesByDistanceInWholeSteps() {
 		assertEquals(2.0F, EditorMath.scaleForDrag(1.0F, 20, 40), "twice as far: twice the size");
 		assertEquals(0.5F, EditorMath.scaleForDrag(1.0F, 20, 10));
-		assertEquals(1.25F, EditorMath.scaleForDrag(1.0F, 20, 26), "1.3 snaps to the nearest step");
+		assertEquals(1.3F, EditorMath.scaleForDrag(1.0F, 20, 26), "1.3 is a size of its own");
+		assertEquals(1.25F, EditorMath.scaleForDrag(1.0F, 20, 25.1F), "1.255 snaps to the nearest size");
 		assertEquals(1.5F, EditorMath.scaleForDrag(0.75F, 10, 20));
 		assertEquals(ScaleSteps.max(), EditorMath.scaleForDrag(1.0F, 10, 500), "never past the largest step");
 		assertEquals(ScaleSteps.min(), EditorMath.scaleForDrag(1.0F, 10, 0), "behind the corner: the smallest step");

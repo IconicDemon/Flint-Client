@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 class HookGuardTest {
 	private final List<String> reports = new ArrayList<>();
-	private final List<RuntimeException> errors = new ArrayList<>();
+	private final List<Throwable> errors = new ArrayList<>();
 
 	private HookGuard guard(String path) {
 		return new HookGuard(path, (failedPath, error) -> {

@@ -8,11 +8,20 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** 3D Skins: right before a player is drawn, its outer layers get that skin's voxels (or Minecraft's flat boxes back). */
+/**
+ * 3D Skins: right before a player is drawn, its outer layers get that skin's voxels (or Minecraft's flat boxes back).
+ * Animations: Not Enough Animations' poses go on after Minecraft's own.
+ */
 @Mixin(PlayerModel.class)
 abstract class PlayerModelMixin {
+	@Inject(method = "setupAnim(Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;)V", at = @At("HEAD"))
+	private void flint$animationsBefore(AvatarRenderState state, CallbackInfo callback) {
+		com.flintclient.client.control.platform.Mc263Animations.before(state);
+	}
+
 	@Inject(method = "setupAnim(Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;)V", at = @At("TAIL"))
 	private void flint$voxels(AvatarRenderState state, CallbackInfo callback) {
+		com.flintclient.client.control.platform.Mc263Animations.after(state, (PlayerModel) (Object) this);
 		Mc263Skins.apply((PlayerModel) (Object) this, state);
 	}
 }

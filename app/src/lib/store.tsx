@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { api, subscribe, type Account, type AppInfo, type Job, type Profile, type ProfileState } from "./api";
 
+/** A skin Flint couldn't get yet (Mojang slow or unreachable) is asked for again after these waits; the last repeats. */
+const SKIN_RETRY_MS = [3_000, 10_000, 30_000, 120_000, 600_000];
+
 export type Skin = { dataUrl: string | null; capeUrl?: string | null; model: "classic" | "slim" };
 
 type Store = {
@@ -62,6 +65,37 @@ export function StoreProvider({ info, children }: { info: AppInfo; children: Rea
     setStates((prev) => Object.fromEntries(Object.entries(live).map(([id, fetched]) => [id, prev[id] && seqOf(prev[id]) > seqOf(fetched) ? prev[id] : fetched])));
   }, []);
 
+  // The profiles' states only, asked again: a game's last event can be missed while Flint sits minimized behind it, and
+  // "Running" must never outlast the game. Merged by sequence number as above.
+  const refreshStates = useCallback(async () => {
+    const live = await api.profileStates();
+    setStates((prev) => ({
+      ...prev,
+      ...Object.fromEntries(Object.entries(live).map(([id, fetched]) => [id, prev[id] && seqOf(prev[id]) > seqOf(fetched) ? prev[id] : fetched])),
+    }));
+  }, []);
+
+  // When Flint comes back to the front.
+  useEffect(() => {
+    const onBack = () => {
+      if (document.visibilityState === "visible") void refreshStates().catch(() => {});
+    };
+    window.addEventListener("focus", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => {
+      window.removeEventListener("focus", onBack);
+      document.removeEventListener("visibilitychange", onBack);
+    };
+  }, [refreshStates]);
+
+  // And every few seconds while a game runs (a read of Flint's own state, nothing more).
+  const gameRunning = Object.values(states).some((s) => s.state === "running");
+  useEffect(() => {
+    if (!gameRunning) return;
+    const timer = window.setInterval(() => void refreshStates().catch(() => {}), 5000);
+    return () => window.clearInterval(timer);
+  }, [gameRunning, refreshStates]);
+
   useEffect(() => {
     void reloadAccounts();
     void reloadProfiles();
@@ -82,25 +116,59 @@ export function StoreProvider({ info, children }: { info: AppInfo; children: Rea
       });
       if (job.state === "done") {
         if (job.profileId) touchContent(job.profileId);
-        if (job.kind === "modpack") void reloadProfiles();
+        if (job.kind === "modpack" || job.kind === "import") void reloadProfiles();
       }
     });
+    // A running game switched to another account, or added one, through Flint (its main menu's account card).
+    const offAccounts = subscribe<{ added: string | null }>("accounts-changed", () => void reloadAccounts());
     return () => {
       offState();
       offJobs();
+      offAccounts();
     };
   }, [reloadAccounts, reloadProfiles, touchContent]);
 
+  // Each account's skin, for its head, the Home character and the Skins page. Flint answers from its cache at once; a
+  // player it has no skin for yet (Mojang slow or unreachable) is asked for again, sooner first, until one arrives.
+  // The retries live outside the effect (it runs again whenever a skin arrives) and stop only when the app closes.
+  const skinTimers = useRef(new Set<number>());
+  useEffect(() => () => skinTimers.current.forEach((t) => window.clearTimeout(t)), []);
   useEffect(() => {
     for (const account of accounts) {
-      if (skins[account.uuid]) continue;
-      setSkins((prev) => ({ ...prev, [account.uuid]: { dataUrl: null, model: account.skinModel ?? "classic" } }));
-      void api
-        .skin(account.uuid)
-        .then((skin) => setSkins((prev) => ({ ...prev, [account.uuid]: skin })))
-        .catch(() => {});
+      const uuid = account.uuid;
+      if (skins[uuid]) continue;
+      setSkins((prev) => ({ ...prev, [uuid]: { dataUrl: null, model: account.skinModel ?? "classic" } }));
+      const retry = (attempt: number) => {
+        const timer = window.setTimeout(() => {
+          skinTimers.current.delete(timer);
+          load(attempt + 1);
+        }, SKIN_RETRY_MS[Math.min(attempt, SKIN_RETRY_MS.length - 1)]);
+        skinTimers.current.add(timer);
+      };
+      const load = (attempt: number) => {
+        void api.skin(uuid).then(
+          (skin) => {
+            if (skin.dataUrl) setSkins((prev) => ({ ...prev, [uuid]: skin }));
+            else retry(attempt);
+          },
+          () => retry(attempt),
+        );
+      };
+      load(0);
     }
   }, [accounts, skins]);
+
+  // A skin Flint refreshed in the background changed (a new skin, arm model or cape): show the new one.
+  useEffect(
+    () =>
+      subscribe<{ uuid: string }>("skin-updated", ({ uuid }) => {
+        void api
+          .skin(uuid)
+          .then((skin) => setSkins((prev) => ({ ...prev, [uuid]: skin })))
+          .catch(() => {});
+      }),
+    [],
+  );
 
   const dismissJob = useCallback((id: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== id));

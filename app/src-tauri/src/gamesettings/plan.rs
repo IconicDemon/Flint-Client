@@ -565,7 +565,7 @@ mod tests {
                 family: None,
                 game_version: version.into(),
                 data_version: None,
-                reason: Some("Not yet verified against Minecraft 1.21.x".into()),
+                reason: Some(format!("Flint doesn't know Minecraft {version}'s settings format.")),
             },
         }
     }
@@ -779,6 +779,58 @@ mod tests {
     }
 
     #[test]
+    fn a_1_21_11_destination_gets_26_3_values_key_by_key_and_keeps_its_version_line() {
+        let source = profile("a", "26.3", &edited(&bench(), &[
+            ("fov", "0.5"),
+            ("renderDistance", "8"),
+            ("graphicsPreset", "\"custom\""),
+            ("preferredGraphicsBackend", "\"opengl\""),
+            ("key_key.jump", "key.keyboard.v"),
+            ("key_key.drop", "key.keyboard.media.play"),
+            ("lang", "fr_fr"),
+        ]));
+        let target = profile("b", "1.21.11", "version:4671\nfov:0.0\nrenderDistance:12\ngraphicsPreset:\"fancy\"\nsomeOlderKey:1\n");
+        let all = [SyncCategory::Controls, SyncCategory::Keybinds, SyncCategory::Video, SyncCategory::Audio, SyncCategory::Language];
+        let work = run(&source, &target, &all);
+        assert!(work.plan.blocked.is_none(), "{:?}", work.plan.blocked);
+        let doc = written(&work);
+        assert_eq!(doc.get("version"), Some("4671"), "the destination keeps its own version line");
+        assert_eq!((doc.get("fov"), doc.get("renderDistance"), doc.get("graphicsPreset")), (Some("0.5"), Some("8"), Some("\"custom\"")));
+        assert_eq!((doc.get("key_key.jump"), doc.get("lang")), (Some("key.keyboard.v"), Some("fr_fr")));
+        assert_eq!(doc.get("someOlderKey"), Some("1"), "lines Flint doesn't know stay");
+        assert_eq!(skipped(&work, "video.preferredGraphicsBackend").unwrap().reason, "Not in Minecraft 1.21.11.");
+        assert_eq!(skipped(&work, "keybind.key.drop").unwrap().reason, "Media Play doesn't exist in Minecraft 1.21.11.");
+        assert!(doc.get("preferredGraphicsBackend").is_none() && doc.get("key_key.drop").is_none(), "nothing 1.21.11 lacks is written");
+    }
+
+    #[test]
+    fn a_1_21_1_destination_has_no_graphics_preset_to_force() {
+        let source = profile("a", "26.3", &edited(&bench(), &[("graphicsPreset", "\"custom\""), ("renderDistance", "8"), ("soundCategory_ui", "0.5"), ("soundCategory_music", "0.25")]));
+        let target = profile("b", "1.21.1", "version:3955\nrenderDistance:12\n");
+        let work = run(&source, &target, &[SyncCategory::Video, SyncCategory::Audio]);
+        let doc = written(&work);
+        assert_eq!(doc.get("renderDistance"), Some("8"));
+        assert_eq!(doc.get("soundCategory_music"), Some("0.25"));
+        assert_eq!(doc.get("graphicsPreset"), None, "1.21.1 has no graphics preset");
+        assert_eq!(skipped(&work, "video.graphicsPreset").unwrap().reason, "Not in Minecraft 1.21.1.");
+        assert_eq!(skipped(&work, "audio.ui").unwrap().reason, "Not in Minecraft 1.21.1.");
+        assert_eq!(doc.get("version"), Some("3955"));
+    }
+
+    #[test]
+    fn a_1_21_11_source_brings_its_values_to_26_3() {
+        let source = profile("a", "1.21.11", "version:4671\nfov:0.25\ngamma:1.0\nkey_key.jump:key.keyboard.b\nkey_key.drop:key.keyboard.81\n");
+        let target = profile("b", "26.3", &bench());
+        let work = run(&source, &target, &[SyncCategory::Video, SyncCategory::Keybinds]);
+        let doc = written(&work);
+        assert_eq!(change(&work, "video.fov").unwrap().proposed, "80°");
+        assert_eq!((doc.get("fov"), doc.get("gamma"), doc.get("key_key.jump")), (Some("0.25"), Some("1.0"), Some("key.keyboard.b")));
+        // GLFW's key code 81 is another key under SDL3.
+        assert!(skipped(&work, "keybind.key.drop").unwrap().reason.contains("GLFW"));
+        assert_eq!(doc.get("version"), Some("5023"));
+    }
+
+    #[test]
     fn shared_keys_are_copied_as_they_are_and_flagged() {
         // Minecraft allows one key for two actions: copied as-is, with an informational note.
         let source = profile("a", "26.3", &edited(&bench(), &[("key_key.drop", "key.keyboard.space")]));
@@ -841,10 +893,10 @@ mod tests {
     #[test]
     fn an_unverified_destination_is_blocked_whole() {
         let source = profile("a", "26.3", &bench());
-        let target = profile("b", "1.21.11", "version:4671\nfov:0.0\n");
+        let target = profile("b", "1.20.1", "version:3465\nfov:0.0\n");
         let work = run(&source, &target, &[SyncCategory::Video, SyncCategory::ServerShortcuts]);
         let reason = work.plan.blocked.unwrap();
-        assert!(reason.starts_with("Not yet verified against Minecraft 1.21.x."), "{reason}");
+        assert!(reason.starts_with("Flint doesn't know Minecraft 1.20.1's settings format."), "{reason}");
         assert!(work.writes.is_empty());
         assert!(work.plan.changes.is_empty());
     }
@@ -855,7 +907,7 @@ mod tests {
         source.flint.shortcuts = JsonFileOrMissing(JsonFile::parse(br#"{"shortcuts":[{"name":"Hub","address":"hub.example.net"}]}"#.to_vec()));
         source.flint.layouts = vec![("pvp".into(), JsonFile::parse(br#"{"schema":1,"id":"pvp"}"#.to_vec()))];
         let flint = [SyncCategory::HudLayouts, SyncCategory::ControlCenter, SyncCategory::ServerShortcuts];
-        let unverified = profile("b", "1.21.11", "version:4671\n");
+        let unverified = profile("b", "1.20.1", "version:3465\n");
         let mut unknown = profile("c", "26.2", "");
         unknown.options = OptionsFile::Missing;
         unknown.support = VersionSupport {
@@ -878,7 +930,7 @@ mod tests {
 
     #[test]
     fn an_unverified_source_can_t_be_read() {
-        let source = profile("a", "1.21.11", "version:4671\nfov:0.5\n");
+        let source = profile("a", "1.20.1", "version:3465\nfov:0.5\n");
         let target = profile("b", "26.3", &bench());
         let work = run(&source, &target, &[SyncCategory::Video]);
         assert!(work.plan.blocked.unwrap().starts_with("Flint can't read Profile a's Minecraft settings"));

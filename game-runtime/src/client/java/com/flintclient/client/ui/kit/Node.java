@@ -1,11 +1,11 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.KeyInput;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.TextLine;
 import com.flintclient.client.ui.Motion;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -380,7 +380,7 @@ public class Node {
 	}
 
 	/** A key while focused; by default Enter and Space activate. */
-	public boolean keyDown(KeyEvent event) {
+	public boolean keyDown(KeyInput event) {
 		if (event.isSelection()) {
 			if (enabled) {
 				press = 1.0F;

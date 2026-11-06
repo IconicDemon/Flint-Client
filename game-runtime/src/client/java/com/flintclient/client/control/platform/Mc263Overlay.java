@@ -3,36 +3,47 @@ package com.flintclient.client.control.platform;
 import com.flintclient.client.FlintClient;
 import com.flintclient.client.control.feature.Features;
 import com.flintclient.client.control.feature.Mods;
-import com.flintclient.client.control.feature.Waypoint;
 import com.flintclient.client.control.model.ModuleState;
+import com.flintclient.client.control.model.RgbSetting;
 import com.flintclient.client.control.model.mods.HudMods;
 import com.flintclient.client.control.model.mods.PlayerMods;
 import com.flintclient.client.control.model.mods.UtilityMods;
+import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.resources.DefaultPlayerSkin;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.item.PrimedTnt;
+import net.minecraft.world.entity.OwnableEntity;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.player.PlayerSkin;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ProjectileWeaponItem;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3x2fStack;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Minecraft 26.3's side of the modules that draw on the HUD layer or change Minecraft's own HUD pieces: Crosshair, Attack
- * Indicator, Hit Color, Damage Tint, waypoint markers, TNT timers, Tab Editor, Scoreboard, Boss Bar and Nick Hider.
+ * Indicator, Hit Color, Damage Tint, waypoint markers (drawn by {@link Mc263Waypoints}), TNT timers (in the world, from the TNT's renderer), Tab Editor, Scoreboard, Boss Bar and Nick Hider.
  * Drawing paths allocate nothing in steady state, apart from a few small objects per waypoint or lit TNT on screen and
  * Minecraft's own render-state objects. Each path is fault-isolated. Render thread only.
  */
@@ -41,7 +52,6 @@ public final class Mc263Overlay {
 	private static final int ATTACK = Mods.index(PlayerMods.AttackIndicator.ID);
 	private static final int HIT = Mods.index(PlayerMods.HitColor.ID);
 	private static final int TINT = Mods.index(PlayerMods.DamageTint.ID);
-	private static final int WAYPOINTS = Mods.index(UtilityMods.Waypoints.ID);
 	private static final int TNT = Mods.index(HudMods.TntCountdown.ID);
 	private static final int TAB = Mods.index(UtilityMods.TabEditor.ID);
 	private static final int SCORE = Mods.index(UtilityMods.Scoreboard.ID);
@@ -51,15 +61,23 @@ public final class Mc263Overlay {
 	private static final Identifier INDICATOR_FULL = Identifier.withDefaultNamespace("hud/crosshair_attack_indicator_full");
 	private static final Identifier INDICATOR_BACK = Identifier.withDefaultNamespace("hud/crosshair_attack_indicator_background");
 	private static final Identifier INDICATOR_PROGRESS = Identifier.withDefaultNamespace("hud/crosshair_attack_indicator_progress");
+	/** Feather's hit indicator: a crescent with a pointer, 205x59, drawn at a quarter size and tinted. */
+	private static final Identifier HIT_CRESCENT = Identifier.fromNamespaceAndPath("flintclient", "textures/gui/hit_indicator.png");
+	private static final int CRESCENT_W = 205;
+	private static final int CRESCENT_H = 59;
+	/** Feather's hit marker: four strokes of an X around the crosshair, 16x16. */
+	private static final Identifier HIT_MARKER = Identifier.fromNamespaceAndPath("flintclient", "textures/gui/hit_marker.png");
+	/** The ring indicator's frames: 33 of 48x48 stacked, empty to full, filling clockwise from the top. */
+	private static final Identifier RING = Identifier.fromNamespaceAndPath("flintclient", "textures/gui/attack_ring.png");
+	private static final int RING_FRAME = 48;
+	private static final int RING_STEPS = 32;
 
 	private static final HookGuard DRAW = new HookGuard("overlay", Mc263Overlay::off);
 	private static final HookGuard HUD_PARTS = new HookGuard("hud parts", Mc263Overlay::off);
 	private static final HookGuard NAMES = new HookGuard("nick hider", Mc263Overlay::off);
 
-	private static final int MAX_TNT = 24;
-	private static final PrimedTnt[] TNTS = new PrimedTnt[MAX_TNT];
-	private static int tntCount;
-	private static final char[] DIGITS = new char[16];
+	/** Light for text that glows (the TNT timer reads the same by night). */
+	private static final int FULL_BRIGHT = 15728880;
 
 	/** 0: outlines only, 1: fills only (so one shape's outline never covers another's fill). */
 	private static int pass;
@@ -70,7 +88,7 @@ public final class Mc263Overlay {
 	private Mc263Overlay() {
 	}
 
-	private static void off(String path, RuntimeException error) {
+	private static void off(String path, Throwable error) {
 		FlintClient.LOGGER.warn("Flint: the {} hook failed; it's off for this session", path, error);
 	}
 
@@ -81,49 +99,59 @@ public final class Mc263Overlay {
 	// ---------- crosshair and attack indicator ----------
 
 	/**
-	 * Where vanilla draws its crosshair sprite: true when the Crosshair module drew its own instead. Also notes that the
-	 * crosshair is showing, for the attack indicator and hit markers drawn after it.
+	 * Where vanilla draws its crosshair sprite (always vanilla's: the Crosshair module skips Minecraft's whole crosshair
+	 * instead). Notes that the crosshair is showing, for the attack indicator and hit markers drawn after it.
 	 */
 	public static boolean crosshair(GuiGraphicsExtractor graphics) {
 		crosshairShown = true;
-		if (!DRAW.on() || !Mods.on(CROSSHAIR)) {
-			return false;
-		}
-		try {
-			ModuleState state = Mods.state(CROSSHAIR);
-			if (state.option(PlayerMods.Crosshair.TYPE) == 0) {
-				return false;
-			}
-			drawCrosshair(graphics, state);
-			return true;
-		} catch (RuntimeException e) {
-			DRAW.fail(e);
-			return false;
-		}
+		decideIndicator();
+		return false;
 	}
 
 	/** Whether the Attack Indicator module draws the indicator (vanilla's is then left out). */
 	public static boolean ownAttackIndicator() {
-		return DRAW.on() && Mods.on(ATTACK);
+		return DRAW.on() && Mods.on(ATTACK) && !vanillaIndicator;
+	}
+
+	/** This frame, Attack Indicator leaves the indicator to Minecraft: Default display, nothing moved or added (exact vanilla). */
+	private static boolean vanillaIndicator;
+	/** This frame's choice of what the indicator shows ({@link com.flintclient.client.control.feature.IndicatorChoice}). */
+	private static int frameSource = com.flintclient.client.control.feature.IndicatorChoice.NONE;
+
+	/**
+	 * Once a frame, before Minecraft's indicator: what Attack Indicator shows, and whether Minecraft's own drawing already is
+	 * exactly that (the Default display at its own size and place, your attack only, the full sprite as Minecraft shows it).
+	 */
+	private static void decideIndicator() {
+		vanillaIndicator = false;
+		frameSource = com.flintclient.client.control.feature.IndicatorChoice.NONE;
+		LocalPlayer player = mc().player;
+		if (!DRAW.on() || !Mods.on(ATTACK) || player == null) {
+			return;
+		}
+		try {
+			ModuleState state = Mods.state(ATTACK);
+			readSources(player, state);
+			frameSource = com.flintclient.client.control.feature.IndicatorChoice.choose(SOURCES, true);
+			boolean attack = frameSource == com.flintclient.client.control.feature.IndicatorChoice.ATTACK;
+			boolean asIs = state.option(PlayerMods.AttackIndicator.SHAPE) == 0 && state.integer(PlayerMods.AttackIndicator.SCALE) == 100
+				&& state.integer(PlayerMods.AttackIndicator.X_OFFSET) == 0 && state.integer(PlayerMods.AttackIndicator.Y_OFFSET) == 0;
+			// Shown full while charged (Hide when charged off) is Flint's to draw; Minecraft shows it full only on a target.
+			vanillaIndicator = asIs && attack && (state.bool(PlayerMods.AttackIndicator.FULL_ONLY_TARGET) || SOURCES[frameSource] < 1);
+		} catch (RuntimeException | LinkageError e) {
+			DRAW.fail(e);
+		}
 	}
 
 	/** After vanilla's crosshair method: the third-person crosshair, the attack indicator and hit markers. */
 	public static void afterCrosshair(GuiGraphicsExtractor graphics) {
+		com.flintclient.client.control.platform.ambient.AmbientSounds.renderDebug(graphics);
 		boolean shown = crosshairShown;
 		crosshairShown = false;
 		if (!DRAW.on()) {
 			return;
 		}
 		try {
-			Minecraft mc = mc();
-			if (!shown && Mods.on(CROSSHAIR) && Mods.state(CROSSHAIR).bool(PlayerMods.Crosshair.THIRD_PERSON)
-				&& !mc.options.getCameraType().isFirstPerson() && mc.player != null && !mc.player.isSpectator()) {
-				ModuleState state = Mods.state(CROSSHAIR);
-				if (state.option(PlayerMods.Crosshair.TYPE) != 0) {
-					drawCrosshair(graphics, state);
-				}
-				shown = true;
-			}
 			if (!shown) {
 				return;
 			}
@@ -133,119 +161,58 @@ public final class Mc263Overlay {
 			if (Mods.on(HIT)) {
 				drawHitMarker(graphics, Mods.state(HIT));
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			DRAW.fail(e);
 		}
 	}
 
-	private static void drawCrosshair(GuiGraphicsExtractor g, ModuleState state) {
-		Minecraft mc = mc();
-		if (state.bool(PlayerMods.Crosshair.HIDE_SPECTATOR) && mc.player != null && mc.player.isSpectator()) {
+	/**
+	 * With the Crosshair module on (Minecraft's crosshair method skipped): the attack indicator (Attack Indicator's, or
+	 * Minecraft's own as Custom Crosshair Mod redraws it) and the hit markers, from the crosshair's own drawing.
+	 */
+	public static void indicatorsWithCrosshair(GuiGraphicsExtractor g) {
+		if (!DRAW.on()) {
 			return;
 		}
-		int type = state.option(PlayerMods.Crosshair.TYPE);
-		int size = state.integer(PlayerMods.Crosshair.SIZE);
-		int gap = state.integer(PlayerMods.Crosshair.GAP);
-		int thick = state.integer(PlayerMods.Crosshair.THICKNESS);
-		boolean invert = state.bool(PlayerMods.Crosshair.INVERT);
-		int alpha = Math.round(255 * state.integer(PlayerMods.Crosshair.OPACITY) / 100.0F) << 24;
-		int rgb = state.rgb(PlayerMods.Crosshair.COLOR);
-		Entity target = mc.crosshairPickEntity;
-		if (state.bool(PlayerMods.Crosshair.TARGET_COLOR) && target instanceof LivingEntity && target.isAlive()) {
-			rgb = state.rgb(PlayerMods.Crosshair.TARGET_RGB);
-		}
-		int color = alpha | rgb;
-		int outline = state.bool(PlayerMods.Crosshair.OUTLINE) ? alpha | state.rgb(PlayerMods.Crosshair.OUTLINE_COLOR) : 0;
-		for (pass = outline != 0 && !invert ? 0 : 1; pass < 2; pass++) {
-			drawShape(g, state, mc, type, size, gap, thick, invert, alpha, color, outline);
-		}
-	}
-
-	private static void drawShape(GuiGraphicsExtractor g, ModuleState state, Minecraft mc, int type, int size, int gap, int thick,
-		boolean invert, int alpha, int color, int outline) {
-		Matrix3x2fStack pose = g.pose();
-		pose.pushMatrix();
 		try {
-			pose.translate(g.guiWidth() / 2.0F, g.guiHeight() / 2.0F);
-			if (state.bool(PlayerMods.Crosshair.IGNORE_SCALE)) {
-				float k = 1.0F / Math.max(1, mc.getWindow().getGuiScale());
-				pose.scale(k, k);
+			decideIndicator();
+			// Minecraft draws nothing of its own here, so Attack Indicator draws even its Default look.
+			vanillaIndicator = false;
+			if (Mods.on(ATTACK)) {
+				drawAttackIndicator(g, Mods.state(ATTACK));
+			} else {
+				vanillaAttackIndicator(g);
 			}
-			int half = thick / 2;
-			int reach = gap + size;
-			switch (type) {
-				case 1, 2 -> {
-					bar(g, -reach, -half, -gap, thick - half, color, outline, invert);
-					bar(g, gap, -half, reach, thick - half, color, outline, invert);
-					bar(g, -half, -reach, thick - half, -gap, color, outline, invert);
-					bar(g, -half, gap, thick - half, reach, color, outline, invert);
-					if (type == 2) {
-						int c = reach + 2;
-						int arm = Math.max(2, size / 2);
-						for (int sx = -1; sx <= 1; sx += 2) {
-							for (int sy = -1; sy <= 1; sy += 2) {
-								int x = sx * c;
-								int y = sy * c;
-								bar(g, Math.min(x, x - sx * arm), y - half, Math.max(x, x - sx * arm) + 1, y + thick - half, color, outline, invert);
-								bar(g, x - half, Math.min(y, y - sy * arm), x + thick - half, Math.max(y, y - sy * arm) + 1, color, outline, invert);
-							}
-						}
-					}
-				}
-				case 3 -> {
-					int segments = 24;
-					float radius = gap + size / 2.0F;
-					int len = Math.max(1, Math.round((float) (2 * Math.PI * radius / segments)) + 1);
-					for (int i = 0; i < segments; i++) {
-						pose.pushMatrix();
-						pose.rotate((float) (2 * Math.PI * i / segments));
-						pose.translate(0, -radius);
-						bar(g, -len / 2, -half, len - len / 2, thick - half, color, outline, invert);
-						pose.popMatrix();
-					}
-				}
-				case 4 -> {
-					bar(g, -reach, -reach, reach + 1, -reach + thick, color, outline, invert);
-					bar(g, -reach, reach + 1 - thick, reach + 1, reach + 1, color, outline, invert);
-					bar(g, -reach, -reach + thick, -reach + thick, reach + 1 - thick, color, outline, invert);
-					bar(g, reach + 1 - thick, -reach + thick, reach + 1, reach + 1 - thick, color, outline, invert);
-				}
-				case 5 -> bar(g, -half - 1, -half - 1, thick - half + 1, thick - half + 1, color, outline, invert);
-				case 6 -> {
-					for (int side = -1; side <= 1; side += 2) {
-						pose.pushMatrix();
-						pose.rotate((float) Math.toRadians(side * 45));
-						bar(g, -half, gap, thick - half, reach, color, outline, invert);
-						pose.popMatrix();
-					}
-				}
-				default -> {
-				}
+			if (Mods.on(HIT)) {
+				drawHitMarker(g, Mods.state(HIT));
 			}
-			if (state.bool(PlayerMods.Crosshair.DOT) && type != 5) {
-				int dot = alpha | state.rgb(PlayerMods.Crosshair.DOT_COLOR);
-				bar(g, -half, -half, thick - half, thick - half, dot, outline, invert);
-			}
-		} finally {
-			pose.popMatrix();
+		} catch (RuntimeException | LinkageError e) {
+			DRAW.fail(e);
 		}
 	}
 
-	/** One crosshair rectangle (and its one-unit outline first). Inverted ones blend like vanilla's crosshair. */
-	private static void bar(GuiGraphicsExtractor g, int x0, int y0, int x1, int y1, int color, int outline, boolean invert) {
-		if (invert) {
-			if (pass == 1) {
-				g.fill(RenderPipelines.CROSSHAIR, x0, y0, x1, y1, 0xFFFFFFFF);
-			}
+	/** Minecraft's crosshair attack indicator, where and when Minecraft draws it (its option set to Crosshair). */
+	private static void vanillaAttackIndicator(GuiGraphicsExtractor g) {
+		Minecraft mc = mc();
+		LocalPlayer player = mc.player;
+		if (player == null || mc.options.attackIndicator().get() != net.minecraft.client.AttackIndicatorStatus.CROSSHAIR) {
 			return;
 		}
-		if (pass == 0) {
-			if (outline != 0) {
-				g.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, outline);
-			}
-			return;
+		float strength = player.getAttackStrengthScale(0.0F);
+		boolean full = false;
+		Entity target = mc.crosshairPickEntity;
+		if (target instanceof LivingEntity && strength >= 1.0F) {
+			full = player.getCurrentItemAttackStrengthDelay() > 5.0F && target.isAlive();
 		}
-		g.fill(x0, y0, x1, y1, color);
+		int y = g.guiHeight() / 2 - 7 + 16;
+		int x = g.guiWidth() / 2 - 8;
+		if (full) {
+			g.blitSprite(RenderPipelines.CROSSHAIR, INDICATOR_FULL, x, y, 16, 16);
+		} else if (strength < 1.0F) {
+			int progress = (int) (strength * 17.0F);
+			g.blitSprite(RenderPipelines.CROSSHAIR, INDICATOR_BACK, x, y, 16, 4);
+			g.blitSprite(RenderPipelines.CROSSHAIR, INDICATOR_PROGRESS, 16, 4, 0, 0, x, y, progress, 4);
+		}
 	}
 
 	private static final float[] SOURCES = new float[com.flintclient.client.control.feature.IndicatorChoice.SOURCES];
@@ -347,16 +314,26 @@ public final class Mc263Overlay {
 
 	private static void drawAttackIndicator(GuiGraphicsExtractor g, ModuleState state) {
 		LocalPlayer player = mc().player;
-		if (player == null) {
+		int source = frameSource;
+		shownSource = vanillaIndicator ? source : com.flintclient.client.control.feature.IndicatorChoice.NONE;
+		if (player == null || vanillaIndicator || source == com.flintclient.client.control.feature.IndicatorChoice.NONE) {
 			return;
 		}
-		readSources(player, state);
-		int source = com.flintclient.client.control.feature.IndicatorChoice.choose(SOURCES, !state.bool(PlayerMods.AttackIndicator.FULL_ONLY_TARGET));
-		shownSource = source;
-		if (source == com.flintclient.client.control.feature.IndicatorChoice.NONE) {
-			return;
-		}
+		int shape = state.option(PlayerMods.AttackIndicator.SHAPE);
 		float strength = SOURCES[source];
+		boolean attack = source == com.flintclient.client.control.feature.IndicatorChoice.ATTACK;
+		boolean full = attack && strength >= 1.0F;
+		if (full && state.bool(PlayerMods.AttackIndicator.FULL_ONLY_TARGET)) {
+			// As Minecraft: full only while aiming at something alive to hit, with a weapon slower than 5 ticks.
+			Entity target = mc().crosshairPickEntity;
+			if (shape != 0 || !(target instanceof LivingEntity) || !target.isAlive() || player.getCurrentItemAttackStrengthDelay() <= 5.0F) {
+				return;
+			}
+		}
+		if (shape == 0 && mc().options.attackIndicator().get() != net.minecraft.client.AttackIndicatorStatus.CROSSHAIR) {
+			return;
+		}
+		shownSource = source;
 		float scale = state.integer(PlayerMods.AttackIndicator.SCALE) / 100.0F;
 		int rgb = state.bool(PlayerMods.AttackIndicator.DYNAMIC) ? com.flintclient.client.control.feature.IndicatorChoice.dynamicColor(strength)
 			: state.rgb(PlayerMods.AttackIndicator.COLOR);
@@ -364,12 +341,13 @@ public final class Mc263Overlay {
 		Matrix3x2fStack pose = g.pose();
 		pose.pushMatrix();
 		try {
-			pose.translate(g.guiWidth() / 2.0F + state.integer(PlayerMods.AttackIndicator.X_OFFSET),
-				g.guiHeight() / 2.0F + state.integer(PlayerMods.AttackIndicator.Y_OFFSET));
+			// Whole GUI units, as Minecraft places its indicator (guiWidth / 2 - 8).
+			pose.translate(g.guiWidth() / 2 + state.integer(PlayerMods.AttackIndicator.X_OFFSET),
+				g.guiHeight() / 2 + state.integer(PlayerMods.AttackIndicator.Y_OFFSET));
 			pose.scale(scale, scale);
-			switch (state.option(PlayerMods.AttackIndicator.SHAPE)) {
+			switch (shape) {
 				case 0 -> {
-					if (strength >= 1.0F && source == com.flintclient.client.control.feature.IndicatorChoice.ATTACK) {
+					if (full) {
 						g.blitSprite(RenderPipelines.CROSSHAIR, INDICATOR_FULL, -8, 9, 16, 16);
 					} else {
 						int progress = (int) (Math.min(1, strength) * 17.0F);
@@ -378,14 +356,11 @@ public final class Mc263Overlay {
 					}
 				}
 				case 1 -> {
-					int segments = 32;
-					int lit = Math.round(Math.min(1, strength) * segments);
-					for (int i = 0; i < segments; i++) {
-						pose.pushMatrix();
-						pose.rotate((float) (2 * Math.PI * i / segments));
-						pose.translate(0, -10);
-						g.fill(0, 0, 2, 1, i < lit ? color : 0x40000000);
-						pose.popMatrix();
+					int step = Math.round(Math.min(1, strength) * RING_STEPS);
+					if (step > 0) {
+						// White follows Minecraft's crosshair (inverted against what's behind); a chosen color is drawn as is.
+						var pipeline = rgb == 0xFFFFFF ? RenderPipelines.CROSSHAIR : RenderPipelines.GUI_TEXTURED;
+						g.blit(pipeline, RING, -3, 9, 0, step * RING_FRAME, 6, 6, RING_FRAME, RING_FRAME, RING_FRAME, RING_FRAME * (RING_STEPS + 1), color);
 					}
 				}
 				default -> {
@@ -398,6 +373,14 @@ public final class Mc263Overlay {
 		}
 	}
 
+	/**
+	 * How long ago {@code at} was; "never" (Long.MIN_VALUE) is forever ago. A plain {@code now - at} overflows to a negative
+	 * age for "never", which kept the hit indicator and kill marker on screen before any hit.
+	 */
+	private static long age(long now, long at) {
+		return at == Long.MIN_VALUE || at > now ? Long.MAX_VALUE : now - at;
+	}
+
 	private static void drawHitMarker(GuiGraphicsExtractor g, ModuleState state) {
 		if (!state.bool(PlayerMods.HitColor.MARKER)) {
 			return;
@@ -405,10 +388,10 @@ public final class Mc263Overlay {
 		long now = Features.nowMs();
 		long duration = state.integer(PlayerMods.HitColor.MARKER_DURATION) * 50L;
 		long at = Features.COMBAT.hitMarkerAt();
-		if (now - at > duration) {
+		if (age(now, at) > duration) {
 			return;
 		}
-		boolean kill = now - Features.COMBAT.killAt() <= duration;
+		boolean kill = age(now, Features.COMBAT.killAt()) <= duration;
 		float fade = 1 - (now - at) / (float) duration;
 		int rgb = kill ? state.rgb(PlayerMods.HitColor.KILL_COLOR) : state.rgb(PlayerMods.HitColor.MARKER_COLOR);
 		int color = Math.round(255 * fade) << 24 | rgb;
@@ -416,14 +399,9 @@ public final class Mc263Overlay {
 		Matrix3x2fStack pose = g.pose();
 		pose.pushMatrix();
 		try {
-			pose.translate(g.guiWidth() / 2.0F, g.guiHeight() / 2.0F);
+			pose.translate(g.guiWidth() / 2, g.guiHeight() / 2);
 			pose.scale(size, size);
-			for (int i = 0; i < 4; i++) {
-				pose.pushMatrix();
-				pose.rotate((float) Math.toRadians(45 + 90 * i));
-				g.fill(-1, 4, 1, 9, color);
-				pose.popMatrix();
-			}
+			g.blit(RenderPipelines.GUI_TEXTURED, HIT_MARKER, -8, -8, 0, 0, 16, 16, 16, 16, 16, 16, color);
 		} finally {
 			pose.popMatrix();
 		}
@@ -431,7 +409,7 @@ public final class Mc263Overlay {
 
 	// ---------- the overlay under Flint's HUD ----------
 
-	/** From the HUD, just before Flint's modules: damage tint, waypoint markers, TNT timers and the damage direction. */
+	/** From the HUD, just before Flint's modules: damage tint, waypoint markers and the damage direction. */
 	public static void render(GuiGraphicsExtractor graphics, DeltaTracker delta) {
 		if (!DRAW.on()) {
 			return;
@@ -445,40 +423,25 @@ public final class Mc263Overlay {
 				drawTint(graphics, Mods.state(TINT), mc.player);
 			}
 			if (Mc263Features.markersShown()) {
-				drawWaypoints(graphics, mc);
-			}
-			if (Mods.on(TNT) && tntCount > 0) {
-				drawTnt(graphics, mc, delta.getGameTimeDeltaPartialTick(false));
+				Mc263Waypoints.draw(graphics, mc, delta.getGameTimeDeltaPartialTick(true));
 			}
 			if (Mods.on(HIT)) {
 				drawDamageDirection(graphics, Mods.state(HIT));
 			}
 			Mc263Visuals.render(graphics);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			DRAW.fail(e);
 		}
 	}
 
-	/** From the client tick: the lit TNT near you (at most {@value #MAX_TNT}, within 48 blocks). */
+	/** From the client tick: the attack-charged sound. */
 	public static void tick() {
 		if (!DRAW.on()) {
 			return;
 		}
 		try {
 			tickAttackSound();
-			java.util.Arrays.fill(TNTS, null);
-			tntCount = 0;
-			Minecraft mc = mc();
-			ClientLevel level = mc.level;
-			if (level == null || mc.player == null || !Mods.on(TNT)) {
-				return;
-			}
-			for (Entity entity : level.entitiesForRendering()) {
-				if (entity instanceof PrimedTnt tnt && tnt.distanceToSqr(mc.player) < 48 * 48 && tntCount < MAX_TNT) {
-					TNTS[tntCount++] = tnt;
-				}
-			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			DRAW.fail(e);
 		}
 	}
@@ -488,7 +451,7 @@ public final class Mc263Overlay {
 		float health = player.getHealth();
 		float strength = health < below ? 1 - health / below : 0;
 		if (state.bool(PlayerMods.DamageTint.ON_HURT)) {
-			long since = Features.nowMs() - Features.COMBAT.hurtAt();
+			long since = age(Features.nowMs(), Features.COMBAT.hurtAt());
 			if (since < 400) {
 				strength = Math.max(strength, 0.6F * (1 - since / 400.0F));
 			}
@@ -498,154 +461,107 @@ public final class Mc263Overlay {
 		}
 		float intensity = state.integer(PlayerMods.DamageTint.INTENSITY) / 100.0F;
 		int rgb = state.rgb(PlayerMods.DamageTint.COLOR);
-		int w = g.guiWidth();
-		int h = g.guiHeight();
-		int depth = Math.max(8, Math.min(w, h) / 6);
-		int steps = 8;
-		for (int i = 0; i < steps; i++) {
-			float k = 1 - i / (float) steps;
-			int a = Math.round(255 * strength * intensity * k * k * 0.5F);
-			if (a <= 0) {
-				continue;
-			}
-			int c = a << 24 | rgb;
-			int inset = i * depth / steps;
-			int next = (i + 1) * depth / steps;
-			g.fill(inset, inset, w - inset, next, c);
-			g.fill(inset, h - next, w - inset, h - inset, c);
-			g.fill(inset, next, next, h - next, c);
-			g.fill(w - next, next, w - inset, h - next, c);
+		int alpha = Math.min(255, Math.round(255 * strength * Math.min(1, intensity * 1.6F)));
+		if (alpha <= 0) {
+			return;
 		}
+		// A soft vignette: clear in the middle, the colour gathering towards the edges and corners.
+		g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, vignette(), 0, 0, 0, 0, g.guiWidth(), g.guiHeight(), VIGNETTE, VIGNETTE,
+			VIGNETTE, VIGNETTE, alpha << 24 | rgb);
+	}
+
+	private static final int VIGNETTE = 128;
+	private static net.minecraft.resources.@org.jspecify.annotations.Nullable Identifier vignetteId;
+
+	/** A white radial fade (transparent in the middle, opaque at the corners), made once and smoothly stretched. */
+	private static net.minecraft.resources.Identifier vignette() {
+		if (vignetteId == null) {
+			com.mojang.blaze3d.platform.NativeImage image = new com.mojang.blaze3d.platform.NativeImage(VIGNETTE, VIGNETTE, true);
+			for (int y = 0; y < VIGNETTE; y++) {
+				for (int x = 0; x < VIGNETTE; x++) {
+					float dx = (x + 0.5F) / (VIGNETTE / 2.0F) - 1;
+					float dy = (y + 0.5F) / (VIGNETTE / 2.0F) - 1;
+					float d = (float) Math.sqrt((dx * dx + dy * dy) / 2);
+					float t = Math.clamp((d - 0.35F) / 0.65F, 0, 1);
+					int a = Math.round(255 * t * t * (3 - 2 * t));
+					image.setPixel(x, y, a << 24 | 0xFFFFFF);
+				}
+			}
+			vignetteId = net.minecraft.resources.Identifier.fromNamespaceAndPath(com.flintclient.client.FlintClient.MOD_ID, "damage_vignette");
+			Minecraft.getInstance().getTextureManager().register(vignetteId, new Smooth("Flint damage vignette", image));
+		}
+		return vignetteId;
 	}
 
 	private static void drawDamageDirection(GuiGraphicsExtractor g, ModuleState state) {
 		if (!state.bool(PlayerMods.HitColor.HIT_INDICATOR)) {
 			return;
 		}
-		long since = Features.nowMs() - Features.COMBAT.hurtAt();
+		long since = age(Features.nowMs(), Features.COMBAT.hurtAt());
 		long duration = state.integer(PlayerMods.HitColor.HIT_DURATION) * 50L;
 		float yaw = Features.COMBAT.hurtYaw();
 		if (since > duration || Float.isNaN(yaw)) {
 			return;
 		}
 		float fade = 1 - since / (float) duration;
-		int color = Math.round(220 * fade) << 24 | state.rgb(PlayerMods.HitColor.HIT_COLOR);
+		int color = Math.round(127 * fade) << 24 | state.rgb(PlayerMods.HitColor.HIT_COLOR);
 		float size = state.integer(PlayerMods.HitColor.HIT_SIZE) / 100.0F;
+		// A quarter of the texture at 100%, shrinking with its age (never below a fifth), as Feather's.
+		float k = 0.25F * size * Math.max(fade, 0.2F);
 		Matrix3x2fStack pose = g.pose();
 		pose.pushMatrix();
 		try {
 			pose.translate(g.guiWidth() / 2.0F, g.guiHeight() / 2.0F);
-			pose.scale(size, size);
 			// The server's hurt direction is 90° off "straight ahead" (see Minecraft's hurt tilt).
 			pose.rotate((float) Math.toRadians(yaw - 90));
-			for (int i = -4; i <= 4; i++) {
-				pose.pushMatrix();
-				pose.rotate((float) Math.toRadians(i * 6));
-				g.fill(-2, -30, 2, -27, color);
-				pose.popMatrix();
-			}
+			pose.translate(0, -15 * size);
+			pose.scale(k, k);
+			g.blit(RenderPipelines.GUI_TEXTURED, HIT_CRESCENT, -CRESCENT_W / 2, -CRESCENT_H / 2, 0, 0, CRESCENT_W, CRESCENT_H, CRESCENT_W, CRESCENT_H,
+				CRESCENT_W, CRESCENT_H, color);
 		} finally {
 			pose.popMatrix();
 		}
 	}
 
-	private static void drawWaypoints(GuiGraphicsExtractor g, Minecraft mc) {
-		String dimension = Mc263Features.dimension();
-		List<Waypoint> all = Features.waypoints().all();
-		if (dimension == null || all.isEmpty()) {
+	/**
+	 * Above each lit TNT, from its renderer: the fuse left, in seconds, where a nametag would be (half a block over the
+	 * block), turned to face you. It is part of the world, so it stays put above the block and gets smaller with distance as
+	 * the block does; a faint copy shows through walls, as a nametag's does. Within 48 blocks.
+	 */
+	public static void tntLabel(float fuseTicks, float height, double distanceSq, PoseStack pose, SubmitNodeCollector collector,
+		CameraRenderState camera) {
+		if (!DRAW.on() || !Mods.on(TNT) || distanceSq > 48 * 48) {
 			return;
 		}
-		ModuleState state = Mods.state(WAYPOINTS);
-		boolean names = state.bool(UtilityMods.Waypoints.SHOW_NAME);
-		boolean distances = state.bool(UtilityMods.Waypoints.SHOW_DISTANCE);
-		int max = state.integer(UtilityMods.Waypoints.MAX_DISTANCE);
-		Vec3 eye = mc.gameRenderer.mainCamera().position();
-		Font font = mc.font;
-		int w = g.guiWidth();
-		int h = g.guiHeight();
-		for (int i = 0; i < all.size(); i++) {
-			Waypoint wp = all.get(i);
-			if (!wp.visible() || !wp.dimension().equals(dimension)) {
-				continue;
-			}
-			double distance = wp.distanceTo(eye.x, eye.y, eye.z);
-			if (max > 0 && distance > max) {
-				continue;
-			}
-			Vec3 ndc = mc.gameRenderer.projectPointToScreen(new Vec3(wp.x() + 0.5, wp.y() + 0.5, wp.z() + 0.5));
-			if (ndc.z > 1.0 || ndc.x < -1.2 || ndc.x > 1.2 || ndc.y < -1.2 || ndc.y > 1.2) {
-				continue;
-			}
-			int sx = (int) Math.round((ndc.x + 1) / 2 * w);
-			int sy = (int) Math.round((1 - ndc.y) / 2 * h);
-			int color = 0xFF000000 | wp.rgb();
-			Matrix3x2fStack pose = g.pose();
-			pose.pushMatrix();
-			pose.translate(sx, sy);
-			pose.rotate((float) Math.toRadians(45));
-			g.fill(-4, -4, 4, 4, 0xC0000000);
-			g.fill(-3, -3, 3, 3, color);
-			pose.popMatrix();
-			int line = sy - 8;
-			if (distances && wp.showDistance()) {
-				int n = HudFormatInt.write(Math.round(distance), DIGITS);
-				DIGITS[n++] = 'm';
-				String text = new String(DIGITS, 0, n);
-				g.text(font, text, sx - font.width(text) / 2, line - 9, 0xFFE8E2DA, true);
-				line -= 10;
-			}
-			if (names && wp.showText()) {
-				g.text(font, wp.name(), sx - font.width(wp.name()) / 2, line - 9, color, true);
-			}
-		}
-	}
-
-	private static void drawTnt(GuiGraphicsExtractor g, Minecraft mc, float partialTick) {
-		ModuleState state = Mods.state(TNT);
-		int decimals = state.integer(HudMods.TntCountdown.DECIMALS);
-		boolean fixedColor = state.bool(HudMods.TntCountdown.STATIC_COLOR);
-		boolean shadow = state.bool(HudMods.TntCountdown.SHADOW);
-		Font font = mc.font;
-		for (int i = 0; i < tntCount; i++) {
-			PrimedTnt tnt = TNTS[i];
-			if (tnt == null || tnt.isRemoved()) {
-				continue;
-			}
-			Vec3 at = tnt.getPosition(partialTick).add(0, tnt.getBbHeight() + 0.5, 0);
-			Vec3 ndc = mc.gameRenderer.projectPointToScreen(at);
-			if (ndc.z > 1.0 || Math.abs(ndc.x) > 1.1 || Math.abs(ndc.y) > 1.1) {
-				continue;
-			}
-			float seconds = Math.max(0, (tnt.getFuse() - partialTick) / 20.0F);
-			String text = String.format(java.util.Locale.ROOT, "%." + decimals + "f", seconds);
+		try {
+			ModuleState state = Mods.state(TNT);
+			float seconds = Math.max(0, fuseTicks / 20.0F);
+			String text = String.format(java.util.Locale.ROOT, "%." + state.integer(HudMods.TntCountdown.DECIMALS) + "f", seconds);
 			int color;
-			if (fixedColor) {
-				color = 0xFFFFFFFF;
+			if (state.bool(HudMods.TntCountdown.STATIC_COLOR)) {
+				color = 0xFF000000 | state.rgb(HudMods.TntCountdown.TIME_COLOR);
 			} else {
 				float k = Math.clamp(seconds / 4.0F, 0, 1);
 				int r = Math.round(255 * Math.min(1, 2 * (1 - k)));
 				int gr = Math.round(255 * Math.min(1, 2 * k));
 				color = 0xFF000000 | r << 16 | gr << 8 | 0x40;
 			}
-			int sx = (int) Math.round((ndc.x + 1) / 2 * g.guiWidth());
-			int sy = (int) Math.round((1 - ndc.y) / 2 * g.guiHeight());
-			g.text(font, text, sx - font.width(text) / 2, sy - 4, color, shadow);
-		}
-	}
-
-	/** Whole numbers into a char buffer (waypoint distances). */
-	private static final class HudFormatInt {
-		static int write(long value, char[] out) {
-			long v = Math.max(0, Math.min(value, 99_999_999));
-			int n = 0;
-			long d = 1;
-			while (v / d >= 10) {
-				d *= 10;
+			Font font = mc().font;
+			float x = -font.width(text) / 2.0F;
+			pose.pushPose();
+			try {
+				pose.translate(0.0F, height + 0.5F, 0.0F);
+				com.flintclient.client.compat.McCompat.rotate(pose, camera.orientation);
+				pose.scale(0.025F, -0.025F, 0.025F);
+				collector.submitText(pose, x, -4, Component.literal(text).getVisualOrderText(), false, Font.DisplayMode.SEE_THROUGH, FULL_BRIGHT,
+					color & 0x00FFFFFF | 0x40000000, 0, 0);
+				collector.submitText(pose, x, -4, Component.literal(text).getVisualOrderText(), state.bool(HudMods.TntCountdown.SHADOW),
+					Font.DisplayMode.NORMAL, FULL_BRIGHT, color, 0, 0);
+			} finally {
+				pose.popPose();
 			}
-			for (; d > 0; d /= 10) {
-				out[n++] = (char) ('0' + v / d % 10);
-			}
-			return n;
+		} catch (RuntimeException | LinkageError e) {
+			DRAW.fail(e);
 		}
 	}
 
@@ -720,24 +636,71 @@ public final class Mc263Overlay {
 		return Mods.on(TAB) && Mods.state(TAB).bool(UtilityMods.TabEditor.HIDE_HEADS);
 	}
 
-	/** Ping as a number where vanilla draws its bars; true when it drew (vanilla's bars are then skipped). */
+	// Ping View's ping numbers (MIT, karlsson1000): see META-INF/licenses/MIT-PingView.txt.
+
+	/** Whether the player list shows Ping View's numbers in place of the signal bars. */
+	private static boolean pingNumbers() {
+		return HUD_PARTS.on() && Mods.on(TAB) && Mods.state(TAB).bool(UtilityMods.TabEditor.PING_NUMBER);
+	}
+
+	/** The ping column's width: Minecraft's 13 for the bars, 23 more for Ping View's numbers. */
+	public static int tabPingWidth(int vanilla) {
+		return pingNumbers() ? vanilla + 23 : vanilla;
+	}
+
+	/** Ping as Ping View draws it where vanilla draws its bars; true when it drew (vanilla's bars are then skipped). */
 	public static boolean tabPing(GuiGraphicsExtractor g, int slotWidth, int xo, int yo, PlayerInfo info) {
-		if (!HUD_PARTS.on() || !Mods.on(TAB) || !Mods.state(TAB).bool(UtilityMods.TabEditor.PING_NUMBER)) {
+		if (!pingNumbers()) {
 			return false;
 		}
 		try {
+			ModuleState state = Mods.state(TAB);
 			int latency = info.getLatency();
-			String text = latency < 0 ? "?" : Integer.toString(latency);
-			int color = 0xFFAAAAAA;
-			if (Mods.state(TAB).bool(UtilityMods.TabEditor.PING_COLOR) && latency >= 0) {
-				color = latency < 150 ? 0xFF55FF55 : latency < 300 ? 0xFFFFFF55 : latency < 600 ? 0xFFFFAA00 : 0xFFFF5555;
-			}
+			String text = pingText(state, latency);
 			Font font = mc().font;
-			g.text(font, text, xo + slotWidth - 1 - font.width(text), yo, color, true);
+			g.text(font, text, xo + slotWidth - font.width(text), yo, pingColor(state, latency), state.bool(UtilityMods.TabEditor.PING_SHADOW));
 			return true;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			HUD_PARTS.fail(e);
 			return false;
+		}
+	}
+
+	/** "N/A" for an unknown latency, else the milliseconds, with "ms" after when asked. */
+	static String pingText(ModuleState state, int latency) {
+		return latency < 0 ? "N/A" : state.bool(UtilityMods.TabEditor.PING_MS) ? latency + "ms" : Integer.toString(latency);
+	}
+
+	/** Ping View's colours: good under 50 ms, ok under 100, bad under 200, terrible from there, unknown when not known. */
+	static int pingColor(ModuleState state, int latency) {
+		RgbSetting color = latency < 0 ? UtilityMods.TabEditor.PING_UNKNOWN : latency < 50 ? UtilityMods.TabEditor.PING_GOOD
+			: latency < 100 ? UtilityMods.TabEditor.PING_OK : latency < 200 ? UtilityMods.TabEditor.PING_BAD : UtilityMods.TabEditor.PING_TERRIBLE;
+		return 0xFF000000 | state.rgb(color);
+	}
+
+	/** A player's nametag with Ping View's " (45ms)" after it, when Show ping on nametags is on. */
+	public static Component pingTag(Entity entity, Component name) {
+		if (!HUD_PARTS.on() || !Mods.on(TAB) || !(entity instanceof net.minecraft.client.player.AbstractClientPlayer player)) {
+			return name;
+		}
+		ModuleState state = Mods.state(TAB);
+		if (!state.bool(UtilityMods.TabEditor.PING_NAMETAGS)) {
+			return name;
+		}
+		try {
+			net.minecraft.client.multiplayer.ClientPacketListener connection = mc().getConnection();
+			PlayerInfo info = connection == null ? null : connection.getPlayerInfo(player.getUUID());
+			if (info == null) {
+				return name;
+			}
+			int latency = info.getLatency();
+			int color = pingColor(state, latency) & 0xFFFFFF;
+			return Component.empty().append(name).append(Component.literal(" (").withStyle(style -> style.withColor(0xAAAAAA)))
+				.append(Component.literal(pingText(state, latency)).withStyle(style -> style.withColor(color)))
+				.append(Component.literal(")").withStyle(style -> style.withColor(0xAAAAAA)));
+		} catch (RuntimeException | LinkageError e) {
+			HUD_PARTS.fail(e);
+			return name;
 		}
 	}
 
@@ -764,20 +727,30 @@ public final class Mc263Overlay {
 		return Mods.on(SCORE) ? Mods.state(SCORE).bool(UtilityMods.Scoreboard.SHADOW) : vanilla;
 	}
 
-	/** Before the sidebar is drawn: its scale (about its right edge, mid-height) and offset. */
+	private static final float[] PLACED = new float[4];
+
+	/**
+	 * Before the sidebar is drawn: Minecraft's own spot for it mapped onto where Flint's HUD placed the module (its
+	 * position and scale), from the last HUD frame; Minecraft's spot when the module isn't placed (off, the HUD hidden).
+	 */
 	public static void scoreboardBegin(GuiGraphicsExtractor g) {
 		g.pose().pushMatrix();
-		if (!Mods.on(SCORE)) {
+		int[] size = Mods.on(SCORE) ? Mc263HudData.sidebarCached() : null;
+		if (size == null || !com.flintclient.client.control.hud.render.HudRenderer.lastRect(UtilityMods.Scoreboard.ID, PLACED)) {
 			return;
 		}
-		ModuleState state = Mods.state(SCORE);
-		float k = state.integer(UtilityMods.Scoreboard.SCALE) / 100F;
-		float ax = g.guiWidth();
-		float ay = g.guiHeight() / 2F;
-		g.pose().translate(-state.integer(UtilityMods.Scoreboard.X_OFFSET), state.integer(UtilityMods.Scoreboard.Y_OFFSET));
-		g.pose().translate(ax, ay);
+		moveOnto(g, com.flintclient.client.control.hud.VanillaAreas.sidebar(g.guiWidth(), g.guiHeight(), size[0], size[1]));
+	}
+
+	/** Maps {@code vanilla} (Minecraft's own rectangle, GUI units) onto {@link #PLACED}, scaled to its width. */
+	private static void moveOnto(GuiGraphicsExtractor g, com.flintclient.client.control.hud.HudRect vanilla) {
+		if (vanilla.width() <= 0) {
+			return;
+		}
+		float k = PLACED[2] / vanilla.width();
+		g.pose().translate(PLACED[0], PLACED[1]);
 		g.pose().scale(k, k);
-		g.pose().translate(-ax, -ay);
+		g.pose().translate(-vanilla.x(), -vanilla.y());
 	}
 
 	public static void scoreboardEnd(GuiGraphicsExtractor g) {
@@ -792,7 +765,10 @@ public final class Mc263Overlay {
 		}
 		ModuleState state = Mods.state(SCORE);
 		int rgb = state.rgb(title ? UtilityMods.Scoreboard.TITLE_BACKGROUND : UtilityMods.Scoreboard.BACKGROUND_COLOR);
-		g.fill(x0, y0, x1, y1, (color & 0xFF000000) | rgb);
+		// A Transparent title background draws nothing.
+		if (!com.flintclient.client.control.model.RgbSetting.isClear(rgb)) {
+			g.fill(x0, y0, x1, y1, (color & 0xFF000000) | rgb);
+		}
 		if (title) {
 			scoreboardTop = y0;
 		} else if (state.bool(UtilityMods.Scoreboard.BORDER)) {
@@ -807,19 +783,15 @@ public final class Mc263Overlay {
 		return Mods.on(SCORE) ? 0xFF000000 | Mods.state(SCORE).rgb(UtilityMods.Scoreboard.TEXT_COLOR) : vanilla;
 	}
 
-	/** Before the boss bars are drawn: their scale (about the top centre) and offset. */
+	/** Before the boss bars are drawn: Minecraft's spot for them mapped onto where Flint's HUD placed the module. */
 	public static void bossBegin(GuiGraphicsExtractor g) {
 		g.pose().pushMatrix();
-		if (!Mods.on(BOSS)) {
+		if (!Mods.on(BOSS) || !com.flintclient.client.control.hud.render.HudRenderer.lastRect(UtilityMods.BossBar.ID, PLACED)) {
+			// Minecraft's own spot: Armor's Push bossbars moves them below its strip.
+			g.pose().translate(0.0F, Mc263ArmorHud.bossBarPush(g));
 			return;
 		}
-		ModuleState state = Mods.state(BOSS);
-		float k = state.integer(UtilityMods.BossBar.SCALE) / 100F;
-		float ax = g.guiWidth() / 2F;
-		g.pose().translate(state.integer(UtilityMods.BossBar.X_OFFSET), state.integer(UtilityMods.BossBar.Y_OFFSET));
-		g.pose().translate(ax, 0);
-		g.pose().scale(k, k);
-		g.pose().translate(-ax, 0);
+		moveOnto(g, com.flintclient.client.control.hud.VanillaAreas.bossBars(g.guiWidth(), Math.max(1, Mc263HudData.bossBars())));
 	}
 
 	public static void bossEnd(GuiGraphicsExtractor g) {
@@ -850,18 +822,21 @@ public final class Mc263Overlay {
 		return player == null ? null : player.getUUID();
 	}
 
-	/** A nametag's text: your fake nick for you, "Player" for others when hidden; else unchanged. */
+	/**
+	 * A nametag's text: your fake nick for you, "Player" for others when hidden; else unchanged. Only the name changes: a
+	 * server's team prefix and suffix (a rank, a colour) stay ({@link #masked}).
+	 */
 	public static Component nameTag(Entity entity, Component name) {
-		if (!NAMES.on() || !Mods.on(NICK) || !(entity instanceof Player)) {
+		if (!NAMES.on() || !Mods.on(NICK) || !(entity instanceof Player player)) {
 			return name;
 		}
 		try {
 			ModuleState state = Mods.state(NICK);
 			if (entity == mc().player) {
-				return state.bool(UtilityMods.NickHider.HIDE_NICK) ? Component.literal(state.text(UtilityMods.NickHider.FAKE_NICK)) : name;
+				return state.bool(UtilityMods.NickHider.HIDE_NICK) ? masked(name, player.getGameProfile().name(), state.text(UtilityMods.NickHider.FAKE_NICK)) : name;
 			}
-			return state.bool(UtilityMods.NickHider.HIDE_OTHERS) ? Component.literal("Player") : name;
-		} catch (RuntimeException e) {
+			return state.bool(UtilityMods.NickHider.HIDE_OTHERS) ? masked(name, player.getGameProfile().name(), "Player") : name;
+		} catch (RuntimeException | LinkageError e) {
 			NAMES.fail(e);
 			return name;
 		}
@@ -875,13 +850,31 @@ public final class Mc263Overlay {
 		try {
 			ModuleState state = Mods.state(NICK);
 			if (info.getProfile().id().equals(me())) {
-				return state.bool(UtilityMods.NickHider.HIDE_NICK) ? Component.literal(state.text(UtilityMods.NickHider.FAKE_NICK)) : name;
+				return state.bool(UtilityMods.NickHider.HIDE_NICK) ? masked(name, info.getProfile().name(), state.text(UtilityMods.NickHider.FAKE_NICK)) : name;
 			}
-			return state.bool(UtilityMods.NickHider.HIDE_OTHERS) ? Component.literal("Player") : name;
-		} catch (RuntimeException e) {
+			return state.bool(UtilityMods.NickHider.HIDE_OTHERS) ? masked(name, info.getProfile().name(), "Player") : name;
+		} catch (RuntimeException | LinkageError e) {
 			NAMES.fail(e);
 			return name;
 		}
+	}
+
+	/**
+	 * {@code name} with the player's real name ({@code real}, a whole word in any case) shown as {@code shown}, piece by piece,
+	 * so a server's team prefix and suffix and their colours stay. When the real name would still show (split across colours,
+	 * or inside another word) the whole text is {@code shown}, as before: a hidden name never shows.
+	 */
+	private static Component masked(Component name, String real, String shown) {
+		java.util.Map<String, String> names = java.util.Map.of(real, shown);
+		net.minecraft.network.chat.MutableComponent out = Component.empty();
+		name.visit((style, text) -> {
+			out.append(Component.literal(com.flintclient.client.control.feature.NameMask.apply(text, names)).withStyle(style));
+			return java.util.Optional.empty();
+		}, net.minecraft.network.chat.Style.EMPTY);
+		String lower = real.toLowerCase(java.util.Locale.ROOT);
+		boolean stillShown = !real.isEmpty() && out.getString().toLowerCase(java.util.Locale.ROOT).contains(lower)
+			&& !shown.toLowerCase(java.util.Locale.ROOT).contains(lower);
+		return stillShown ? Component.literal(shown) : out;
 	}
 
 	/**
@@ -919,7 +912,7 @@ public final class Mc263Overlay {
 				return java.util.Optional.empty();
 			}, net.minecraft.network.chat.Style.EMPTY);
 			return changed[0] ? out : line;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NAMES.fail(e);
 			return line;
 		}
@@ -938,9 +931,17 @@ public final class Mc263Overlay {
 				return DefaultPlayerSkin.get(id);
 			}
 			return skin;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NAMES.fail(e);
 			return skin;
+		}
+	}
+
+	/** A texture sampled with linear filtering and clamped at its edges (the vignette is stretched over the screen). */
+	private static final class Smooth extends net.minecraft.client.renderer.texture.DynamicTexture {
+		Smooth(String label, com.mojang.blaze3d.platform.NativeImage image) {
+			super(() -> label, image);
+			this.sampler = com.flintclient.client.compat.McCompat.linearClampSampler();
 		}
 	}
 }

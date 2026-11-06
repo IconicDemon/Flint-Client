@@ -1,0 +1,57 @@
+{
+	"name": "taiga",
+	"features": [
+		"tree"
+	],
+	"temperature": {
+		"min": 0.2
+	},
+	"bad-regions": [
+		"rain",
+		"pale-garden"
+	],
+	"biomes": [
+		"#is_taiga",
+		"taiga",
+		"grove",
+		"jade cliffs",
+		"shield",
+		"coniferous forest",
+		"land of lakes",
+		"snowy*forest",
+		"temperate rainforest",
+		"seasonal forest",
+		"spruce",
+		"meneglin",
+		"redwood",
+		"dead forest",
+		"ominous woods",
+		"autumnal forest",
+		"boreal forest",
+		"maple wood",
+		"meadow",
+		"thornlands",
+		"twilight highlands",
+		"mirage_isles",
+		"yosemite_lowlands",
+		"yosemite_cliffs",
+		"yellowstone",
+		"crimson_tundra",
+		"shield"
+	],
+	"sounds": [
+		{
+			"name": "bird-ambience-huge",
+			"files": [
+				"minecraft:entity.parrot.ambient"
+			],
+			"category": "bird_day",
+			"pause": {
+				"min": 40,
+				"max": 200
+			},
+			"pitch": 0.9,
+			"volume": 0.3
+		}
+	]
+}

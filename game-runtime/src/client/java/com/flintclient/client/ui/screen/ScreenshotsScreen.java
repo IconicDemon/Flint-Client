@@ -12,7 +12,6 @@ import com.flintclient.client.render.Paragraph;
 import com.flintclient.client.render.TextLine;
 import com.flintclient.client.ui.widget.FlintButton;
 import com.flintclient.client.ui.widget.MenuButton;
-import com.mojang.blaze3d.Blaze3D;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -109,10 +108,10 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 			next.active = page < pages - 1;
 			next.setRectangle(56, BAR_H, width - MARGIN - 56, height - 14 - BAR_H);
 		}
-		int scale = Canvas.measuring().scale();
-		int border = tileBorder(scale);
+		float scale = com.flintclient.client.ui.MenuScale.pixels();
+		int border = tileBorder(Math.max(1, Math.round(scale)));
 		// Thumbnails are cut to the tile's inner size with its rounded corners, drawn 1:1.
-		keepOnly(first, Math.min(shots.size(), first + perPage), TILE_W * scale - 2 * border, TILE_H * scale - 2 * border, true,
+		keepOnly(first, Math.min(shots.size(), first + perPage), Math.round(TILE_W * scale) - 2 * border, Math.round(TILE_H * scale) - 2 * border, true,
 			Math.round(TILE_RADIUS * scale) - border);
 	}
 
@@ -127,11 +126,11 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 		next.setRectangle(56, BAR_H, MARGIN + 60, bar);
 		MenuButton folder = addRenderableWidget(new MenuButton(Component.translatable("flintclient.screenshots.reveal"), Icon.FOLDER, MenuButton.Style.NEUTRAL, this::openFolder));
 		folder.setRectangle(84, BAR_H, width - MARGIN - 84, bar);
-		MenuButton open = addRenderableWidget(new MenuButton(Component.translatable("flintclient.screenshots.open"), null, MenuButton.Style.NEUTRAL, () -> Blaze3D.openPath(shot.path())));
+		MenuButton open = addRenderableWidget(new MenuButton(Component.translatable("flintclient.screenshots.open"), null, MenuButton.Style.NEUTRAL, () -> com.flintclient.client.compat.McCompat.openPath(shot.path())));
 		open.setRectangle(56, BAR_H, width - MARGIN - 84 - 60, bar);
 		setInitialFocus(next.active ? next : previous);
-		int scale = Canvas.measuring().scale();
-		keepOnly(viewing, viewing + 1, (width - 2 * MARGIN) * scale, (areaBottom - contentTop) * scale, false, Math.round(TILE_RADIUS * scale));
+		float scale = com.flintclient.client.ui.MenuScale.pixels();
+		keepOnly(viewing, viewing + 1, Math.round((width - 2 * MARGIN) * scale), Math.round((areaBottom - contentTop) * scale), false, Math.round(TILE_RADIUS * scale));
 		info.set(shot.name() + "  ·  " + DATE.format(Instant.ofEpochMilli(shot.modified()).atZone(ZoneId.systemDefault())));
 	}
 
@@ -161,7 +160,7 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 		} catch (Exception ignored) {
 			// The system reports it if the folder can't be opened.
 		}
-		Blaze3D.openPath(ScreenshotLibrary.folder());
+		com.flintclient.client.compat.McCompat.openPath(ScreenshotLibrary.folder());
 	}
 
 	/** Frees pictures outside {@code [from, to)} or at a different display size, and loads missing ones. */
@@ -219,7 +218,7 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 			if (picture != null) {
 				int x = boxX + (boxW - picture.width()) / 2;
 				int y = boxY + (boxH - picture.height()) / 2;
-				c.graphics().blit(RenderPipelines.GUI_TEXTURED, picture.id(), x, y, 0, 0, picture.width(), picture.height(), picture.width(), picture.height());
+				c.frame().graphics().blit(RenderPipelines.GUI_TEXTURED, picture.id(), x, y, 0, 0, picture.width(), picture.height(), picture.width(), picture.height());
 				TextLine dims = info;
 				c.text(dims, (c.px(width) - c.width(dims)) / 2, c.baselineFor(dims, barCenter), Palette.MUTED);
 			}
@@ -255,7 +254,7 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 			int w = c.px(getWidth());
 			int h = c.px(getHeight());
 			int border = tileBorder(c.scale());
-			int radius = Math.round(TILE_RADIUS * c.scale());
+			int radius = Math.round(TILE_RADIUS * c.unitScale());
 			int ring = Palette.lerp(Palette.lerp(Palette.BORDER, Palette.BORDER_HOVER, hover), Palette.ACCENT, Math.max(focus, hover * 0.35F));
 			Picture picture = thumbnails.picture(index);
 			if (picture == null) {
@@ -264,7 +263,7 @@ public final class ScreenshotsScreen extends FlintPageScreen {
 				// Cut to the tile's inner size with rounded corners when loaded, so it's drawn 1:1.
 				int cw = Math.min(w - 2 * border, picture.width());
 				int ch = Math.min(h - 2 * border, picture.height());
-				c.graphics().blit(RenderPipelines.GUI_TEXTURED, picture.id(), x + (w - cw) / 2, y + (h - ch) / 2, 0, 0, cw, ch, picture.width(), picture.height());
+				c.frame().graphics().blit(RenderPipelines.GUI_TEXTURED, picture.id(), x + (w - cw) / 2, y + (h - ch) / 2, 0, 0, cw, ch, picture.width(), picture.height());
 			}
 			c.ring(x, y, w, h, radius, border + (focus > 0.5F ? border : 0), ring);
 		}

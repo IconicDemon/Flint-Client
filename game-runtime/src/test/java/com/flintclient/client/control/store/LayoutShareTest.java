@@ -26,7 +26,7 @@ class LayoutShareTest {
 		LayoutStore store = store();
 		Layout active = store.active();
 		active.module(ModuleId.FPS).setEnabled(true);
-		active.module(PlayerMods.Zoom.ID).set(PlayerMods.Zoom.LEVEL, 11);
+		active.module(PlayerMods.Zoom.ID).set(PlayerMods.Zoom.LEVEL, 9);
 		String text = store.exportText(store.activeId());
 		assertNotNull(text);
 		assertFalse(text.contains("\"id\""), "the file id isn't part of what is shared");
@@ -36,7 +36,7 @@ class LayoutShareTest {
 		assertNotNull(copy);
 		assertEquals("Default 2", copy.name(), "a taken name is numbered");
 		assertTrue(copy.module(ModuleId.FPS).enabled());
-		assertEquals(11, copy.module(PlayerMods.Zoom.ID).integer(PlayerMods.Zoom.LEVEL));
+		assertEquals(9, copy.module(PlayerMods.Zoom.ID).integer(PlayerMods.Zoom.LEVEL));
 		assertEquals(store.activeId(), "default", "importing doesn't switch");
 		assertEquals(2, store.list().size());
 	}

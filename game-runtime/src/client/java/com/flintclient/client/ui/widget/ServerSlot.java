@@ -78,7 +78,7 @@ public final class ServerSlot extends FlintButton {
 			int inset = c.px(1.6F);
 			int size = Math.min(w, h) - 2 * inset;
 			int color = Palette.lerp(0xFFD8D8D8, 0xFFFFFFFF, Math.max(hover, focus));
-			c.graphics().blit(RenderPipelines.GUI_TEXTURED, icon, x + (w - size) / 2, y + (h - size) / 2, 0, 0, size, size, 64, 64, 64, 64, c.tint(color));
+			c.frame().graphics().blit(RenderPipelines.GUI_TEXTURED, icon, x + (w - size) / 2, y + (h - size) / 2, 0, 0, size, size, 64, 64, 64, 64, c.tint(color));
 		} else {
 			int ink = Palette.lerp(Palette.TEXT_DIM, Palette.TEXT, Math.max(hover, focus));
 			c.text(monogram, x + (w - c.width(monogram)) / 2, c.baselineFor(monogram, y + h / 2), ink);

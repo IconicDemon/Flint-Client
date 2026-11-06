@@ -4,8 +4,9 @@ import com.flintclient.client.control.hud.HudRect;
 import com.flintclient.client.control.hud.Snapper;
 import com.flintclient.client.control.hud.VanillaAreas;
 import com.flintclient.client.control.hud.render.HudRenderer;
-import com.flintclient.client.control.platform.Mc263HudData;
+import com.flintclient.client.platform.HudData;
 import com.flintclient.client.render.Canvas;
+import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
 import com.flintclient.client.ui.kit.Type;
 
@@ -55,17 +56,17 @@ final class VanillaGuides {
 		refreshed = nowNanos;
 		set(HOTBAR, VanillaAreas.hotbar(width, height));
 		set(STATUS, VanillaAreas.statusBars(width, height));
-		set(CHAT, VanillaAreas.chat(height, Mc263HudData.chatWidth(), Mc263HudData.chatHeight(), Mc263HudData.chatScale()));
+		set(CHAT, VanillaAreas.chat(height, HudData.chatWidth(), HudData.chatHeight(), HudData.chatScale()));
 		set(BOSS, VanillaAreas.bossBars(width, 1));
 		// Minecraft's icons only take room while there are some and Flint's Effects module isn't hiding them.
 		present[EFFECTS] = false;
 		if (!HudRenderer.hideVanillaEffects()) {
-			int[] rows = Mc263HudData.effectIconRows();
+			int[] rows = HudData.effectIconRows();
 			if (rows[0] + rows[1] > 0) {
 				set(EFFECTS, VanillaAreas.effects(width, rows[0], rows[1]));
 			}
 		}
-		int[] sidebar = Mc263HudData.sidebar();
+		int[] sidebar = HudData.sidebar();
 		if (sidebar == null) {
 			present[SCOREBOARD] = false;
 		} else {
@@ -109,7 +110,8 @@ final class VanillaGuides {
 	}
 
 	/** Draws the outlines and names on a canvas begun in GUI units. */
-	void paint(Canvas c, EditorPatterns patterns) {
+	/** The areas' outlines and names, at {@code alpha} (they fade in while something is dragged). */
+	void paint(Canvas c, EditorPatterns patterns, float alpha) {
 		int g = c.guiScale();
 		int line = lineFor(g);
 		int dash = dashFor(g);
@@ -122,11 +124,11 @@ final class VanillaGuides {
 			int y0 = Math.round(rects[4 * i + 1] * g);
 			int x1 = Math.round((rects[4 * i] + rects[4 * i + 2]) * g);
 			int y1 = Math.round((rects[4 * i + 1] + rects[4 * i + 3]) * g);
-			patterns.dashed(c, x0, y0, x1, y1, line, dash, gap, OUTLINE);
+			patterns.dashed(c, x0, y0, x1, y1, line, dash, gap, Palette.withAlpha(OUTLINE, (OUTLINE >>> 24) / 255F * alpha));
 			TextLine label = labels[i];
 			int pad = Math.round(2.0F * g);
 			int baseline = c.baselineFor(label, y0 + pad + Math.round(label.capHeightPx(g) / 2.0F) + 1);
-			c.text(label, x0 + pad, baseline, LABEL, Math.max(1, x1 - x0 - 2 * pad));
+			c.text(label, x0 + pad, baseline, Palette.withAlpha(LABEL, (LABEL >>> 24) / 255F * alpha), Math.max(1, x1 - x0 - 2 * pad));
 		}
 	}
 

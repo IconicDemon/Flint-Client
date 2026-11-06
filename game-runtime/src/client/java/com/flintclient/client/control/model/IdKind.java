@@ -5,5 +5,7 @@ public enum IdKind {
 	SOUND,
 	ITEM,
 	/** A slot of your own inventory, as {@code slot:<index>} (0-8 hotbar, 9-35 main, 36-39 armor, 40 offhand). */
-	SLOT
+	SLOT,
+	/** An inventory slot bound to a hotbar slot, as {@code bind:<inventory index>-<hotbar index>}. */
+	SLOT_BINDING
 }

@@ -36,7 +36,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().attemptStarted(connector.threadId());
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -48,7 +48,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().resolving(Thread.currentThread().threadId());
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -60,7 +60,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().resolved(Thread.currentThread().threadId(), found);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -79,7 +79,7 @@ public final class NetworkHooks {
 				OPENING.set(opening);
 				future.addListener((ChannelFutureListener) done -> socketDone(opening));
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -95,7 +95,7 @@ public final class NetworkHooks {
 			} else {
 				NetworkCore.tracker().socketFailed(opening.connection(), failure(opening.future()));
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -107,7 +107,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().authenticating(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -119,7 +119,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().authenticated(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -131,7 +131,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().loginFinished(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -143,7 +143,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().reconfiguring(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -155,7 +155,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().connected(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -167,7 +167,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().kicked(connection, reasonKey(reason));
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -184,7 +184,7 @@ public final class NetworkHooks {
 			if (connection.isConnected()) {
 				NetworkCore.tracker().disconnecting(connection, reasonKey(details.reason()));
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -196,7 +196,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().disconnected(connection, reasonKey(details.reason()));
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -208,7 +208,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().closed(connection);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -223,7 +223,7 @@ public final class NetworkHooks {
 			ChannelFuture future = opening == null || !NetworkCore.tracker().tracks(opening.connection()) ? null : opening.future();
 			ConnectionOutcome cause = future != null && future.isDone() && !future.isSuccess() ? failure(future) : null;
 			NetworkCore.tracker().failedWithoutConnection(cause, reasonKey(details.reason()));
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}
@@ -235,7 +235,7 @@ public final class NetworkHooks {
 		}
 		try {
 			NetworkCore.tracker().connectScreenClosed();
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			NetworkCore.fail(e);
 		}
 	}

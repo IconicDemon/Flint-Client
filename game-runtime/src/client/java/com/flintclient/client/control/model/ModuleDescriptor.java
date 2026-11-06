@@ -55,6 +55,8 @@ public final class ModuleDescriptor {
 	private final Category category;
 	private final List<SettingSection> sections;
 	private final List<SettingDescriptor<?>> settings;
+	/** Each setting's position in {@link #settings}, by identity: settings are read every frame. */
+	private final java.util.IdentityHashMap<SettingDescriptor<?>, Integer> positions = new java.util.IdentityHashMap<>();
 	private final HudPlacement defaultPlacement;
 	private final Requirement requirement;
 	private final @Nullable String note;
@@ -62,6 +64,14 @@ public final class ModuleDescriptor {
 	private final Status status;
 	private final @Nullable String statusNote;
 	private @Nullable BoxStyle boxStyle;
+	/**
+	 * Drawn by Minecraft itself (the scoreboard, boss bars) or by its own hook in Minecraft's look (Armor's hotbar slots): placed
+	 * by Flint, but no panel or HUD look of Flint's.
+	 */
+	private boolean drawnByMinecraft;
+	/** A key that turns the module on or off in a world, and whether that says so on screen (usable modules only). */
+	private final @Nullable KeySetting modKey;
+	private final @Nullable BoolSetting modKeyNotify;
 
 	public ModuleDescriptor(String id, String name, String description, List<String> keywords, IconId icon, Category category,
 		List<SettingSection> sections, HudPlacement defaultPlacement, Requirement requirement, @Nullable String note) {
@@ -77,7 +87,17 @@ public final class ModuleDescriptor {
 		this.keywords = List.copyOf(keywords);
 		this.icon = Objects.requireNonNull(icon);
 		this.category = Objects.requireNonNull(category);
-		this.sections = List.copyOf(sections);
+		if (status.usable()) {
+			modKey = new KeySetting("modKey", "Toggle mod key", "Turns this mod on or off from anywhere in a world", KeySetting.NONE);
+			modKeyNotify = new BoolSetting("modKeyNotify", "Toggle mod notification", "Says on screen when the key turns it on or off", true);
+			List<SettingSection> withKey = new ArrayList<>(sections);
+			withKey.add(SettingSection.of("Mod", modKey, modKeyNotify));
+			this.sections = List.copyOf(withKey);
+		} else {
+			modKey = null;
+			modKeyNotify = null;
+			this.sections = List.copyOf(sections);
+		}
 		List<SettingDescriptor<?>> all = new ArrayList<>();
 		for (SettingSection section : this.sections) {
 			for (SettingDescriptor<?> setting : section.settings()) {
@@ -90,6 +110,14 @@ public final class ModuleDescriptor {
 			}
 		}
 		this.settings = List.copyOf(all);
+		for (int i = 0; i < settings.size(); i++) {
+			SettingDescriptor<?> s = settings.get(i);
+			positions.putIfAbsent(s, i);
+			if (s.owner == null) {
+				s.owner = this;
+				s.position = i;
+			}
+		}
 		this.defaultPlacement = Objects.requireNonNull(defaultPlacement);
 		this.requirement = Objects.requireNonNull(requirement);
 		this.note = note;
@@ -107,8 +135,35 @@ public final class ModuleDescriptor {
 	}
 
 	/** The boxed-counter look this module uses (its settings are among the module's), or null. */
+	/** Whether Minecraft draws it and Flint only places it (no HUD look of its own). */
+	public boolean drawnByMinecraft() {
+		return drawnByMinecraft;
+	}
+
 	public @Nullable BoxStyle boxStyle() {
 		return boxStyle;
+	}
+
+	/** Declares the box style a hand-built descriptor already uses (FPS), so its look is known to be its own. */
+	ModuleDescriptor withBoxStyle(BoxStyle style) {
+		this.boxStyle = style;
+		return this;
+	}
+
+	/** Drawn in Minecraft's look by its own hook, as Minecraft draws its HUD (see {@link #drawnByMinecraft()}); while it is made. */
+	ModuleDescriptor withMinecraftLook() {
+		this.drawnByMinecraft = true;
+		return this;
+	}
+
+	/** This module's toggle key (null for a module that can't be turned on). */
+	public @Nullable KeySetting modKey() {
+		return modKey;
+	}
+
+	/** Whether the toggle key says on screen what it did (null with {@link #modKey()}). */
+	public @Nullable BoolSetting modKeyNotify() {
+		return modKeyNotify;
 	}
 
 	public Kind kind() {
@@ -193,12 +248,11 @@ public final class ModuleDescriptor {
 	 * module's setting with the same id (Coordinates' and Armor's {@code "layout"}) is a mistake, not a match.
 	 */
 	public int indexOf(SettingDescriptor<?> setting) {
-		for (int i = 0; i < settings.size(); i++) {
-			if (settings.get(i) == setting) {
-				return i;
-			}
+		if (setting.owner == this) {
+			return setting.position;
 		}
-		return -1;
+		Integer at = positions.get(setting);
+		return at == null ? -1 : at;
 	}
 
 	public Availability availability(ControlContext context) {
@@ -244,6 +298,7 @@ public final class ModuleDescriptor {
 		private Status status = Status.WORKING;
 		private @Nullable String statusNote;
 		private @Nullable BoxStyle style;
+		private boolean drawnByMinecraft;
 
 		private Builder(String id, String name, String description) {
 			this.id = id;
@@ -321,10 +376,17 @@ public final class ModuleDescriptor {
 			return this;
 		}
 
+		/** Minecraft draws it; Flint only places and scales it (see {@link ModuleDescriptor#drawnByMinecraft()}). */
+		public Builder drawnByMinecraft() {
+			drawnByMinecraft = true;
+			return this;
+		}
+
 		public ModuleDescriptor build() {
 			ModuleDescriptor made = new ModuleDescriptor(id, name, description, keywords, icon, category, sections, placement, requirement, note, kind,
 				status, statusNote);
 			made.boxStyle = style;
+			made.drawnByMinecraft = drawnByMinecraft;
 			return made;
 		}
 	}

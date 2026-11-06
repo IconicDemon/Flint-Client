@@ -10,7 +10,8 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { sound } from "../lib/sound";
+import { useT } from "../lib/i18n";
+import { sound, type Cue } from "../lib/sound";
 import { Icon } from "./Icon";
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -233,6 +234,7 @@ export function Dropdown<T extends string>({
   label: string;
   className?: string;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value);
@@ -247,7 +249,7 @@ export function Dropdown<T extends string>({
         aria-label={label}
         onClick={() => setOpen((o) => !o)}
       >
-        <span>{current?.label ?? "Select"}</span>
+        <span>{current?.label ?? t("ui.dropdown.placeholder")}</span>
         <Icon name="chevronDown" size={15} />
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label={label} placement="bottom-start">
@@ -275,6 +277,7 @@ export function Modal({
   footer?: ReactNode;
   width?: number;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const presence = usePresence(open);
   const held = useHeld({ title, children, footer }, open);
@@ -285,7 +288,8 @@ export function Modal({
     const node = ref.current;
     (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Escape in a menu opened from the dialog (a version picker, say) closes only the menu.
+      if (e.key === "Escape" && !document.querySelector(".modal-backdrop ~ .popover:not(.is-closing)")) {
         e.stopPropagation();
         onClose();
       }
@@ -320,7 +324,7 @@ export function Modal({
       <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-label={held.title} style={{ width }}>
         <header className="modal-head">
           <h2>{held.title}</h2>
-          <button type="button" className="icon-btn icon-btn-sm icon-btn-ghost" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn icon-btn-sm icon-btn-ghost" aria-label={t("common.close")} onClick={onClose}>
             <Icon name="x" size={15} />
           </button>
         </header>
@@ -332,7 +336,7 @@ export function Modal({
   );
 }
 
-export function Tooltip({ label, children, side = "top" }: { label: string; children: ReactNode; side?: "top" | "right" | "bottom" }) {
+export function Tooltip({ label, children, side = "top" }: { label: string; children: ReactNode; side?: "top" | "right" | "bottom" | "left" }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -349,7 +353,9 @@ export function Tooltip({ label, children, side = "top" }: { label: string; chil
     rect &&
     (side === "right"
       ? { top: rect.top + rect.height / 2, left: rect.right + 12 }
-      : side === "bottom"
+      : side === "left"
+        ? { top: rect.top + rect.height / 2, left: rect.left - 8 }
+        : side === "bottom"
         ? { top: rect.bottom + 8, left: rect.left + rect.width / 2 }
         : { top: rect.top - 8, left: rect.left + rect.width / 2 });
   return (
@@ -366,33 +372,82 @@ export function Tooltip({ label, children, side = "top" }: { label: string; chil
   );
 }
 
-type Toast = { id: number; tone: "neutral" | "success" | "danger"; title: string; body?: string };
-const ToastContext = createContext<(t: Omit<Toast, "id">) => void>(() => {});
+type ToastAction = { label: string; onClick: () => void; primary?: boolean };
+
+/**
+ * `action`: one follow-up the toast offers (e.g. "Show in folder"); `actions`: two side by side (Accept and Decline). A
+ * toast with either stays up a little longer. `icon` stands in for the tone's icon (a friend's head); `sound` for its
+ * cue (null: none).
+ */
+type Toast = {
+  id: number;
+  tone: "neutral" | "success" | "danger";
+  title: string;
+  body?: string;
+  action?: ToastAction;
+  actions?: ToastAction[];
+  icon?: ReactNode;
+  sound?: Cue | null;
+};
+const ToastContext = createContext<(toast: Omit<Toast, "id">) => void>(() => {});
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((t: Omit<Toast, "id">) => {
+  const push = useCallback((toast: Omit<Toast, "id">) => {
     const id = Date.now() + Math.random();
-    sound.play(t.tone === "danger" ? "error" : t.tone === "success" ? "success" : "tap");
-    setToasts((prev) => [...prev.slice(-3), { ...t, id }]);
-    window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), t.tone === "danger" ? 7000 : 4200);
+    const cue = toast.sound === undefined ? (toast.tone === "danger" ? "error" : toast.tone === "success" ? "success" : "tap") : toast.sound;
+    if (cue) sound.play(cue);
+    setToasts((prev) => [...prev.slice(-3), { ...toast, id }]);
+    window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), toast.tone === "danger" || toast.action || toast.actions?.length ? 7000 : 4200);
   }, []);
   return (
     <ToastContext.Provider value={push}>
       {children}
       <div className="toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.tone}`} role={t.tone === "danger" ? "alert" : "status"}>
-            <Icon name={t.tone === "danger" ? "alert" : t.tone === "success" ? "check" : "info"} size={16} />
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast toast-${toast.tone} ${toast.icon ? "has-media" : ""}`} role={toast.tone === "danger" ? "alert" : "status"}>
+            {toast.icon ? <span className="toast-media">{toast.icon}</span> : <Icon name={toast.tone === "danger" ? "alert" : toast.tone === "success" ? "check" : "info"} size={16} />}
             <div>
-              <strong>{t.title}</strong>
-              {t.body && <p>{t.body}</p>}
+              <strong>{toast.title}</strong>
+              {toast.body && <p>{toast.body}</p>}
+              {toast.action && (
+                <button
+                  type="button"
+                  className="toast-action"
+                  onClick={() => {
+                    sound.play("tap");
+                    toast.action?.onClick();
+                    setToasts((prev) => prev.filter((x) => x.id !== toast.id));
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+              {!!toast.actions?.length && (
+                <div className="toast-actions">
+                  {toast.actions.map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      className={`toast-action ${action.primary ? "is-primary" : ""}`}
+                      onClick={() => {
+                        sound.play("tap");
+                        action.onClick();
+                        setToasts((prev) => prev.filter((x) => x.id !== toast.id));
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               type="button"
               className="icon-btn icon-btn-sm icon-btn-ghost"
-              aria-label="Dismiss"
-              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              aria-label={t("common.dismiss")}
+              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== toast.id))}
             >
               <Icon name="x" size={14} />
             </button>

@@ -4,6 +4,7 @@
  * requests is local and normally answers in milliseconds, so a generous per-request limit turns a
  * stalled backend into a visible, recoverable error instead of an endless start-up screen.
  */
+import { t } from "./i18n.ts";
 
 export const BOOT_TIMEOUT_MS = 15_000;
 
@@ -27,19 +28,14 @@ export function withTimeout<T>(work: Promise<T>, step: string, ms = BOOT_TIMEOUT
 
 export type BootFailure = { title: string; body: string; detail: string };
 
-/** A short explanation for players plus technical details, which are only shown on request. */
+/**
+ * A short explanation for players plus technical details, which are only shown on request. The details
+ * stay in English (they are for bug reports), like the backend's own errors.
+ */
 export function describeBootFailure(error: unknown): BootFailure {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   if (error instanceof BootTimeout) {
-    return {
-      title: "Flint is taking too long to start",
-      body: "Its background service didn't respond. Try again; if this keeps happening, quit and reopen Flint.",
-      detail,
-    };
+    return { title: t("boot.timeout.title"), body: t("boot.timeout.body"), detail };
   }
-  return {
-    title: "Flint couldn't start",
-    body: "Something went wrong while loading your settings. Try again; your profiles and worlds are not affected.",
-    detail,
-  };
+  return { title: t("boot.failed.title"), body: t("boot.failed.body"), detail };
 }

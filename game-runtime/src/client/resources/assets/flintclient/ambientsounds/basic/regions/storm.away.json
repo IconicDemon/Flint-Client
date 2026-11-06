@@ -1,0 +1,43 @@
+{
+	"name": "storm.away",
+	"storming": true,
+	"bad-regions": [
+		"cold"
+	],
+	"regions": [
+		"cave",
+		"sky"
+	],
+	"relative-height": {
+		"min": -30,
+		"fade": 20
+	},
+	"sounds": [
+		{
+			"name": "storm-away",
+			"files": [
+				"minecraft:entity.lightning_bolt.thunder"
+			],
+			"category": "weather",
+			"pause": {
+				"min": 200,
+				"max": 800
+			},
+			"pitch": 0.6,
+			"volume": 0.3
+		},
+		{
+			"name": "howling-wind",
+			"files": [
+				"minecraft:block.dry_grass.ambient"
+			],
+			"category": "weather",
+			"volume": 0.3,
+			"pause": {
+				"min": 0,
+				"max": 20
+			},
+			"pitch": 0.7
+		}
+	]
+}

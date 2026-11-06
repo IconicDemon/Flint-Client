@@ -19,6 +19,7 @@
         "minWidth": 1080,
         "minHeight": 660,
         "center": true,
+        "visible": false,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
@@ -27,8 +28,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
-      "devCsp": "default-src 'self'; img-src 'self' asset: data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1421"
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob: https: http://flint-modicon.localhost flint-modicon: http://flint-partner.localhost flint-partner:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; img-src 'self' asset: data: blob: https: http://flint-modicon.localhost flint-modicon: http://flint-partner.localhost flint-partner:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1421; object-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
   "bundle": {
@@ -63,9 +64,30 @@
       "icons/icon.ico"
     ],
     "copyright": "© 2026 Flint Client",
+    "fileAssociations": [
+      {
+        "ext": [
+          "flintpack"
+        ],
+        "name": "Flint Client profile",
+        "description": "Flint Client profile",
+        "role": "Editor",
+        "mimeType": "application/x-flintpack",
+        "exportedType": {
+          "identifier": "com.flintclient.flintpack",
+          "conformsTo": [
+            "public.zip-archive"
+          ]
+        }
+      }
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/nsis-header.bmp",
+        "sidebarImage": "installer/nsis-sidebar.bmp",
+        "installerHooks": "installer/hooks.nsh",
         "displayLanguageSelector": false
       },
       "webviewInstallMode": {

@@ -2,10 +2,8 @@ package com.flintclient.client.ui.screen;
 
 import com.flintclient.client.render.Icon;
 import com.flintclient.client.ui.widget.MenuButton;
-import com.mojang.blaze3d.Blaze3D;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.minecraft.client.gui.screens.CreditsAndAttributionScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.AccessibilityOptionsScreen;
 import net.minecraft.client.gui.screens.options.LanguageSelectScreen;
@@ -30,7 +28,7 @@ public final class UtilitiesScreen extends FlintPageScreen {
 			new Row("flintclient.utilities.gameFolder", Icon.FOLDER, () -> open(game)),
 			new Row("flintclient.utilities.modsFolder", Icon.FOLDER, () -> open(game.resolve("mods"))),
 			new Row("flintclient.utilities.packsFolder", Icon.LAYERS, () -> open(minecraft.getResourcePackDirectory())),
-			new Row("flintclient.utilities.credits", Icon.SPARK, () -> minecraft.gui.setScreen(new CreditsAndAttributionScreen(this))),
+			new Row("flintclient.utilities.credits", Icon.SPARK, () -> minecraft.gui.setScreen(new FlintCreditsScreen(this))),
 		};
 		int total = rows.length * ROW_H + (rows.length - 1) * GAP;
 		int y = Math.max(contentTop, (height - total) / 2);
@@ -52,7 +50,7 @@ public final class UtilitiesScreen extends FlintPageScreen {
 		} catch (Exception ignored) {
 			// Opening still works if it already exists; if not, the system reports it.
 		}
-		Blaze3D.openPath(folder);
+		com.flintclient.client.compat.McCompat.openPath(folder);
 	}
 
 	private record Row(String key, Icon icon, Runnable action) {

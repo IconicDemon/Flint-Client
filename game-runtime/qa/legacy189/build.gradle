@@ -1,0 +1,39 @@
+// Dev-only QA tour mod for Minecraft 1.8.9: runs a script of steps inside the game (screenshots, clicks on Flint's menu, FPS
+// samples). Never shipped. The jar lands at ../build/mc-1.8.9/libs/flint-qa-1.0.0+1.8.9.jar, beside the other lines' QA jars.
+plugins {
+	id "net.fabricmc.fabric-loom-remap" version "${loom_version}"
+	id "ploceus" version "${ploceus_version}"
+}
+
+base {
+	archivesName = "flint-qa"
+}
+
+version = "1.0.0+${project.minecraft_version}"
+group = "com.flintclient"
+layout.buildDirectory = file("../build/mc-${project.minecraft_version}")
+
+ploceus {
+	disableLibraryUpgrades()
+}
+
+loom {
+	customMinecraftMetadata = "https://piston-meta.mojang.com/v1/packages/d546f1707a3f2b7d034eece5ea2e311eda875787/1.8.9.json"
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings ploceus.featherMappings(project.feather_build)
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = "UTF-8"
+	it.options.release = 8
+	it.options.compilerArgs += ["-Xlint:-options"]
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_1_8
+	targetCompatibility = JavaVersion.VERSION_1_8
+}

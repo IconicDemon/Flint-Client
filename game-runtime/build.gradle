@@ -16,6 +16,18 @@ base {
 version = appPackage.version
 group = project.maven_group
 
+// The Minecraft version this build is for: 26.3 by default, another with -Pminecraft_version=26.2 (or 26.1.2, built once for
+// every 26.1 release). The shared sources are the same for all; each version adds its own overlay of the few files that
+// differ (src/mc263, src/mc262, src/mc261). Versions other than 26.3 build in their own folder (build/mc-<version>), so
+// switching between them never mixes classes, and name their jar after the version: flint-game-runtime-<app>+26.2.jar.
+def mcVersion = project.minecraft_version
+def mainLine = mcVersion == "26.3"
+def mcLine = mcVersion.startsWith("26.1") ? "26.1" : mcVersion
+def mcOverlay = "mc" + mcLine.replace(".", "")
+if (!mainLine) {
+	layout.buildDirectory = file("build/mc-${mcLine}")
+}
+
 loom {
 	splitEnvironmentSourceSets()
 
@@ -27,9 +39,28 @@ loom {
 	}
 }
 
+sourceSets.client.java.srcDir("src/${mcOverlay}/java")
+sourceSets.client.resources.srcDir("src/${mcOverlay}/resources")
+
+// An overlay may name interfaces for Loom to add to Minecraft's classes at compile time (26.1: Gui gets the screen methods
+// 26.2 moved onto it) in its own loom/fabric.mod.json; Loom reads that file instead of the shipped one, which stays as is.
+def overlayModJson = file("src/${mcOverlay}/loom/fabric.mod.json")
+if (overlayModJson.exists()) {
+	loom.fabricModJsonPath = overlayModJson
+}
+
+// Simple Voice Chat's API, compile only: stubs of the interfaces Sound Physics' voice chat plugin uses (never packaged;
+// Simple Voice Chat brings the real ones and loads the plugin only when it is installed).
+sourceSets {
+	voicechatApi {
+		java.srcDir("src/voicechat-api/java")
+	}
+}
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	clientCompileOnly sourceSets.voicechatApi.output
 
 	testImplementation platform("org.junit:junit-bom:5.14.0")
 	testImplementation "org.junit.jupiter:junit-jupiter"
@@ -64,12 +95,28 @@ def generateFlintResources = tasks.register("generateFlintResources") {
 
 sourceSets.client.resources.srcDir(generatedResources)
 
+// Flint's online services (short profile codes), from FLINT_SUPABASE_URL / FLINT_SUPABASE_ANON_KEY at build time.
+apply from: "flint-services.gradle"
+
 processResources {
 	def modVersion = project.version
+	// The newest line also takes later Minecraft releases (a 26.4 the launcher hands it before Flint has a 26.4 build): on a
+	// version it wasn't built for, FlintPreLaunch makes its mixins fail soft. Older lines stay on the release they target.
+	def minecraftRange = mainLine ? ">=" + mcLine : "~" + mcLine
 	inputs.property "version", modVersion
+	inputs.property "minecraftRange", minecraftRange
+	inputs.property "builtFor", mcLine
 
 	filesMatching("fabric.mod.json") {
-		expand "version": modVersion
+		expand "version": modVersion, "minecraftRange": minecraftRange, "builtFor": mcLine
+	}
+}
+
+if (!mainLine) {
+	tasks.withType(Jar).configureEach {
+		if (name == "jar" || name == "sourcesJar") {
+			archiveVersion = "${project.version}+${mcLine}"
+		}
 	}
 }
 

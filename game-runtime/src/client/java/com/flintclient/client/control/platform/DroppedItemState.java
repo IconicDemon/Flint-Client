@@ -16,4 +16,14 @@ public interface DroppedItemState {
 	float flint$yaw();
 
 	void flint$pose(float angle, float yaw);
+
+	/** UHC Overlay: how much bigger it is drawn (1: its size). */
+	float flint$scale();
+
+	void flint$scale(float scale);
+
+	/** Item Despawn: hidden this frame (a flash). */
+	boolean flint$hidden();
+
+	void flint$hidden(boolean hidden);
 }

@@ -7,15 +7,39 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Any opaque colour (a swatch that opens a colour picker), stored in files as {@code "#RRGGBB"}. The value is
- * {@code 0xRRGGBB} (no alpha: transparency, where a module offers it, is a setting of its own). Reading never fails: a
+ * {@code 0xRRGGBB} (no alpha: transparency, where a module offers it, is usually an opacity setting of its own). A
+ * {@linkplain #clearable() clearable} colour (a background with no opacity beside it) may also be {@link #CLEAR}:
+ * nothing is drawn, stored as {@code "transparent"}; whoever draws it checks {@link #isClear} first. Reading never fails: a
  * missing, malformed or out-of-range value is the default.
  */
 public final class RgbSetting extends SettingDescriptor<Integer> {
+	/** The value of a clearable colour that is see-through: no colour at all (outside 0xRRGGBB, so never a real colour). */
+	public static final int CLEAR = 0x1000000;
+	private static final String CLEAR_NAME = "transparent";
+
+	private final boolean clearable;
+
 	public RgbSetting(String id, String label, @Nullable String description, int defaultRgb) {
+		this(id, label, description, defaultRgb, false);
+	}
+
+	/** {@code clearable}: the colour may also be {@link #CLEAR} (Transparent in the picker). */
+	public RgbSetting(String id, String label, @Nullable String description, int defaultRgb, boolean clearable) {
 		super(id, label, description, defaultRgb & 0xFFFFFF);
 		if ((defaultRgb & ~0xFFFFFF) != 0) {
 			throw new IllegalArgumentException("an RGB default has no alpha: " + id);
 		}
+		this.clearable = clearable;
+	}
+
+	/** Whether the colour may be {@link #CLEAR}. */
+	public boolean clearable() {
+		return clearable;
+	}
+
+	/** Whether {@code value} is the see-through {@link #CLEAR}. */
+	public static boolean isClear(int value) {
+		return value == CLEAR;
 	}
 
 	@Override
@@ -26,6 +50,9 @@ public final class RgbSetting extends SettingDescriptor<Integer> {
 	@Override
 	public Integer parse(@Nullable JsonElement json) {
 		if (json != null && json.isJsonPrimitive() && json.getAsJsonPrimitive().isString()) {
+			if (clearable && json.getAsString().strip().equalsIgnoreCase(CLEAR_NAME)) {
+				return CLEAR;
+			}
 			int rgb = parseHex(json.getAsString());
 			if (rgb >= 0) {
 				return rgb;
@@ -36,17 +63,17 @@ public final class RgbSetting extends SettingDescriptor<Integer> {
 
 	@Override
 	public JsonElement toJson(Integer value) {
-		return new JsonPrimitive(hex(value));
+		return new JsonPrimitive(clearable && value == CLEAR ? CLEAR_NAME : hex(value));
 	}
 
 	@Override
 	public boolean valid(@Nullable Object value) {
-		return value instanceof Integer i && (i & ~0xFFFFFF) == 0;
+		return value instanceof Integer i && ((i & ~0xFFFFFF) == 0 || clearable && i == CLEAR);
 	}
 
 	@Override
 	public Integer clamp(Integer value) {
-		return value & 0xFFFFFF;
+		return clearable && value == CLEAR ? CLEAR : value & 0xFFFFFF;
 	}
 
 	/**

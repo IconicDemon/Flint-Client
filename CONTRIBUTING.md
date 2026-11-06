@@ -1,6 +1,6 @@
 # Contributing to Flint Client
 
-Thanks for helping. Flint is in beta, so the best contributions right now are bug reports with clear steps,
+Thanks for helping. The most useful contributions are bug reports with clear steps,
 fixes for those bugs, and small, focused improvements.
 
 ## Before you start

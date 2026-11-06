@@ -45,6 +45,12 @@ public final class FpsBox {
 	 */
 	public void layout(int textW, int textH, float u, FpsDisplayMode mode, boolean background, FpsSizing sizing, int widthUnits,
 		int heightUnits, boolean border, int borderHalfUnits, int radiusUnits, TextAlign align) {
+		layout(textW, textH, u, mode, background, sizing, widthUnits, heightUnits, border, borderHalfUnits, radiusUnits, align, PAD_X, MIN_PAD_Y);
+	}
+
+	/** As above, with the Dynamic box's padding beside ({@code padXUnits}) and above/below ({@code padYUnits}) the text. */
+	public void layout(int textW, int textH, float u, FpsDisplayMode mode, boolean background, FpsSizing sizing, int widthUnits,
+		int heightUnits, boolean border, int borderHalfUnits, int radiusUnits, TextAlign align, float padXUnits, float padYUnits) {
 		textW = Math.max(0, textW);
 		textH = Math.max(0, textH);
 		if (mode != FpsDisplayMode.BACKGROUND) {
@@ -64,7 +70,8 @@ public final class FpsBox {
 		int minPadY = Math.max(1, Math.round(MIN_PAD_Y * u));
 		int fitted = textW + 2 * minPadX;
 		if (sizing == FpsSizing.DYNAMIC) {
-			int padX = Math.max(minPadX, Math.round(PAD_X * u));
+			int padX = Math.max(padXUnits > 0 ? 1 : 0, Math.round(padXUnits * u));
+			minPadY = Math.max(padYUnits > 0 ? 1 : 0, Math.round(padYUnits * u));
 			width = textW + 2 * padX;
 			textX = padX;
 		} else {

@@ -1,8 +1,8 @@
 package com.flintclient.client.mixin.feature;
 
+import com.flintclient.client.compat.McCompat;
 import com.flintclient.client.control.platform.Mc263Visuals;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.Hud;
 import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Overlay on the HUD: pumpkin blur, powder snow frost, portal swirl and nausea, each skippable. */
-@Mixin(Hud.class)
+@Mixin(targets = McCompat.HUD_CLASS)
 abstract class HudOverlayMixin {
 	@Inject(method = "extractTextureOverlay", at = @At("HEAD"), cancellable = true)
 	private void flint$texture(GuiGraphicsExtractor graphics, Identifier texture, float alpha, CallbackInfo callback) {

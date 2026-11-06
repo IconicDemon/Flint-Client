@@ -1,11 +1,10 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.Keys;
+import com.flintclient.client.platform.Services;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.Motion;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.AbstractWidget;
 
 /**
  * Shared kit state and drawing helpers: the bound {@link KitPrefs}, the focus ring and the outline width,
@@ -13,8 +12,8 @@ import net.minecraft.client.gui.components.AbstractWidget;
  */
 public final class Kit {
 	/** Minecraft numbers mouse buttons from 1 (SDL): left 1, middle 2, right 3. */
-	public static final int LEFT_BUTTON = InputConstants.MOUSE_BUTTON_LEFT;
-	public static final int RIGHT_BUTTON = InputConstants.MOUSE_BUTTON_RIGHT;
+	public static final int LEFT_BUTTON = Keys.MOUSE_LEFT;
+	public static final int RIGHT_BUTTON = Keys.MOUSE_RIGHT;
 	/** How long the pointer rests on a control before its tooltip shows (keyboard focus shows it at once). */
 	public static final long TOOLTIP_DELAY_MILLIS = 350;
 	/** U+2212, the typographic minus (Inter has it; it is as wide as a digit). */
@@ -82,7 +81,7 @@ public final class Kit {
 
 	/** The click Minecraft's own buttons make. */
 	public static void clickSound() {
-		AbstractWidget.playButtonClickSound(Minecraft.getInstance().getSoundManager());
+		Services.playClick();
 	}
 
 	/**

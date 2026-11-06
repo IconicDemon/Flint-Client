@@ -1,9 +1,9 @@
 //! The Minecraft settings Flint shows and copies, and how each is stored in options.txt.
 //!
-//! Every entry was checked against Minecraft 26.3's `Options` (key, range, default, how it is written) and
-//! exists, constructed the same way, in the 26.1 and 26.2 bytecode: availability in a family comes from the
-//! generated tables (`tables.rs`), never from this file, and a key whose definition differs in a family is
-//! treated as missing there. Settings that are machine-specific or that Flint can't change safely
+//! Every entry was checked against Minecraft 26.3's `Options` (key, range, default, how it is written) and,
+//! where an older version has it, is constructed the same way in the 1.21.1, 1.21.10, 1.21.11, 26.1 and 26.2
+//! bytecode: availability in a family comes from the generated tables (`tables.rs`), never from this file,
+//! and a key whose definition differs in a family is treated as missing there. Settings that are machine-specific or that Flint can't change safely
 //! (`resourcePacks`, `soundDevice`, `fullscreenResolution`, `lastServer`, window overrides, tutorial and
 //! onboarding flags, `version`, ...) are not listed: they are always preserved, never shown and never synced.
 
@@ -807,6 +807,21 @@ pub fn catalogue(family: Option<&'static FamilyData>) -> Vec<Setting> {
     out
 }
 
+/// The category of an options.txt key the registry lists (key bindings are `Keybinds`); None for keys it
+/// doesn't list.
+pub fn category_of_key(key: &str) -> Option<Category> {
+    if key.starts_with(KEY_PREFIX) {
+        return Some(Category::Keybinds);
+    }
+    if key.strip_prefix("soundCategory_").is_some_and(|name| SOUNDS.iter().any(|(n, _)| *n == name)) {
+        return Some(Category::Audio);
+    }
+    if key.strip_prefix("modelPart_").is_some_and(|name| PARTS.iter().any(|(n, _)| *n == name)) {
+        return Some(Category::Skin);
+    }
+    OPTIONS.iter().find(|def| def.key == key).map(|def| def.category)
+}
+
 /// The settings in a sync category.
 pub fn in_category(settings: &[Setting], category: Category) -> impl Iterator<Item = &Setting> {
     settings.iter().filter(move |s| s.category == category)
@@ -871,7 +886,8 @@ mod tests {
                 let real: Vec<String> = enum_values(f, name).iter().map(|v| v.to_string()).collect();
                 assert_eq!(values, real, "{} in {}", s.key, f.id);
             }
-            let sounds: Vec<&str> = SOUNDS.iter().map(|(n, _)| *n).collect();
+            // Every family's sound categories are the registry's, in its order (1.21.1 has no UI category yet).
+            let sounds: Vec<&str> = SOUNDS.iter().map(|(n, _)| *n).filter(|n| enum_values(f, "SoundSource").contains(n)).collect();
             assert_eq!(sounds, enum_values(f, "SoundSource"), "sound categories in {}", f.id);
             let parts: Vec<&str> = PARTS.iter().map(|(n, _)| *n).collect();
             assert_eq!(parts, enum_values(f, "PlayerModelPart"), "model parts in {}", f.id);
@@ -882,6 +898,12 @@ mod tests {
     fn every_preset_managed_option_is_in_the_registry() {
         let keys: Vec<String> = catalogue(None).into_iter().map(|s| s.key).collect();
         for f in FAMILIES.iter() {
+            // Graphics presets arrived in 1.21.11; before it nothing is overwritten at start.
+            if enum_values(f, "GraphicsPreset").is_empty() {
+                assert!(f.preset_managed.is_empty(), "{} has no graphics preset", f.id);
+                assert!(!f.option_keys.contains(&"graphicsPreset"), "{}", f.id);
+                continue;
+            }
             assert_eq!(f.preset_managed.len(), 17, "GraphicsPreset.apply sets 17 options in {}", f.id);
             assert_eq!(f.preset_managed, FAMILIES[0].preset_managed, "the same options in {} as in {}", f.id, FAMILIES[0].id);
             for key in f.preset_managed {
@@ -1144,6 +1166,29 @@ mod tests {
                 assert_eq!(check_key(f, raw), KeyCheck::Named);
             } else {
                 assert!(s.accepts(f, &value), "{} = {raw}", s.key);
+            }
+        }
+    }
+
+    #[test]
+    fn files_1_21_x_wrote_decode_every_setting_their_family_has() {
+        // options.txt as Minecraft 1.21.11 and 1.21.10 wrote it on test profiles (no personal data).
+        for (id, bytes) in [("1.21.11", &include_bytes!("testdata/options-1.21.11.txt")[..]), ("1.21.10", &include_bytes!("testdata/options-1.21.10.txt")[..])] {
+            let doc = super::super::options_txt::OptionsDoc::parse(bytes).unwrap();
+            let f = family(id);
+            assert_eq!(doc.data_version(), Some(f.versions[0].1 as i64), "{id}");
+            for s in catalogue(Some(f)).iter().filter(|s| s.available_in(f).is_ok() && s.bind != Some(Bind::Flint)) {
+                let raw = doc.get(&s.key).unwrap_or_else(|| panic!("{} is missing from a file {id} wrote", s.key));
+                let value = s.decode(raw).unwrap_or_else(|| panic!("{} = {raw} doesn't decode in {id}", s.key));
+                if s.repr == Repr::Key {
+                    assert_eq!(check_key(f, raw), KeyCheck::Named, "{} in {id}", s.key);
+                } else {
+                    assert!(s.accepts(f, &value), "{} = {raw} in {id}", s.key);
+                }
+            }
+            // And every option key the file has is one the family's tables list.
+            for key in doc.keys().filter(|k| !k.starts_with(KEY_PREFIX) && !k.starts_with("soundCategory_") && !k.starts_with("modelPart_") && *k != "version") {
+                assert!(f.option_keys.contains(&key), "{key} isn't in {id}'s tables");
             }
         }
     }

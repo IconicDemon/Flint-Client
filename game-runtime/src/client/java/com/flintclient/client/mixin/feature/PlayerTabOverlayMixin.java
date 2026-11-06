@@ -29,7 +29,7 @@ abstract class PlayerTabOverlayMixin {
 	}
 
 	@ModifyExpressionValue(method = "extractRenderState", at = @At(value = "INVOKE",
-		target = "Lnet/minecraft/client/multiplayer/ClientPacketListener;onlineMode()Z"))
+		target = com.flintclient.client.compat.McCompat.TAB_HEADS))
 	private boolean flint$heads(boolean showHead) {
 		return showHead && !Mc263Overlay.tabHideHeads();
 	}
@@ -41,9 +41,15 @@ abstract class PlayerTabOverlayMixin {
 		}
 	}
 
+	/** Tab Editor's ping numbers (Ping View) need a wider column than the bars. */
+	@com.llamalad7.mixinextras.injector.ModifyExpressionValue(method = "extractRenderState", at = @org.spongepowered.asm.mixin.injection.At(value = "CONSTANT", args = "intValue=13"), require = 0)
+	private int flint$pingWidth(int width) {
+		return Mc263Overlay.tabPingWidth(width);
+	}
+
 	@ModifyReturnValue(method = "getNameForDisplay", at = @At("RETURN"))
 	private Component flint$name(Component name, PlayerInfo info) {
-		return Mc263Overlay.tabName(info, name);
+		return com.flintclient.client.control.platform.Mc263Nametags.tabBadge(info, Mc263Overlay.tabName(info, name));
 	}
 
 	@com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = "extractRenderState", at = @At(value = "INVOKE",
@@ -59,7 +65,7 @@ abstract class PlayerTabOverlayMixin {
 		return com.flintclient.client.control.platform.Mc263Overlay.tabRow(color);
 	}
 
-	@org.spongepowered.asm.mixin.injection.ModifyConstant(method = "getPlayerInfos", constant = @org.spongepowered.asm.mixin.injection.Constant(longValue = 80L))
+	@com.llamalad7.mixinextras.injector.ModifyExpressionValue(method = "getPlayerInfos", at = @org.spongepowered.asm.mixin.injection.At(value = "CONSTANT", args = "longValue=80"), require = 0)
 	private long flint$limit(long limit) {
 		return com.flintclient.client.control.platform.Mc263Overlay.tabLimit(limit);
 	}

@@ -1,0 +1,40 @@
+{
+	"name": "cave.lush",
+	"regions": [
+		"cave"
+	],
+	"biome-type": "underground",
+	"min-height-relative": {
+		"max": -2,
+		"fade": 2
+	},
+	"features": [
+		"lush"
+	],
+	"sounds": [
+		{
+			"name": "cave-lush",
+			"files": [
+				"minecraft:entity.axolotl.idle_water"
+			],
+			"category": "cave",
+			"pause": {
+				"min": 250,
+				"max": 500
+			},
+			"volume": 0.4
+		},
+		{
+			"name": "frog",
+			"files": [
+				"minecraft:entity.frog.ambient"
+			],
+			"category": "animal",
+			"volume": 0.3,
+			"pause": {
+				"min": 100,
+				"max": 750
+			}
+		}
+	]
+}

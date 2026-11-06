@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "flintclient",
+  "version": "0",
+  "custom": {
+    "loom:injected_interfaces": {
+      "net/minecraft/class_329": ["com/flintclient/client/compat/GuiBridge"],
+      "net/minecraft/class_332": ["com/flintclient/client/compat/GraphicsBridge"],
+      "net/minecraft/class_338": ["com/flintclient/client/compat/Bridges$Chat"],
+      "net/minecraft/class_303$class_7590": ["com/flintclient/client/compat/Bridges$ChatLine"],
+      "net/minecraft/class_310": ["com/flintclient/client/compat/Bridges$Game"],
+      "net/minecraft/class_638": ["com/flintclient/client/compat/Bridges$Level"],
+      "net/minecraft/class_4184": ["com/flintclient/client/compat/Bridges$Camera"],
+      "net/minecraft/class_9288": ["com/flintclient/client/compat/Bridges$ContainerContents"]
+    }
+  }
+}

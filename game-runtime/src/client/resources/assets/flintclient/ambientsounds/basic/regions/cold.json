@@ -1,0 +1,33 @@
+{
+	"name": "cold",
+	"bad-regions": [
+		"very_cold"
+	],
+	"variants": [
+		{
+			"biomes": [
+				"frozen",
+				"ice",
+				"cold",
+				"arctic",
+				"glacier",
+				"snow"
+			],
+			"bad-biomes": [
+				"arctic peaks"
+			]
+		},
+		{
+			"temperature": {
+				"max": 0,
+				"min": -5
+			},
+			"regions": [
+				"surface"
+			]
+		}
+	],
+	"sound-collections": [
+		"wind"
+	]
+}

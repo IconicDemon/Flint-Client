@@ -13,6 +13,10 @@ import org.jspecify.annotations.Nullable;
 public final class KeySetting extends SettingDescriptor<String> {
 	/** No key. */
 	public static final String NONE = "";
+	/** Read only while a screen is open (a tooltip, the inventory), where moving and fighting keys don't act. */
+	private boolean inScreens;
+	/** Read only while chat is open, where Minecraft's controls and other mods' keys don't act: it shares a key with none of them. */
+	private boolean inChat;
 	private static final Pattern NAME = Pattern.compile("key\\.(keyboard|mouse)\\.[a-z0-9._]{1,40}");
 
 	public KeySetting(String id, String label, @Nullable String description, String defaultKey) {
@@ -20,6 +24,27 @@ public final class KeySetting extends SettingDescriptor<String> {
 		if (!defaultKey.isEmpty() && !NAME.matcher(defaultKey).matches()) {
 			throw new IllegalArgumentException("bad key name for " + id + ": " + defaultKey);
 		}
+	}
+
+	/** Marks a key read only in screens, so sharing a moving or fighting key isn't a conflict. */
+	public KeySetting inScreens() {
+		inScreens = true;
+		return this;
+	}
+
+	public boolean screensOnly() {
+		return inScreens;
+	}
+
+	/** Marks a key read only in the open chat. */
+	public KeySetting inChat() {
+		inScreens = true;
+		inChat = true;
+		return this;
+	}
+
+	public boolean chatOnly() {
+		return inChat;
 	}
 
 	@Override

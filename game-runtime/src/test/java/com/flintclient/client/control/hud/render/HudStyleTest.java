@@ -106,7 +106,7 @@ class HudStyleTest {
 			float step = ScaleSteps.step(i);
 			for (int guiScale = 1; guiScale <= 6; guiScale++) {
 				style.set(HudThemeId.FLINT, HudColor.DEFAULT, true, 70, 3, true, step, guiScale);
-				assertEquals(Math.round(7 * step * guiScale), style.lineH);
+				assertEquals(Math.round(7 * (step * guiScale)), style.lineH);
 				assertEquals(guiScale, style.textScale, "Flint text is rasterised for the pixel scale, sized by the step");
 				style.set(HudThemeId.CLASSIC, HudColor.DEFAULT, true, 40, 3, true, step, guiScale);
 				assertEquals(Math.max(1, Math.round(guiScale * step)), style.textScale, "Minecraft's font at whole pixels per font pixel");
@@ -130,6 +130,34 @@ class HudStyleTest {
 			style.set(HudThemeId.MINIMAL, HudColor.DEFAULT, false, 70, 3, true, 2.0F, guiScale);
 			assertEquals(1, style.shadowPx, "Minimal's shadow is one pixel at every scale (GUI " + guiScale + ")");
 		}
+	}
+
+	@Test
+	void anUnsetLookDrawsAsBeforeAndAChosenOneReplacesTheStyles() {
+		HudStyle plain = new HudStyle();
+		plain.resolve(Appearance.DEFAULTS, Appearance.INHERIT, null, 1.0F, 2);
+		HudStyle looked = new HudStyle();
+		looked.resolve(Appearance.DEFAULTS, Appearance.INHERIT.with(Appearance.BACKGROUND_COLOR, 0x2040FF), null, 1.0F, 2);
+		assertEquals(plain.outlinePx, looked.outlinePx, "only the colour changed");
+		assertEquals(0xFF2040FF, looked.panel | 0xFF000000, "the chosen panel colour");
+		assertEquals(plain.panel >>> 24, looked.panel >>> 24, "at the same opacity");
+		// Border off and on (thicker, coloured), and drawn with the background off.
+		looked.resolve(Appearance.DEFAULTS, Appearance.INHERIT.with(Appearance.BORDER, false), null, 1.0F, 2);
+		assertEquals(0, looked.outlinePx);
+		Appearance framed = Appearance.INHERIT.with(Appearance.BACKGROUND, false).with(Appearance.BORDER, true).with(Appearance.BORDER_THICKNESS, 4)
+			.with(Appearance.BORDER_COLOR, 0xFF0000);
+		looked.resolve(Appearance.DEFAULTS, framed, null, 1.0F, 2);
+		assertEquals(4, looked.outlinePx, "4 half units at 2 px per unit");
+		assertEquals(0xFFFF0000, looked.outline);
+		assertTrue(looked.borderAlone && !looked.background);
+		// The profile's look applies to modules that don't choose; a module's own choice wins.
+		Appearance profile = Appearance.DEFAULTS.with(Appearance.TEXT_SHADOW, true);
+		looked.resolve(profile, Appearance.INHERIT, null, 1.0F, 2);
+		assertTrue(looked.shadowPx > 0, "Flint has no shadow of its own; the profile turned one on");
+		looked.resolve(profile, Appearance.INHERIT.with(Appearance.TEXT_SHADOW, false), null, 1.0F, 2);
+		assertEquals(0, looked.shadowPx);
+		looked.resolve(Appearance.DEFAULTS, Appearance.INHERIT, HudThemeId.CLASSIC, 1.0F, 2);
+		assertTrue(!looked.borderAlone && looked.outlinePx == 0, "Classic keeps no border until one is chosen");
 	}
 
 	@Test

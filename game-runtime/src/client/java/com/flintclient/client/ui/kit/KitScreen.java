@@ -1,19 +1,15 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.Clock;
+import com.flintclient.client.platform.Frame;
+import com.flintclient.client.platform.HostScreen;
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
 import com.flintclient.client.render.Canvas;
+import com.flintclient.client.render.PixelFace;
 import com.flintclient.client.render.TextLine;
-import com.flintclient.client.ui.Backdrop;
 import com.flintclient.client.ui.FlintFrame;
-import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.platform.Window;
 import java.util.ArrayList;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.CharacterEvent;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.Util;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -23,9 +19,9 @@ import org.jspecify.annotations.Nullable;
  * <p><b>Scale.</b> The interface scale ({@link #uiScale()}, whole pixels per UI unit) comes from the window's
  * own size, not Minecraft's GUI scale (the HUD keeps following that): automatic, moved a step by
  * {@link KitPrefs#uiScaleDelta()}, and limited so the screen's minimum layout fits the window ({@link UiScale}).
- * Mouse positions arrive in GUI units; they are turned into physical pixels exactly as
- * {@code MouseHandler.getScaledXPos} scaled them ({@code × framebuffer width / GUI width}) and then into
- * UI units ({@code ÷ uiScale}). Drawing uses {@code Canvas.begin(graphics, uiScale)}.
+ * Mouse positions arrive in GUI units; they are turned into physical pixels exactly as the game scaled them
+ * ({@code × framebuffer width / GUI width}) and then into UI units ({@code ÷ uiScale}). Drawing uses
+ * {@code Canvas.begin(frame, uiScale)}.
  *
  * <p><b>Input.</b> Every mouse handler returns true, so no click or wheel reaches the game behind. A
  * press on a control holds the pointer until that button is released; other buttons meanwhile are
@@ -36,16 +32,19 @@ import org.jspecify.annotations.Nullable;
  * shows the focus ring and is narrated when Minecraft's narrator is on; focus from a click never shows
  * the ring.
  *
- * <p><b>Text input.</b> While a node that accepts text is focused, Minecraft's text input is started for
- * this screen ({@code Minecraft.onTextInputFocusChange}, as {@code EditBox.setFocused} does), so SDL
- * delivers typed characters ({@link #charTyped}); it stops when focus moves away and when the screen is
+ * <p><b>Text input.</b> While a node that accepts text is focused, the game's text input is started for
+ * this screen, so typed characters arrive ({@link #typed}); it stops when focus moves away and when the screen is
  * removed.
  *
  * <p>Subclasses build the tree once ({@link #build}) and place it for the current size
  * ({@link #layoutContent}); resizing keeps the tree, its focus and scroll positions. Kit screens don't
- * pause the game ({@link #isPauseScreen()}). Render thread.
+ * pause the game ({@link #pausesGame()}).
+ *
+ * <p>It is the same on every Minecraft line: the engine's own screen is {@link HostScreen} (a platform class), which hands
+ * this class every event in GUI units and answers its questions about the window, the pointer and the narrator. Render
+ * thread.
  */
-public abstract class KitScreen extends Screen {
+public abstract class KitScreen extends HostScreen {
 	private final Node root = new Node();
 	private final ArrayList<Node> modals = new ArrayList<>();
 	private final ArrayList<@Nullable Node> modalReturnFocus = new ArrayList<>();
@@ -60,6 +59,8 @@ public abstract class KitScreen extends Screen {
 	private float opacity = 1.0F;
 	/** The content's vertical shift in UI units (open and close animations); dialogs and tooltips stay put. */
 	private float contentShift;
+	/** The content's scale about the screen's middle, for open and close animations (1: none). */
+	private float contentZoom = 1;
 	private @Nullable Node focused;
 	private @Nullable Node hovered;
 	private @Nullable Node captured;
@@ -75,13 +76,15 @@ public abstract class KitScreen extends Screen {
 	private final float[] anchor = new float[4];
 	private float mouseX = -1;
 	private float mouseY = -1;
+	private final PaintMeter meter = new PaintMeter();
 
 	/** {@code minWidth × minHeight}: the smallest layout in UI units, which the interface scale keeps in the window. */
-	protected KitScreen(Component title, int minWidth, int minHeight) {
+	protected KitScreen(String title, int minWidth, int minHeight) {
 		super(title);
 		this.minWidth = minWidth;
 		this.minHeight = minHeight;
 		root.attach(this);
+		meter.opening();
 	}
 
 	/** Adds the screen's nodes to {@code root}; called once, before the first layout. */
@@ -93,7 +96,7 @@ public abstract class KitScreen extends Screen {
 	// ---------- lifecycle ----------
 
 	@Override
-	protected final void init() {
+	protected final void opened() {
 		updateScale();
 		if (!built) {
 			built = true;
@@ -104,15 +107,15 @@ public abstract class KitScreen extends Screen {
 
 	/** A resize keeps the tree (focus, scroll positions, text being typed); only the scale and layout change. */
 	@Override
-	protected void repositionElements() {
+	protected void resized() {
 		updateScale();
 		invalidateLayout();
 	}
 
 	@Override
-	protected void setInitialFocus() {
+	protected void initialFocus(boolean keyboard) {
 		// As vanilla: a screen opened from the keyboard starts with its first control focused.
-		if (minecraft.getLastInputType().isKeyboard()) {
+		if (keyboard) {
 			layoutIfNeeded();
 			setFocus(FocusNav.next(collectFocusable(), null, true), true);
 		}
@@ -120,18 +123,31 @@ public abstract class KitScreen extends Screen {
 
 	/** Shown again (returning from another screen): a focused text field takes typing again. */
 	@Override
-	public void added() {
+	protected void shown() {
 		textInput = false;
 		updateTextInput();
+		meter.opening();
 	}
 
 	@Override
-	public void removed() {
+	protected void hidden() {
+		meter.report(getClass().getSimpleName());
 		captured = null;
 		if (textInput) {
 			textInput = false;
-			minecraft.onTextInputFocusChange(this, false);
+			hostTextInput(false);
 		}
+	}
+
+	/** Once per game tick while shown (nothing by default). */
+	@Override
+	protected void update() {
+	}
+
+	/** Something asked the screen to close: by default it closes at once. */
+	@Override
+	protected void closeRequested() {
+		hostCloseNow();
 	}
 
 	/** Recomputes the interface scale (the preferences or window changed). */
@@ -141,10 +157,11 @@ public abstract class KitScreen extends Screen {
 	}
 
 	private void updateScale() {
-		Window window = minecraft.getWindow();
-		uiScale = Math.max(1, computeUiScale(window.getWidth(), window.getHeight()));
-		uiWidth = window.getWidth() / uiScale;
-		uiHeight = window.getHeight() / uiScale;
+		int windowW = hostWindowWidth();
+		int windowH = hostWindowHeight();
+		uiScale = Math.max(1, computeUiScale(windowW, windowH));
+		uiWidth = windowW / uiScale;
+		uiHeight = windowH / uiScale;
 	}
 
 	/**
@@ -189,6 +206,14 @@ public abstract class KitScreen extends Screen {
 		this.contentShift = units;
 	}
 
+	/**
+	 * Scales everything but dialogs and tooltips about the screen's middle (a window growing into place). Pointer input
+	 * doesn't follow it, so it is only for brief animations.
+	 */
+	public void setContentZoom(float scale) {
+		this.contentZoom = scale;
+	}
+
 	/** The shift in whole pixels, and in UI units after snapping. */
 	private int shiftPx() {
 		return Math.round(contentShift * uiScale);
@@ -224,20 +249,17 @@ public abstract class KitScreen extends Screen {
 
 	/** GUI units (from Minecraft's mouse events) to UI units. */
 	public float toUiX(double guiX) {
-		Window window = minecraft.getWindow();
-		return (float) (guiX * window.getWidth() / Math.max(1, window.getGuiScaledWidth()) / uiScale);
+		return (float) (guiX * hostWindowWidth() / hostScaledWidth() / uiScale);
 	}
 
 	public float toUiY(double guiY) {
-		Window window = minecraft.getWindow();
-		return (float) (guiY * window.getHeight() / Math.max(1, window.getGuiScaledHeight()) / uiScale);
+		return (float) (guiY * hostWindowHeight() / hostScaledHeight() / uiScale);
 	}
 
 	/** Where the IME's candidate window goes (the caret), in UI units; from a focused text field's drawing. */
 	public void setTextInputArea(float x0, float y0, float x1, float y1) {
-		int guiScale = Math.max(1, minecraft.getWindow().getGuiScale());
-		float k = (float) uiScale / guiScale;
-		minecraft.textInputManager().setTextInputArea(Math.round(x0 * k), Math.round(y0 * k), Math.round(x1 * k), Math.round(y1 * k));
+		float k = (float) uiScale / hostGuiScale();
+		hostTextInputArea(Math.round(x0 * k), Math.round(y0 * k), Math.round(x1 * k), Math.round(y1 * k));
 	}
 
 	// ---------- state for nodes ----------
@@ -281,16 +303,17 @@ public abstract class KitScreen extends Screen {
 	/**
 	 * Typing in a field or waiting for a key to bind: Minecraft then leaves keys it would otherwise take
 	 * for itself alone ({@code Minecraft.handleGlobalKeyPress} skips the friends key; screenshot and
-	 * fullscreen keys still act first, as on Minecraft's own Key Binds screen).
+	 * fullscreen keys still act first, as on Minecraft's own Key Binds screen). Screen's own hook from 26.3 on; on older
+	 * versions nothing asks.
 	 */
 	@Override
-	public boolean isInputCaptured() {
+	protected boolean holdsInput() {
 		return textInput || capturingKeys();
 	}
 
 	/** Kit screens sit over a live game, as the inventory does; a subclass that should pause overrides this. */
 	@Override
-	public boolean isPauseScreen() {
+	protected boolean pausesGame() {
 		return false;
 	}
 
@@ -331,7 +354,7 @@ public abstract class KitScreen extends Screen {
 		boolean wanted = focused != null && focused.acceptsText() && focused.enabled();
 		if (wanted != textInput) {
 			textInput = wanted;
-			minecraft.onTextInputFocusChange(this, wanted);
+			hostTextInput(wanted);
 		}
 	}
 
@@ -342,18 +365,10 @@ public abstract class KitScreen extends Screen {
 
 	/** Speaks the node's name and state when Minecraft's narrator is on (built only then). */
 	private void narrate(Node node) {
-		if (minecraft.options.narrator().get().shouldNarrateSystem() && minecraft.getNarrator().isActive()) {
-			String text = node.narration();
-			if (!text.isEmpty()) {
-				minecraft.getNarrator().saySystemNow(text);
-			}
+		String text = node.narration();
+		if (!text.isEmpty()) {
+			hostNarrate(text);
 		}
-	}
-
-	/** The screen's own narration says only its title; the kit narrates focus itself. */
-	@Override
-	protected boolean shouldNarrateNavigation() {
-		return false;
 	}
 
 	/** A node was removed or hidden: drop any focus, hover or capture inside it. */
@@ -426,16 +441,14 @@ public abstract class KitScreen extends Screen {
 	// ---------- drawing ----------
 
 	@Override
-	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-		FlintFrame.begin(graphics);
-		Canvas c = Canvas.begin(graphics);
+	protected void paintBackground(Frame frame) {
+		FlintFrame.begin(frame.target());
+		Canvas c = Canvas.begin(frame);
 		try {
 			paintBackdrop(c);
 		} finally {
 			c.end();
 		}
-		// As Screen.extractBackground: subtitles stay readable under the screen.
-		minecraft.gui.hud.extractDeferredSubtitles();
 	}
 
 	/**
@@ -443,19 +456,29 @@ public abstract class KitScreen extends Screen {
 	 * over the game that fades with the screen's opacity (no blur pass).
 	 */
 	protected void paintBackdrop(Canvas c) {
-		if (minecraft.level == null) {
-			Backdrop.paint(c, width, height, Backdrop.PAGE);
+		if (!hostInWorld()) {
+			hostPaintMenuBackdrop(c);
 		} else {
 			float previous = c.opacity();
 			c.setOpacity(previous * opacity);
-			c.fill(0, 0, c.px(width), c.px(height), Tokens.DIM);
+			c.fill(0, 0, c.px(hostGuiWidth()), c.px(hostGuiHeight()), Tokens.DIM);
 			c.setOpacity(previous);
 		}
 	}
 
 	@Override
-	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-		Canvas c = Canvas.begin(graphics, uiScale);
+	protected void paint(Frame frame) {
+		long began = System.nanoTime();
+		try {
+			paintScreen(frame);
+		} finally {
+			meter.painted(began, System.nanoTime());
+		}
+	}
+
+	private void paintScreen(Frame frame) {
+		Canvas c = Canvas.begin(frame, uiScale);
+		int font = PixelFace.begin(fontMode(minecraftFont()));
 		try {
 			layoutIfNeeded();
 			updatePointer();
@@ -465,29 +488,41 @@ public abstract class KitScreen extends Screen {
 				// Through the canvas, so scroll views clip exactly where the shifted content is.
 				c.pushOffset(0, shift);
 			}
+			boolean zoomed = Math.abs(contentZoom - 1) > 0.0005F;
+			if (zoomed) {
+				c.pushZoom(contentZoom, c.px(uiWidth) / 2.0F, c.px(uiHeight) / 2.0F);
+			}
 			root.paintTree(c);
+			if (zoomed) {
+				c.popOffset();
+			}
 			if (shift != 0) {
 				c.popOffset();
 			}
 			int fullW = c.px(uiWidth) + uiScale;
 			int fullH = c.px(uiHeight) + uiScale;
 			for (int i = 0; i < modals.size(); i++) {
-				graphics.nextStratum();
+				frame.nextLayer();
 				c.fill(0, 0, fullW, fullH, Tokens.SCRIM);
 				modals.get(i).paintTree(c);
 			}
-			paintTooltip(c, graphics);
+			int tips = PixelFace.begin(fontMode(minecraftFont() || minecraftTooltips()));
+			try {
+				paintTooltip(c, frame);
+			} finally {
+				PixelFace.end(tips);
+			}
 		} finally {
+			PixelFace.end(font);
 			c.end();
 		}
 		FlintFrame.end();
 	}
 
-	/** Hover from the pointer's exact position (the extract arguments are whole GUI units). */
+	/** Hover from the pointer's exact position (the draw call's arguments are whole GUI units). */
 	private void updatePointer() {
-		Window window = minecraft.getWindow();
-		mouseX = toUiX(minecraft.mouseHandler.getScaledXPos(window));
-		mouseY = localY(minecraft.mouseHandler.getScaledYPos(window));
+		mouseX = toUiX(hostMouseX());
+		mouseY = localY(hostMouseY());
 		if (captured != null) {
 			hovered = captured.containsPoint(mouseX, mouseY) ? captured : null;
 		} else {
@@ -495,7 +530,7 @@ public abstract class KitScreen extends Screen {
 		}
 	}
 
-	private void paintTooltip(Canvas c, GuiGraphicsExtractor graphics) {
+	private void paintTooltip(Canvas c, Frame frame) {
 		Node tip = null;
 		TextLine[] lines = null;
 		if (focused != null && focusVisible && focused.tooltipLines() != null) {
@@ -503,7 +538,7 @@ public abstract class KitScreen extends Screen {
 			tip = focused;
 			lines = focused.tooltipLines();
 		} else if (hovered != null && captured == null && hovered.tooltipLines() != null) {
-			long now = Util.getMillis();
+			long now = Clock.millis();
 			// The delay restarts for another control, or another part of one (each swatch has its own).
 			if (hovered != hoverTipNode || hovered.tooltipLines() != hoverTipLines) {
 				hoverTipNode = hovered;
@@ -518,22 +553,97 @@ public abstract class KitScreen extends Screen {
 			hoverTipNode = null;
 		}
 		if (tip != null && lines != null && lines.length > 0) {
-			graphics.nextStratum();
+			frame.nextLayer();
 			tip.tooltipAnchor(anchor);
-			tooltip.paint(c, lines, anchor[0], anchor[1], anchor[2], anchor[3], uiWidth, uiHeight);
+			float k = tooltipScale();
+			tooltip.paint(c, k == 1 ? lines : scaled(lines, k), anchor[0], anchor[1], anchor[2], anchor[3], uiWidth, uiHeight, k, tooltipLook());
 		}
+	}
+
+	/**
+	 * How much larger than the kit's own tooltips are on this screen (1: as the kit draws them). A screen whose type is
+	 * sized its own way (the Right Shift menu) keeps its tooltips as readable as its rows.
+	 */
+	protected float tooltipScale() {
+		return 1;
+	}
+
+	/** A tooltip's panel ({@code radius} in the kit's units, before {@link #tooltipScale}), its edge, and its first and other lines. */
+	public record TooltipLook(int fill, int border, float radius, int title, int text) {
+	}
+
+	/** How this screen's tooltips look: the kit's own (a dark panel, a faint edge, a bright title over muted lines). */
+	protected TooltipLook tooltipLook() {
+		return new TooltipLook(Tokens.TOOLTIP_FILL, Tokens.TOOLTIP_BORDER, 4, Tokens2.TEXT, Tokens2.muted());
+	}
+
+	/**
+	 * Whether every piece of text on this screen is drawn in Minecraft's own font (the Right Shift menu), Flint's faces
+	 * standing in at their sizes; measured the same way while it handles input, so a caret lands where it is drawn.
+	 */
+	protected boolean minecraftFont() {
+		return false;
+	}
+
+	/** Whether this screen's tooltips are in Minecraft's font even though the rest of it is not (see {@link #minecraftFont()}). */
+	protected boolean minecraftTooltips() {
+		return false;
+	}
+
+	/**
+	 * The pixel scale Minecraft's font is drawn at on this screen, the same for every piece of text, or
+	 * {@link PixelFace#BY_SIZE} for each piece at the scale nearest its own size.
+	 */
+	protected int minecraftFontScale() {
+		return PixelFace.BY_SIZE;
+	}
+
+	private int fontMode(boolean minecraft) {
+		return minecraft ? minecraftFontScale() : PixelFace.OFF;
+	}
+
+	private TextLine @Nullable [] scaledSource;
+	private TextLine[] scaledLines = new TextLine[0];
+	private float scaledBy;
+
+	/** {@code lines} with their type {@code k} times the kit's tooltip size; remade only when the text or size changes. */
+	private TextLine[] scaled(TextLine[] lines, float k) {
+		boolean same = lines == scaledSource || scaledLines.length == lines.length && k == scaledBy;
+		for (int i = 0; same && lines != scaledSource && i < lines.length; i++) {
+			same = lines[i].text().equals(scaledLines[i].text());
+		}
+		if (!same || k != scaledBy) {
+			com.flintclient.client.render.FontFace face = com.flintclient.client.render.ScaledFont.of(com.flintclient.client.render.FlintFonts.LABEL,
+				5.2F * k);
+			scaledLines = new TextLine[lines.length];
+			for (int i = 0; i < lines.length; i++) {
+				scaledLines[i] = new TextLine(face, lines[i].text());
+			}
+			scaledBy = k;
+		}
+		scaledSource = lines;
+		return scaledLines;
 	}
 
 	// ---------- input ----------
 
+	/** A mouse button went down at ({@code x}, {@code y}) GUI units. */
 	@Override
-	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+	protected boolean pointerDown(double x, double y, int button) {
+		int font = PixelFace.begin(fontMode(minecraftFont()));
+		try {
+			return clicked(x, y, button);
+		} finally {
+			PixelFace.end(font);
+		}
+	}
+
+	private boolean clicked(double x, double y, int button) {
 		if (!acceptsInput()) {
 			return true;
 		}
-		float mx = toUiX(event.x());
-		float my = localY(event.y());
-		int button = event.button();
+		float mx = toUiX(x);
+		float my = localY(y);
 		if (captured != null) {
 			if (button != capturedButton) {
 				// Another button during a drag: swallowed, so the drag goes on.
@@ -578,34 +688,46 @@ public abstract class KitScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseReleased(MouseButtonEvent event) {
+	protected boolean pointerUp(double x, double y, int button) {
 		Node node = captured;
-		if (node == null || event.button() != capturedButton) {
+		if (node == null || button != capturedButton) {
 			return true;
 		}
 		captured = null;
 		if (acceptsInput()) {
-			node.mouseUp(toUiX(event.x()), localY(event.y()), event.button());
+			node.mouseUp(toUiX(x), localY(y), button);
 		}
 		return true;
 	}
 
 	@Override
-	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
-		if (captured != null && acceptsInput()) {
-			captured.mouseDrag(toUiX(event.x()), localY(event.y()));
+	protected boolean pointerDragged(double x, double y, int button) {
+		int font = PixelFace.begin(fontMode(minecraftFont()));
+		try {
+			if (captured != null && acceptsInput()) {
+				captured.mouseDrag(toUiX(x), localY(y));
+			}
+			return true;
+		} finally {
+			PixelFace.end(font);
 		}
-		return true;
 	}
 
 	@Override
-	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+	protected boolean wheel(double x, double y, double scrollY) {
 		if (!acceptsInput() || scrollY == 0) {
 			return true;
 		}
 		float mx = toUiX(x);
 		float my = localY(y);
 		for (Node node = scope().deepest(mx, my); node != null; node = node.parent) {
+			if (node.scroll(mx, my, scrollY)) {
+				return true;
+			}
+		}
+		// Nothing on the way up took it: a layer drawn over another (the HUD page over the HUD editor) passes the wheel to
+		// what a click there would reach.
+		for (Node node = scope().hit(mx, my); node != null; node = node.parent) {
 			if (node.scroll(mx, my, scrollY)) {
 				break;
 			}
@@ -614,13 +736,28 @@ public abstract class KitScreen extends Screen {
 	}
 
 	@Override
-	public void mouseMoved(double x, double y) {
+	protected void pointerMoved(double x, double y) {
 		mouseX = toUiX(x);
 		mouseY = localY(y);
 	}
 
 	@Override
-	public boolean keyPressed(KeyEvent event) {
+	protected boolean keyDown(KeyInput event) {
+		int font = PixelFace.begin(fontMode(minecraftFont()));
+		try {
+			return pressed(event);
+		} finally {
+			PixelFace.end(font);
+		}
+	}
+
+	/** A key was let go (nothing by default). */
+	@Override
+	protected boolean keyUp(KeyInput event) {
+		return false;
+	}
+
+	private boolean pressed(KeyInput event) {
 		if (!acceptsInput()) {
 			return true;
 		}
@@ -634,7 +771,7 @@ public abstract class KitScreen extends Screen {
 			}
 			return true;
 		}
-		if (event.key() == InputConstants.KEY_TAB) {
+		if (event.key() == Keys.TAB) {
 			focusVisible = true;
 			setFocus(FocusNav.next(collectFocusable(), focused, !event.hasShiftDown()), true);
 			return true;
@@ -674,16 +811,22 @@ public abstract class KitScreen extends Screen {
 
 	/** Escape with nothing else to close: closes the screen. */
 	protected void onEscape() {
-		if (shouldCloseOnEsc()) {
-			onClose();
+		if (hostClosesOnEscape()) {
+			closeRequested();
 		}
 	}
 
+	/** A character the game allows in text was typed. */
 	@Override
-	public boolean charTyped(CharacterEvent event) {
-		if (acceptsInput() && focused != null && focused.acceptsText() && focused.enabled() && event.isAllowedChatCharacter()) {
-			return focused.charTyped(event.codepoint());
+	protected boolean typed(int codepoint) {
+		int font = PixelFace.begin(fontMode(minecraftFont()));
+		try {
+			if (acceptsInput() && focused != null && focused.acceptsText() && focused.enabled()) {
+				return focused.charTyped(codepoint);
+			}
+			return false;
+		} finally {
+			PixelFace.end(font);
 		}
-		return false;
 	}
 }

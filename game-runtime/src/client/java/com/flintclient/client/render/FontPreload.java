@@ -2,9 +2,11 @@ package com.flintclient.client.render;
 
 import com.flintclient.client.FlintClient;
 import com.flintclient.client.graphics.Preparations;
+import com.flintclient.client.platform.FontSets;
 import com.mojang.blaze3d.font.GlyphProvider;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.FontDescription;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.Util;
@@ -57,7 +59,7 @@ public final class FontPreload {
 		if (enabled) {
 			try {
 				PREPARED.expire();
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				turnOff(e);
 			}
 		}
@@ -69,7 +71,7 @@ public final class FontPreload {
 		if (enabled) {
 			try {
 				prepare(Minecraft.getInstance().getWindow().getGuiScale());
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				turnOff(e);
 			}
 		}
@@ -80,19 +82,19 @@ public final class FontPreload {
 		if (enabled && created != null) {
 			try {
 				prepare(guiScale);
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				turnOff(e);
 			}
 		}
 	}
 
 	/** Fonts are made on the render thread from now on; what was prepared is dropped (closed once its job ends). */
-	private static void turnOff(RuntimeException e) {
+	private static void turnOff(Throwable e) {
 		FlintClient.LOGGER.warn("Flint font preparation failed; it's off for the rest of this session", e);
 		enabled = false;
 		try {
 			PREPARED.expire();
-		} catch (RuntimeException ignored) {
+		} catch (RuntimeException | LinkageError ignored) {
 			// Already failing: what's left is closed at shutdown, or not at all.
 		}
 	}
@@ -100,8 +102,10 @@ public final class FontPreload {
 	private static void prepare(int guiScale) {
 		// As Canvas and FlintFonts.forScale name the fonts: at least 1, larger than MAX_SCALE shares it.
 		int scale = Math.clamp(Math.max(1, guiScale), 1, FlintFonts.MAX_SCALE);
+		// Flint's main menu and its pages draw at their own size (MenuScale), often a fractional one: their faces too.
+		float menu = com.flintclient.client.ui.MenuScale.pixels();
 		Predicate<Identifier> exists = created;
-		if (exists == null || !PREPARED.switchTo(scale)) {
+		if (exists == null || !PREPARED.switchTo(scale * 10_000 + Math.round(menu * 100.0F))) {
 			return;
 		}
 		ResourceManager resources = Minecraft.getInstance().getResourceManager();
@@ -109,12 +113,21 @@ public final class FontPreload {
 			if (!role.menuRole()) {
 				continue;
 			}
-			Identifier id = role.fontId(scale);
-			FlintFonts.Spec spec = FlintFonts.spec(id);
-			// A font set made at this scale before (since the last reload) is still there.
-			if (spec != null && !exists.test(id)) {
-				PREPARED.start(id, () -> spec.loadWithGlyphs(resources), Util.backgroundExecutor());
+			start(role.forScale(scale), exists, resources);
+			if (TextLine.whole(menu)) {
+				start(role.forScale(Math.round(menu)), exists, resources);
+			} else {
+				start(TextLine.atScale(role, menu).forScale(1), exists, resources);
 			}
+		}
+	}
+
+	private static void start(com.flintclient.client.platform.FontRef font, Predicate<Identifier> exists, ResourceManager resources) {
+		Identifier id = ((FontDescription.Resource) font.description()).id();
+		FontSets.Spec spec = FontSets.spec(id);
+		// A font set made at this scale before (since the last reload) is still there.
+		if (spec != null && !exists.test(id)) {
+			PREPARED.start(id, () -> spec.loadWithGlyphs(resources), Util.backgroundExecutor());
 		}
 	}
 
@@ -146,7 +159,7 @@ public final class FontPreload {
 		enabled = false;
 		try {
 			PREPARED.shutdown();
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			FlintClient.LOGGER.warn("Couldn't finish Flint's font preparations at shutdown", e);
 		}
 	}

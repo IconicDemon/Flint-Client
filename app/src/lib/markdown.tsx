@@ -48,5 +48,6 @@ export function Markdown({ source, className = "" }: { source: string; className
     const href = link.getAttribute("href");
     if (href) void api.openExternal(href);
   };
-  return <div className={`markdown ${className}`} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
+  // A middle click on a link goes to the browser too, never to a pop-up window of the app.
+  return <div className={`markdown ${className}`} onClick={onClick} onAuxClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }

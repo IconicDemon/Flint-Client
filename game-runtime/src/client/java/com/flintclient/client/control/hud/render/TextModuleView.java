@@ -41,6 +41,7 @@ abstract class TextModuleView extends ModuleView {
 	private long now;
 	private int textW;
 	private int textH;
+	private int trail;
 
 	TextModuleView(String moduleId, int surface, BoxStyle style) {
 		super(moduleId, surface);
@@ -56,6 +57,15 @@ abstract class TextModuleView extends ModuleView {
 	 * May set {@link #colors}. Must not allocate.
 	 */
 	abstract int compose(ModuleState state, int mode, long nowNanos, char[] out);
+
+	/** Room for a drawing after the first line's text (Ping's signal bars), or 0 for none. */
+	int trailWidth(HudPen p) {
+		return 0;
+	}
+
+	/** Draws that drawing from {@code x} on the first line's baseline, in the line's colour. */
+	void drawTrail(HudPen p, int x, int baseline, int color) {
+	}
 
 	/** How often the text is composed again. */
 	long refreshNanos() {
@@ -130,16 +140,18 @@ abstract class TextModuleView extends ModuleView {
 		applyLook(p.s, state);
 		boolean brackets = state.choice(style.displayMode) == FpsDisplayMode.BRACKETS;
 		int bracketW = brackets ? p.width(OPEN, HudFaces.VALUE) + p.width(CLOSE, HudFaces.VALUE) + p.s.thin : 0;
+		trail = trailWidth(p);
 		textW = 0;
 		for (int i = 0; i < lineCount; i++) {
-			lineW[i] = p.width(lines[i], HudFaces.VALUE) + bracketW;
+			lineW[i] = p.width(lines[i], HudFaces.VALUE) + bracketW + (i == 0 && trail > 0 ? p.s.space + trail : 0);
 			textW = Math.max(textW, lineW[i]);
 		}
 		textH = linesHeight(p, lineCount);
 		FpsDisplayMode mode = state.choice(style.displayMode);
 		FpsSizing sizing = state.choice(style.backgroundType);
 		box.layout(textW, textH, p.s.u, mode, state.bool(style.background), sizing, state.integer(style.width), state.integer(style.height),
-			state.bool(style.border), state.integer(style.borderThickness), state.integer(style.cornerRadius), state.choice(style.align));
+			state.bool(style.border), state.integer(style.borderThickness), state.integer(style.cornerRadius), state.choice(style.align),
+			state.integer(style.horizontalPadding), state.integer(style.verticalPadding));
 		if (box.box && sizing == FpsSizing.DYNAMIC) {
 			int held = hold.width(box.width, now);
 			if (held > box.width) {
@@ -183,6 +195,10 @@ abstract class TextModuleView extends ModuleView {
 				at = p.text(OPEN, HudFaces.VALUE, at, baseline, p.s.text) + p.s.thin / 2;
 			}
 			at = p.text(lines[i], HudFaces.VALUE, at, baseline, color);
+			if (i == 0 && trail > 0) {
+				drawTrail(p, at + p.s.space, baseline, color);
+				at += p.s.space + trail;
+			}
 			if (brackets) {
 				p.text(CLOSE, HudFaces.VALUE, at + p.s.thin / 2, baseline, p.s.text);
 			}

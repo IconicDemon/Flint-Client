@@ -1,0 +1,8 @@
+{
+    "name": "water",
+    "groups": [
+        "water"
+    ],
+    "low-count": 100,
+    "high-count": 300
+}

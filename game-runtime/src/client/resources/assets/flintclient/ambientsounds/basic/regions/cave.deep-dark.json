@@ -1,0 +1,35 @@
+{
+	"name": "cave.deep-dark",
+	"regions": [
+		"cave"
+	],
+	"features": [
+		"sculk"
+	],
+	"sounds": [
+		{
+			"name": "deep-dark",
+			"files": [
+				"minecraft:block.sculk_sensor.clicking"
+			],
+			"category": "cave",
+			"volume": 0.5,
+			"pause": {
+				"min": 100,
+				"max": 500
+			}
+		},
+		{
+			"name": "water-droplets",
+			"files": [
+				"minecraft:block.pointed_dripstone.drip_water"
+			],
+			"category": "cave",
+			"volume": 0.25,
+			"pause": {
+				"min": 20,
+				"max": 100
+			}
+		}
+	]
+}

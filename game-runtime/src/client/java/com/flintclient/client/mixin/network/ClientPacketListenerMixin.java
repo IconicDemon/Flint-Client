@@ -25,6 +25,12 @@ abstract class ClientPacketListenerMixin {
 		NetworkHooks.reconfiguring(((ClientPacketListener) (Object) this).getConnection());
 	}
 
+	/** The server's game time, about once a second (on the main thread at the end): the TPS module's measure. */
+	@Inject(method = "handleSetTime", at = @At("TAIL"))
+	private void flint$serverTime(net.minecraft.network.protocol.game.ClientboundSetTimePacket packet, CallbackInfo callback) {
+		com.flintclient.client.control.feature.Features.SERVER_TICKS.record(packet.gameTime(), System.nanoTime());
+	}
+
 	@Inject(method = "close", at = @At("HEAD"))
 	private void flint$closed(CallbackInfo callback) {
 		NetworkHooks.closed(((ClientPacketListener) (Object) this).getConnection());

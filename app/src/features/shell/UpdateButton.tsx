@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
+import { useT } from "../../lib/i18n";
 import { useStoreSelect } from "../../lib/store";
-import { canInstallNow, downloadUpdate, installAndRestart, progressLabel, retryUpdate, useUpdates } from "../../lib/updater";
+import { canInstallNow, downloadUpdate, installAndRestart, megabytes, progressLabel, retryUpdate, useUpdates } from "../../lib/updater";
 import { Button, Progress, Spinner } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { Popover } from "../../ui/overlays";
@@ -12,6 +13,7 @@ import { Popover } from "../../ui/overlays";
  * version, which it holds back while Minecraft is running so a game is never cut short.
  */
 export function UpdateButton() {
+  const t = useT();
   const update = useUpdates();
   const gameRunning = useStoreSelect((s) => Object.values(s.states).some((st) => st.state === "running" || st.state === "launching"));
   const [open, setOpen] = useState(false);
@@ -27,10 +29,10 @@ export function UpdateButton() {
 
   const label =
     update.phase === "downloading" ? progressLabel(update.received, update.total)
-    : update.phase === "ready" ? "Restart to update"
-    : update.phase === "installing" ? "Installing…"
-    : update.phase === "error" ? "Update failed"
-    : "Update";
+    : update.phase === "ready" ? t("shell.update.restart")
+    : update.phase === "installing" ? t("shell.update.installing")
+    : update.phase === "error" ? t("shell.update.failed")
+    : t("shell.update.chip");
   const version = "version" in update ? update.version : null;
 
   return (
@@ -41,7 +43,7 @@ export function UpdateButton() {
         className={`update-chip is-${update.phase}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={version ? `Flint ${version}: ${label}` : label}
+        aria-label={version ? t("shell.update.chipLabel", { version, label }) : label}
         onClick={() => setOpen((o) => !o)}
       >
         {update.phase === "downloading" || update.phase === "installing" ? (
@@ -51,45 +53,41 @@ export function UpdateButton() {
         )}
         <span>{label}</span>
       </button>
-      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label="Flint update" className="update-pop">
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label={t("shell.update.panelLabel")} className="update-pop">
         <header className="update-head">
           <strong>Flint {version}</strong>
-          <span className="faint">Signed by Flint · checked before installing</span>
+          <span className="faint">{t("shell.update.signed")}</span>
         </header>
         {update.phase === "available" && (
           <>
             {update.notes && <p className="update-notes">{update.notes}</p>}
             <Button variant="primary" icon="download" onClick={() => void downloadUpdate()}>
-              Download update
+              {t("shell.update.download")}
             </Button>
           </>
         )}
         {update.phase === "downloading" && (
           <div className="update-progress">
-            <Progress value={update.total ? update.received / update.total : null} label="Downloading the update" />
+            <Progress value={update.total ? update.received / update.total : null} label={t("shell.update.downloading")} />
             <span className="faint">
-              {(update.received / 1_000_000).toFixed(1)} MB{update.total ? ` of ${(update.total / 1_000_000).toFixed(1)} MB` : ""}
+              {update.total ? t("shell.update.receivedOfTotal", { received: megabytes(update.received), total: megabytes(update.total) }) : megabytes(update.received)}
             </span>
           </div>
         )}
         {update.phase === "ready" && (
           <>
-            {gameRunning ? (
-              <p className="update-notes">Minecraft is running. Close it first: Flint restarts to finish updating, and your game won't be interrupted.</p>
-            ) : (
-              <p className="update-notes">Downloaded and verified. Flint restarts to finish; your profiles, worlds and settings stay as they are.</p>
-            )}
+            <p className="update-notes">{gameRunning ? t("shell.update.waitForGame") : t("shell.update.readyNote")}</p>
             <Button variant="primary" icon="refresh" disabled={!canInstallNow(update, gameRunning)} onClick={() => void installAndRestart(gameRunning)}>
-              Restart to update
+              {t("shell.update.restart")}
             </Button>
           </>
         )}
-        {update.phase === "installing" && <p className="update-notes">Installing… Flint will restart.</p>}
+        {update.phase === "installing" && <p className="update-notes">{t("shell.update.installingNote")}</p>}
         {update.phase === "error" && (
           <>
             <p className="update-notes is-danger">{update.message}</p>
             <Button variant="secondary" icon="refresh" onClick={() => retryUpdate()}>
-              Retry
+              {t("common.retry")}
             </Button>
           </>
         )}

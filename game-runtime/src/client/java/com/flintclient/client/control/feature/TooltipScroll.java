@@ -45,7 +45,7 @@ public final class TooltipScroll {
 	 * (or one after a pause) starts at {@code defaultScale}; with {@code snapToStart} it also starts at its top-left edge.
 	 */
 	public void begin(int width, int height, int lines, long nowNanos, boolean snapToStart, float defaultScale) {
-		boolean fresh = width != identityW || height != identityH || lines != identityLines || nowNanos - lastSeen > GONE_NANOS;
+		boolean fresh = width != identityW || height != identityH || lines != identityLines || lastSeen == Long.MIN_VALUE || nowNanos - lastSeen > GONE_NANOS;
 		identityW = width;
 		identityH = height;
 		identityLines = lines;
@@ -119,7 +119,7 @@ public final class TooltipScroll {
 
 	/** Whether a tooltip was drawn within the last moment (so a wheel notch is meant for it). */
 	public boolean showing(long nowNanos) {
-		return nowNanos - lastSeen <= GONE_NANOS;
+		return lastSeen != Long.MIN_VALUE && nowNanos - lastSeen <= GONE_NANOS;
 	}
 
 	/** Whether the tooltip is taller (vertical) or wider than the window allows. */

@@ -1,7 +1,146 @@
 [
   {
+    "version": "1.0.1",
+    "date": "2026-11-08",
+    "page_url": "https://flintclient.com/releases/1.0.1/",
+    "title": "Flint 1.0",
+    "summary": "The first general release: Flint Friends and Flint capes inside Minecraft on every version, a redesigned Store page, a smaller and faster launcher, and fixes for the bugs players told us about.",
+    "points": [
+      "Flint Friends inside Minecraft on every version, 1.8.9 included: chat, answer requests, pin friends and send gifts from the title screen, with a short note when a friend comes online or messages you",
+      "A Cosmetics window in Minecraft shows the Flint Store capes on your account and lets you wear them",
+      "Animated capes play on every version, 1.8.9 included, and in the launcher's previews",
+      "A calmer Cosmetics page: a 3D preview of what you wear, your items by slot with a clear None, and your Merit, orders and the Flint Store one click away",
+      "Add resource packs and shader packs while you play: they show up in Minecraft right away and can turn on at once, with no restart",
+      "Armor HUD: drag it anywhere in the HUD editor, change the size and weight of its durability text, and add your sword, pickaxe, axe, shield and other tools",
+      "Friends signs you in by itself with your Minecraft sign-in, safely: no codes to type, you stay signed in, and Friends opens straight away with your last list while it reconnects",
+      "With the Flint theme, the title screen's Friends button opens Flint Friends; the Vanilla theme keeps Minecraft's own",
+      "Your Flint cape shows first everywhere in the launcher, then your Minecraft cape",
+      "News opens the full article: Flint releases on flintclient.com, Minecraft releases on minecraft.net",
+      "Your friends show with their real skins, and a friend's name or message can never change how the game draws text",
+      "Type the memory a profile gets, such as 6 or 6.5 GB, instead of only dragging the slider",
+      "A smaller download: the Windows installer is about 30% smaller (15 MB instead of 22 MB)",
+      "New Minecraft versions install about a third faster (a fresh 26.3 install took 21 seconds instead of 31 on our test PC), and mods download several at once",
+      "On our test PC a new Flint profile ran 19% more frames per second than vanilla Minecraft on the same settings (822 against 690 FPS on average over 12 scenarios on 26.3 and 1.8.9)",
+      "3D Skins, Tier Tagger and chat stacking do far less work each frame, so busy lobbies stay smooth",
+      "\"The authentication servers are currently not reachable\" and \"Failed to verify username\" when joining a server: Flint waits a moment and tries again, on every version including 1.8.9",
+      "Toggle Sprint and Toggle Sneak no longer turn on by themselves after you close your inventory with the key held",
+      "Flint keys bound to a mouse side button work, and a mouse button let go inside a menu no longer stays held, so the camera and player never move by themselves",
+      "The Darkness effect from the Warden and sculk shriekers dims the screen again, as in Minecraft",
+      "Chat messages that start with \"=\", such as \"=)\", are sent as typed instead of being taken for a calculation",
+      "Elytra wings show again while you wear a Flint cape",
+      "A Flint menu that runs into an error closes instead of crashing the game",
+      "Two nametags over the same player on some servers: Flint follows the server's nametag rules, so every player has one",
+      "Flint players see each other's Flint icon again, including players a server keeps out of the player list",
+      "The sky no longer flickers with Custom Fog's No Fog or a high fog distance, and Blindness and Darkness always keep their fog"
+    ],
+    "sections": [
+      {
+        "heading": "New",
+        "points": [
+          "Flint Friends inside Minecraft on every version, 1.8.9 included: chat, answer requests, pin friends and send gifts from the title screen, with a short note when a friend comes online or messages you",
+          "A Cosmetics window in Minecraft shows the Flint Store capes on your account and lets you wear them",
+          "Animated capes play on every version, 1.8.9 included, and in the launcher's previews",
+          "A calmer Cosmetics page: a 3D preview of what you wear, your items by slot with a clear None, and your Merit, orders and the Flint Store one click away",
+          "Add resource packs and shader packs while you play: they show up in Minecraft right away and can turn on at once, with no restart",
+          "Armor HUD: drag it anywhere in the HUD editor, change the size and weight of its durability text, and add your sword, pickaxe, axe, shield and other tools"
+        ]
+      },
+      {
+        "heading": "Improved",
+        "points": [
+          "Friends signs you in by itself with your Minecraft sign-in, safely: no codes to type, you stay signed in, and Friends opens straight away with your last list while it reconnects",
+          "With the Flint theme, the title screen's Friends button opens Flint Friends; the Vanilla theme keeps Minecraft's own",
+          "Your Flint cape shows first everywhere in the launcher, then your Minecraft cape",
+          "News opens the full article: Flint releases on flintclient.com, Minecraft releases on minecraft.net",
+          "Your friends show with their real skins, and a friend's name or message can never change how the game draws text",
+          "Type the memory a profile gets, such as 6 or 6.5 GB, instead of only dragging the slider"
+        ]
+      },
+      {
+        "heading": "Performance",
+        "points": [
+          "A smaller download: the Windows installer is about 30% smaller (15 MB instead of 22 MB)",
+          "New Minecraft versions install about a third faster (a fresh 26.3 install took 21 seconds instead of 31 on our test PC), and mods download several at once",
+          "On our test PC a new Flint profile ran 19% more frames per second than vanilla Minecraft on the same settings (822 against 690 FPS on average over 12 scenarios on 26.3 and 1.8.9)",
+          "3D Skins, Tier Tagger and chat stacking do far less work each frame, so busy lobbies stay smooth"
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "points": [
+          "\"The authentication servers are currently not reachable\" and \"Failed to verify username\" when joining a server: Flint waits a moment and tries again, on every version including 1.8.9",
+          "Toggle Sprint and Toggle Sneak no longer turn on by themselves after you close your inventory with the key held",
+          "Flint keys bound to a mouse side button work, and a mouse button let go inside a menu no longer stays held, so the camera and player never move by themselves",
+          "The Darkness effect from the Warden and sculk shriekers dims the screen again, as in Minecraft",
+          "Chat messages that start with \"=\", such as \"=)\", are sent as typed instead of being taken for a calculation",
+          "Elytra wings show again while you wear a Flint cape",
+          "A Flint menu that runs into an error closes instead of crashing the game",
+          "Two nametags over the same player on some servers: Flint follows the server's nametag rules, so every player has one",
+          "Flint players see each other's Flint icon again, including players a server keeps out of the player list",
+          "The sky no longer flickers with Custom Fog's No Fog or a high fog distance, and Blindness and Darkness always keep their fog"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "0.9.1",
+    "date": "2026-11-04",
+    "page_url": "https://flintclient.com/releases/0.9.1/",
+    "title": "Friends",
+    "summary": "Add your friends, see who's online and chat in Flint, now in 17 languages, plus profiles from other launchers, Update all and a calmer Music Player.",
+    "points": [
+      "Friends: add Flint players by their Minecraft name, accept or decline requests, pin your favourites and chat. Only players who use Flint can be added",
+      "Set yourself Online, Busy, Away or Invisible, and get a note with a soft sound when a friend comes online, a request arrives or a message comes in (each can be turned off)",
+      "Flint asks before you send anything that looks like a password, email, login or card number, and keeps it blurred. Flint staff will never ask for them",
+      "Send a gift: the Flint Store opens with your friend already chosen as the one who receives it",
+      "Subtitles' Nearby Sound Activity shows sounds around you in the bottom-right corner, with arrows pointing where they come from, on every version including 1.8.9",
+      "Music Player: calmer motion, colours taken from the album art, a softer card while paused, and sliders for art size and bar thickness",
+      "Import profiles from the Modrinth App, CurseForge, Prism, MultiMC, Lunar, Feather, Dawn, the Minecraft Launcher, GDLauncher and ATLauncher, with their mods and settings",
+      "Update all: Flint finds mod updates by itself, and Update projects lets you choose versions, read changelogs and pin a mod",
+      "Flint in 17 languages: English, Español, Português (Brasil), Deutsch, Français, Italiano, Nederlands, Polski, Русский, Українська, Türkçe, हिन्दी, Bahasa Indonesia, Tiếng Việt, 日本語, 한국어 and 中文 (简体)",
+      "Syncing, Java and memory, Storage and Troubleshooting pages in Settings",
+      "Fixed: \"The authentication servers are currently not reachable\" on the first server you join, and the Brightness mod now works in single player and on servers, also with Sodium",
+      "Fewer crashes: every Minecraft version runs on the same Java, with the same settings, as the official Minecraft Launcher",
+      "Flint now also comes for Macs with an Intel chip and for Linux (AppImage and .deb)"
+    ]
+  },
+  {
+    "version": "0.5.5",
+    "date": "2026-11-01",
+    "page_url": "https://flintclient.com/releases/0.5.5/",
+    "title": "Your profiles, your icons",
+    "summary": "Your profiles in the sidebar with icons of their own, any tile color, UHC Overlay items as rows of their own, and a TNT timer that stays above the TNT.",
+    "points": [
+      "Your profiles in the sidebar: open the arrow on the Profiles button to see up to five, pinned ones first, then the ones you play most",
+      "Give a profile a sidebar icon: over 100 Minecraft items in groups, with a search, on a tile of any color you pick, or your own picture",
+      "Pin up to five favorites from a profile's ••• menu, and right-click one in the sidebar to open or unpin it",
+      "Profile folders are named after your profiles, like Demon-26.3, instead of random letters and numbers",
+      "UHC Overlay: items you add show up in the Scale section, each with its own size slider and a remove button",
+      "TNT Timer stays in place above the TNT and gets smaller with distance, now on every version including 1.8.9, with a Time color",
+      "UHC Overlay's item search works from the title screen too, and a button that fails no longer turns off the Right Shift menu",
+      "The launcher stops showing Running the moment your game has closed, and Flint's news has a new picture"
+    ]
+  },
+  {
+    "version": "0.5.3",
+    "date": "2026-11-01",
+    "page_url": "https://flintclient.com/releases/0.5.3/",
+    "title": "Any color, any item",
+    "summary": "A full color picker for every color setting, UHC Overlay for any item, and the new Flint menu on every version.",
+    "points": [
+      "Pick any color: a color square, a hue bar, your recent colors and a hex box, everywhere a mod has a color",
+      "UHC Overlay: search any item of your Minecraft version, add it and choose how big it shows on the ground",
+      "UHC Overlay now works on 1.8.9 too, and item lists show each item's picture",
+      "The new Right Shift menu, with up to 95 mods, on Minecraft 1.8.9, 1.21.1, 1.21.10, 1.21.11, 26.1, 26.2 and 26.3",
+      "Flint players see a Flint mark before each other's names and in the player list",
+      "Sign in to the Flint Store from the app to see your Merits and Store cosmetics",
+      "A smaller download and app: Flint now takes half the space it did"
+    ]
+  },
+  {
     "version": "0.5.2",
     "date": "2026-10-18",
+    "page_url": "https://flintclient.com/releases/0.5.2/",
     "title": "A cleaner right-click",
     "summary": "Right-clicking in Flint no longer opens the browser menu.",
     "points": [
@@ -12,6 +151,7 @@
   {
     "version": "0.5.1",
     "date": "2026-10-17",
+    "page_url": "https://flintclient.com/releases/0.5.1/",
     "title": "Flint on Windows",
     "summary": "The first Flint build for Windows, plus artwork for every version.",
     "points": [
@@ -24,18 +164,20 @@
   {
     "version": "0.5.0",
     "date": "2026-10-16",
-    "title": "Beta 1 is here",
-    "summary": "The first Flint beta for Minecraft 26.3.",
+    "page_url": "https://flintclient.com/releases/0.5.0/",
+    "title": "Flint for Minecraft 26.3",
+    "summary": "The first public Flint for Minecraft 26.3.",
     "points": [
       "Quick Play: pin up to five servers from Multiplayer to the main menu",
       "Flint updates itself: an Update button appears when a new version is out",
-      "A clearer Settings button, and the Store coming soon",
+      "A clearer Settings button",
       "Flint's main menu stays readable at any GUI scale"
     ]
   },
   {
     "version": "0.4.0",
     "date": "2026-10-14",
+    "page_url": "https://flintclient.com/releases/0.4.0/",
     "title": "Flint, now inside Minecraft",
     "summary": "Flint's own menu, now in Minecraft 26.3.",
     "points": [
@@ -48,6 +190,7 @@
   {
     "version": "0.3.0",
     "date": "2026-10-12",
+    "page_url": "https://flintclient.com/releases/0.3.0/",
     "title": "A calmer, more complete Flint",
     "summary": "Home, Profiles and Skins rebuilt around real account and profile data.",
     "points": [
@@ -60,6 +203,7 @@
   {
     "version": "0.2.0",
     "date": "2026-10-11",
+    "page_url": "https://flintclient.com/releases/0.2.0/",
     "title": "A new Flint",
     "summary": "Guided first-run setup with Microsoft sign-in.",
     "points": [

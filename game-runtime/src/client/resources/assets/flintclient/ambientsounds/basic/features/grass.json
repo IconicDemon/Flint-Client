@@ -1,0 +1,21 @@
+{
+    "name": "grass",
+    "or": [
+        {
+            "groups": [
+                "grass",
+                "grass_block"
+            ],
+            "low-count": 30,
+            "low-weight": 0.2,
+            "high-weight": 0.4
+        },
+        {
+            "groups": [
+                "grass"
+            ],
+            "low-count": 30,
+            "high-count": 100
+        }
+    ]
+}

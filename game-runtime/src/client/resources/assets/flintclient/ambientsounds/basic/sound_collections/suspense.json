@@ -1,0 +1,16 @@
+{
+	"sounds": [
+		{
+			"name": "suspense",
+			"files": [
+				"minecraft:ambient.soul_sand_valley.mood"
+			],
+			"pause": {
+				"min": 100,
+				"max": 600
+			},
+			"pitch": 0.6,
+			"volume": 0.6
+		}
+	]
+}

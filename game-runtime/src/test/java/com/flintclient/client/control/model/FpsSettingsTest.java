@@ -41,7 +41,7 @@ class FpsSettingsTest {
 		assertEquals(FpsSizing.DYNAMIC, fps.choice(ModuleSettings.Fps.BACKGROUND_TYPE));
 		assertFalse(fps.bool(ModuleSettings.Fps.BORDER));
 		assertEquals(0xFFFFFF, fps.rgb(ModuleSettings.Fps.TEXT_COLOR));
-		assertTrue(fps.bool(ModuleSettings.Fps.TEXT_SHADOW));
+		assertFalse(fps.bool(ModuleSettings.Fps.TEXT_SHADOW), "clean text, no hard shadow, by default");
 		assertFalse(fps.bool(ModuleSettings.Fps.REVERSED), "80 FPS, not FPS 80");
 		assertTrue(fps.bool(ModuleSettings.Fps.SHOW_LABEL));
 		assertEquals(45, fps.integer(ModuleSettings.Fps.BACKGROUND_OPACITY));

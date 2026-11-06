@@ -643,7 +643,9 @@ None of the bundled OFL texts declares a Reserved Font Name. All fonts are bundl
 |---|---|---|
 | app/src/assets/brand/flint-icon.svg, app/src-tauri/icons/* | Flint original | GPL-3.0-only (Flint Client) |
 | app/src/assets/wallpapers/** | Flint original placeholders (charcoal and orange gradients) | GPL-3.0-only (Flint Client) |
-| game-runtime/src/client/resources/assets/flintclient/textures/gui/menu_background.png, module_preview_scene.png | Rendered Minecraft scenes (game screenshots) | Minecraft content (c) Mojang/Microsoft; not covered by Flint's licence |
+| app/src/assets/news/flint-1.0.1-release.png | Flint original (the 1.0.1 release banner) | GPL-3.0-only (Flint Client); the Flint name and logo are trademarks (see README) |
+| app/src/assets/news/flint-sparks.jpg | "A fire with sparks" by Wes Hicks (unsplash.com/photos/-zI5SUBdbwg), cropped | Unsplash License (free to use; not covered by Flint's licence) |
+| game-runtime/src/client/resources/assets/flintclient/textures/gui/menu_background.png | A rendered Minecraft scene (game screenshot) | Minecraft content (c) Mojang/Microsoft; not covered by Flint's licence |
 
-UI sounds are synthesised at run time (no audio files). Player skins and Mojang patch-note images are downloaded at run
-time from Mojang's servers and are not part of this repository.
+UI sounds are synthesised at run time (no audio files). Player skins are downloaded at run time from Mojang's servers
+and are not part of this repository.

@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.flintclient.client.mixin",
+  "plugin": "com.flintclient.client.FlintMixinPlugin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "bridge.MinecraftFriendsAccessor",
+    "feature.NameTagShadowMixin",
+    "feature.HudFoodMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

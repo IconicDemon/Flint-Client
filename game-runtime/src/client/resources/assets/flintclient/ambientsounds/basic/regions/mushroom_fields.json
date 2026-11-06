@@ -1,0 +1,41 @@
+{
+	"name": "mushroom_fields",
+	"biomes": [
+		"mushroom_fields"
+	],
+	"sounds": [
+		{
+			"name": "cicadas-mushroom-fields",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cicadas",
+			"volume": 0.5,
+			"day": 1,
+			"time": [
+				"day",
+				"night"
+			],
+			"night": "0.1",
+			"pause": {
+				"min": 20,
+				"max": 100
+			},
+			"pitch": 0.7
+		},
+		{
+			"name": "special-mushroom-fields",
+			"files": [
+				"minecraft:block.eyeblossom.idle"
+			],
+			"category": "animal",
+			"volume": 0.5,
+			"day": 1,
+			"night": "0.2",
+			"pause": {
+				"min": 500,
+				"max": 2200
+			}
+		}
+	]
+}

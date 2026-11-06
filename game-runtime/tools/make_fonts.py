@@ -1,8 +1,9 @@
 """Regenerates the static TrueType fonts the in-game menu uses from the launcher's own fonts.
 
 Minecraft's font loader needs plain TrueType files at a fixed weight, while the launcher ships
-variable WOFF2/TTF files. This instances Inter at 400/500/600 (merging its Latin and Latin Extended
-subsets into one file) and Outfit at 700 (the wordmark), then keeps only Latin, Latin Extended-A/B and common
+variable WOFF2/TTF files. This instances Inter at 600 (merging its Latin and Latin Extended subsets
+into one file; the menu's Nunito Sans faces fall back to it for the arrows they lack, FontSets.FALLBACK)
+and Outfit at 700 (the wordmark), then keeps only Latin, Latin Extended-A/B and common
 punctuation: Minecraft loads a copy of the font for every text role and GUI scale, so small files
 matter. Other scripts fall back to Minecraft's own font. All fonts are SIL Open Font License 1.1.
 
@@ -39,7 +40,7 @@ def shrink(path: str, unicodes: str) -> None:
 
 def main() -> None:
     with tempfile.TemporaryDirectory() as work:
-        for weight, name in [(400, "regular"), (500, "medium"), (600, "semibold")]:
+        for weight, name in [(600, "semibold")]:
             parts = []
             for script in ["Latin", "LatinExt"]:
                 part = os.path.join(work, f"inter-{name}-{script}.ttf")

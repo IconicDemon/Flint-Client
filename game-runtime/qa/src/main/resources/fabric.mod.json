@@ -18,11 +18,15 @@
     {
       "config": "flintqa.mixins.json",
       "environment": "client"
+    },
+    {
+      "config": "flintqa.version.mixins.json",
+      "environment": "client"
     }
   ],
   "depends": {
     "fabricloader": ">=0.19.5",
-    "minecraft": "~26.3",
+    "minecraft": "${minecraftRange}",
     "java": ">=25"
   }
 }

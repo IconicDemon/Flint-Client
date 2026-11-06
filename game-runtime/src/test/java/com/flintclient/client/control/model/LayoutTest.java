@@ -21,7 +21,7 @@ class LayoutTest {
 			assertSame(ModuleRegistry.all().get(i), layout.modules().get(i).descriptor());
 		}
 		assertSame(layout.modules().get(3), layout.module("keystrokes"));
-		assertNull(layout.module("minimap"));
+		assertNull(layout.module("teleporter"));
 		assertEquals(HudThemeId.FLINT, layout.appearance().theme());
 		assertNull(layout.appearance().backgroundOpacity(), "the panel follows the style");
 		assertNull(layout.appearance().background());

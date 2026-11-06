@@ -1,13 +1,13 @@
 package com.flintclient.client.control;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** The first public beta ships without the Right Shift customization; turning it back on is a deliberate change here. */
+/** The Right Shift customization is on (owner request, 2026-10-18); switching it off again is a deliberate change here. */
 class BetaFeaturesTest {
 	@Test
-	void theRightShiftCustomizationIsOffForTheBeta() {
-		assertFalse(BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION);
+	void theRightShiftCustomizationIsOn() {
+		assertTrue(BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION);
 	}
 }

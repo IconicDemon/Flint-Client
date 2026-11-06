@@ -1,0 +1,491 @@
+{
+  "schema": 1,
+  "menu": {
+    "favorites": [],
+    "compact": false
+  },
+  "general": {
+    "menuScale": 100
+  },
+  "modules": {
+    "armorstatus": {
+      "enabled": true,
+      "settings": {
+        "durability": "both",
+        "layout": "vertical",
+        "held": true,
+        "dynamicColor": true,
+        "count": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 2,
+        "x": -4.0,
+        "y": -4.0,
+        "scale": 1.0
+      }
+    },
+    "blockoverlay": {
+      "enabled": true,
+      "settings": {
+        "outline": true,
+        "outlineColor": "#FFFF8139",
+        "outlineWidth": 2,
+        "fill": true,
+        "fillColor": "#33FF8139",
+        "throughWalls": false,
+        "toggleKey": 0
+      }
+    },
+    "brightness": {
+      "enabled": false,
+      "settings": {
+        "level": 1000,
+        "toggleKey": 0
+      }
+    },
+    "combodisplay": {
+      "enabled": true,
+      "settings": {
+        "timeout": 2,
+        "showZero": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 172.0,
+        "scale": 1.0
+      }
+    },
+    "coordinates": {
+      "enabled": true,
+      "settings": {
+        "layout": "vertical",
+        "decimals": "0",
+        "facing": false,
+        "axisColor": "#FFFF8139",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 1,
+        "x": 0.0,
+        "y": -15.399994,
+        "scale": 1.3
+      }
+    },
+    "cps": {
+      "enabled": true,
+      "settings": {
+        "buttons": "both",
+        "labelMode": "suffix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 24.0,
+        "scale": 1.0
+      }
+    },
+    "crosshair": {
+      "enabled": true,
+      "settings": {
+        "style": "cross",
+        "size": 5,
+        "gap": 2,
+        "thickness": 2,
+        "color": "#FF55FF55",
+        "outline": true,
+        "outlineColor": "#C0000000",
+        "invert": false,
+        "toggleKey": 0
+      }
+    },
+    "day_counter": {
+      "enabled": true,
+      "settings": {
+        "labelMode": "prefix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 0,
+        "x": -4.0,
+        "y": 24.0,
+        "scale": 1.0
+      }
+    },
+    "direction": {
+      "enabled": true,
+      "settings": {
+        "format": "short",
+        "degrees": true,
+        "axis": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 1,
+        "anchorY": 0,
+        "x": 0.0,
+        "y": 4.0,
+        "scale": 1.0
+      }
+    },
+    "fps": {
+      "enabled": true,
+      "settings": {
+        "labelMode": "suffix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 1,
+        "anchorY": 0,
+        "x": -10.0,
+        "y": 78.0,
+        "scale": 1.0
+      }
+    },
+    "hitcolor": {
+      "enabled": true,
+      "settings": {
+        "color": "#FF2060FF",
+        "strength": 60,
+        "toggleKey": 0
+      }
+    },
+    "itemcounter": {
+      "enabled": true,
+      "settings": {
+        "goldenApples": true,
+        "enderPearls": true,
+        "arrows": true,
+        "splashHealing": true,
+        "soup": false,
+        "hideZero": true,
+        "layout": "vertical",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 1,
+        "x": -4.0,
+        "y": 60.0,
+        "scale": 1.0
+      }
+    },
+    "keystrokes": {
+      "enabled": true,
+      "settings": {
+        "mouse": true,
+        "cps": true,
+        "space": true,
+        "keyColor": "#66000000",
+        "pressedColor": "#CCFFFFFF",
+        "textColor": "#FFFFFFFF",
+        "pressedTextColor": "#FF000000",
+        "textShadow": true,
+        "fade": 100,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 44.0,
+        "scale": 1.0
+      }
+    },
+    "motionblur": {
+      "enabled": false,
+      "settings": {
+        "amount": 8,
+        "toggleKey": 0
+      }
+    },
+    "nametags": {
+      "enabled": true,
+      "settings": {
+        "showOwn": true,
+        "textShadow": true,
+        "background": true,
+        "backgroundOpacity": 25,
+        "toggleKey": 0
+      }
+    },
+    "ping": {
+      "enabled": true,
+      "settings": {
+        "colored": false,
+        "hideSingleplayer": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 132.0,
+        "scale": 1.0
+      }
+    },
+    "potioneffects": {
+      "enabled": true,
+      "settings": {
+        "icons": true,
+        "names": true,
+        "blink": true,
+        "nameColor": "#FFFFFFFF",
+        "timeColor": "#FFAAAAAA",
+        "textShadow": true,
+        "background": false,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 1,
+        "x": -4.0,
+        "y": -40.0,
+        "scale": 1.0
+      }
+    },
+    "reachdisplay": {
+      "enabled": true,
+      "settings": {
+        "decimals": "2",
+        "hideAfter": 0,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 152.0,
+        "scale": 1.0
+      }
+    },
+    "saturation": {
+      "enabled": true,
+      "settings": {
+        "hud": true,
+        "showFood": false,
+        "overlay": true,
+        "color": "#FFFFC93C",
+        "opacity": 55,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 1,
+        "anchorY": 2,
+        "x": 124.0,
+        "y": -3.0,
+        "scale": 1.0
+      }
+    },
+    "scoreboard": {
+      "enabled": true,
+      "settings": {
+        "showNumbers": true,
+        "numberColor": "#FFFF8139",
+        "textColor": "#FFFFFFFF",
+        "textShadow": false,
+        "background": true,
+        "backgroundColor": "#50000000",
+        "titleBackground": "#66000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 2,
+        "verticalPadding": 1,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 1,
+        "x": -1.0,
+        "y": 0.0,
+        "scale": 1.0
+      }
+    },
+    "time": {
+      "enabled": true,
+      "settings": {
+        "24h": false,
+        "seconds": false,
+        "date": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 0,
+        "x": -4.0,
+        "y": 4.0,
+        "scale": 1.0
+      }
+    },
+    "togglesprint": {
+      "enabled": true,
+      "settings": {
+        "toggleSprint": true,
+        "toggleSneak": false,
+        "hud": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 2,
+        "x": 4.0,
+        "y": -4.0,
+        "scale": 1.0
+      }
+    },
+    "zoom": {
+      "enabled": true,
+      "settings": {
+        "mode": "hold",
+        "level": 4,
+        "scroll": true,
+        "smooth": true,
+        "slowerMouse": true,
+        "cinematic": false,
+        "toggleKey": 0
+      }
+    }
+  }
+}

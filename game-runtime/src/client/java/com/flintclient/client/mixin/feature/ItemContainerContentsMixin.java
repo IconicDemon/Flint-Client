@@ -1,6 +1,6 @@
 package com.flintclient.client.mixin.feature;
 
-import com.flintclient.client.control.platform.Mc263Visuals;
+import com.flintclient.client.control.platform.Mc263Containers;
 import java.util.function.Consumer;
 import net.minecraft.core.component.DataComponentGetter;
 import net.minecraft.network.chat.Component;
@@ -18,7 +18,7 @@ abstract class ItemContainerContentsMixin {
 	@Inject(method = "addToTooltip", at = @At("HEAD"), cancellable = true)
 	private void flint$hideList(Item.TooltipContext context, Consumer<Component> consumer, TooltipFlag flag, DataComponentGetter components,
 		CallbackInfo callback) {
-		if (Mc263Visuals.hideContainerList()) {
+		if (Mc263Containers.hideList()) {
 			callback.cancel();
 		}
 	}

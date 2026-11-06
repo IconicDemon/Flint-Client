@@ -5,7 +5,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -13,8 +13,9 @@ pub const SUPPORTED_VERSIONS: [&str; 9] =
     ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.8.9"];
 pub const DISCORD_INVITE: &str = "https://discord.gg/59rAHZMWb7";
 /// Built-in address of Flint's AI gateway, the production Cloudflare Worker (Mojang-verified players
-/// only; no key or secret in the app). Settings ("aiGatewayUrl") or FLINT_AI_GATEWAY_URL can point a
-/// build elsewhere, e.g. at staging for tests.
+/// only; no key or secret in the app). FLINT_AI_GATEWAY_URL (at run or build time) can point a build
+/// elsewhere, e.g. at staging for tests; it is no longer a setting, so an address saved by an older Flint
+/// is ignored.
 const DEFAULT_AI_GATEWAY: Option<&str> = None;
 const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
@@ -110,14 +111,9 @@ pub struct AppInfo {
     perf_run: Option<String>,
 }
 
-pub fn gateway_url(state: &AppState) -> Option<String> {
-    let settings = load_settings(state);
-    settings["aiGatewayUrl"]
-        .as_str()
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-        .map(str::to_owned)
-        .or_else(|| std::env::var("FLINT_AI_GATEWAY_URL").ok())
+pub fn gateway_url() -> Option<String> {
+    std::env::var("FLINT_AI_GATEWAY_URL")
+        .ok()
         .or_else(|| option_env!("FLINT_AI_GATEWAY_URL").map(str::to_owned))
         .or_else(|| DEFAULT_AI_GATEWAY.map(str::to_owned))
         .filter(|u| valid_gateway(u))
@@ -144,7 +140,7 @@ pub fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
         data_dir: state.paths.root.display().to_string(),
         qa: state.qa,
         force_onboarding: state.force_onboarding,
-        gateway_configured: gateway_url(&state).is_some(),
+        gateway_configured: gateway_url().is_some(),
         discord_url: Some(option_env!("FLINT_DISCORD_URL").filter(|u| u.starts_with("https://")).unwrap_or(DISCORD_INVITE)),
         qa_start_page: std::env::var_os("FLINT_DATA_DIR")
             .and(std::env::var("FLINT_QA_PAGE").ok())
@@ -183,6 +179,8 @@ pub fn open_external(app: AppHandle, url: String) -> CmdResult<()> {
 pub fn reveal_folder(app: AppHandle, state: State<'_, AppState>, which: String, profile_id: Option<String>) -> CmdResult<()> {
     let path = match which.as_str() {
         "data" => state.paths.root.clone(),
+        // Minecraft's shared files: versions, libraries and assets.
+        "game" => state.paths.game(),
         "profiles" => state.paths.root.join("profiles"),
         "profile" | "mods" | "resourcepacks" | "shaderpacks" | "saves" | "screenshots" | "config" | "logs" => {
             let id = profile_id.ok_or("Missing profile")?;
@@ -192,6 +190,19 @@ pub fn reveal_folder(app: AppHandle, state: State<'_, AppState>, which: String, 
             find_profile(&state, &id)?;
             let dir = state.paths.profile_dir(&id);
             if which == "profile" { dir } else { dir.join(&which) }
+        }
+        // A profile's backups: earlier versions of updated content and Auto Sync's backups. Only opened, never made.
+        "backups" => {
+            let id = profile_id.ok_or("Missing profile")?;
+            if !is_safe_id(&id) {
+                return Err("Invalid profile".into());
+            }
+            find_profile(&state, &id)?;
+            let dir = state.paths.profile_dir(&id).join(".flint-backup");
+            if !dir.is_dir() {
+                return Err("This profile has no backups.".into());
+            }
+            dir
         }
         _ => return Err("Unknown folder".into()),
     };
@@ -214,64 +225,12 @@ pub fn launch_at_login_set(app: AppHandle, enabled: bool) -> CmdResult<bool> {
     Ok(manager.is_enabled().unwrap_or(enabled))
 }
 
-/// Total size of a file or folder. Symlinks are counted as links, never followed.
-fn disk_size(path: &std::path::Path) -> u64 {
-    let Ok(meta) = std::fs::symlink_metadata(path) else { return 0 };
-    if meta.is_dir() {
-        std::fs::read_dir(path)
-            .map(|entries| entries.flatten().map(|e| disk_size(&e.path())).sum())
-            .unwrap_or(0)
-    } else {
-        meta.len()
-    }
-}
-
 /// Runs blocking file-system work on a background thread, so a large walk can't freeze the window.
 pub async fn blocking<T: Send + 'static>(app: &AppHandle, work: impl FnOnce(&AppState) -> T + Send + 'static) -> CmdResult<T> {
     let app = app.clone();
     tokio::task::spawn_blocking(move || work(&app.state::<AppState>()))
         .await
         .map_err(|e| format!("Background task failed: {e}"))
-}
-
-#[tauri::command]
-pub async fn storage_usage(app: AppHandle) -> CmdResult<Value> {
-    blocking(&app, |state| {
-        json!({
-            "game": disk_size(&state.paths.game()),
-            "runtimes": disk_size(&state.paths.runtimes()),
-            "profiles": disk_size(&state.paths.root.join("profiles")),
-            "cache": disk_size(&state.paths.cache()),
-        })
-    })
-    .await
-}
-
-/// The only files Clear Cache may remove. All of them are re-downloaded on demand; worlds, mods,
-/// settings, accounts and installed game files are never in this list.
-const CACHE_ENTRIES: [&str; 3] = ["skins", "news.json", "catalog.json"];
-
-/// Removes the cached entries under `cache`, continuing past failures, and reports exactly what
-/// happened: bytes freed and anything that couldn't be removed.
-fn clear_cache_dir(cache: &std::path::Path) -> Value {
-    let mut removed = 0u64;
-    let mut failed = Vec::new();
-    for name in CACHE_ENTRIES {
-        let path = cache.join(name);
-        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-        let size = disk_size(&path);
-        let result = if meta.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
-        match result {
-            Ok(()) => removed += size,
-            Err(error) => failed.push(json!({ "name": name, "error": error.to_string() })),
-        }
-    }
-    json!({ "removedBytes": removed, "failed": failed })
-}
-
-#[tauri::command]
-pub async fn cache_clear(app: AppHandle) -> CmdResult<Value> {
-    blocking(&app, |state| clear_cache_dir(&state.paths.cache())).await
 }
 
 // ---------- profiles ----------
@@ -301,6 +260,33 @@ pub struct Profile {
     /// Heap for this profile in MB. None means the global Settings → Memory value is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mb: Option<u64>,
+    /// The profile's icon (profileicon.rs): a Minecraft item on a coloured tile, `{"kind":"item","name":"item/diamond",
+    /// "color":"ember"}`, or the player's own picture, `{"kind":"image","file":"<id>-<n>.png"}`. None: the version's picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Value>,
+    /// When the profile was pinned to the sidebar (seconds since 1970); None when it isn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
+    /// Time played in this profile through Flint, in seconds (the sidebar's "most played").
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub play_seconds: u64,
+    /// Its folder's name under `profiles/` ("Daemon-26.2", profilefolder.rs). None: a folder named by its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The other launcher's profile it was imported from (import/), so a later scan shows that one as already here.
+    /// Never copied by Duplicate or carried in a `.flintpack`: a copy isn't the import. Read leniently: a value this
+    /// Flint can't read is dropped instead of making profiles.json unreadable.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "lenient_origin")]
+    pub origin: Option<crate::import::ImportOrigin>,
+}
+
+fn lenient_origin<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<crate::import::ImportOrigin>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// The heap a launch gets: the profile's own value when it has one, else the global setting,
@@ -366,13 +352,12 @@ pub fn clean_name(name: &str) -> CmdResult<String> {
     Ok(name)
 }
 
-fn validate_version(version: &str, loader: &str) -> CmdResult<()> {
+pub(crate) fn validate_version(version: &str, loader: &str) -> CmdResult<()> {
     if !SUPPORTED_VERSIONS.contains(&version) {
         return Err("That Minecraft version isn't offered in Flint yet.".into());
     }
     match loader {
         "vanilla" => Ok(()),
-        "fabric" if version == "1.8.9" => Err("Official Fabric doesn't support Minecraft 1.8.9.".into()),
         "fabric" => Ok(()),
         _ => Err("Unknown loader".into()),
     }
@@ -396,7 +381,7 @@ pub async fn profiles_create(
     let _guard = state.file_lock.lock().await;
     let mut file = load_profiles(&state);
     let performance = (loader == "fabric" && performance_mods_enabled(&state)).then(|| "pending".to_owned());
-    let profile = Profile {
+    let mut profile = Profile {
         id: random_hex(6),
         name,
         game_version,
@@ -408,7 +393,9 @@ pub async fn profiles_create(
         modpack: None,
         performance,
         memory_mb: None,
+        ..Profile::default()
     };
+    crate::profilefolder::assign(&state, &file, &mut profile);
     std::fs::create_dir_all(state.paths.profile_dir(&profile.id).join("mods"))
         .map_err(err("Could not create the profile folder"))?;
     file.profiles.push(profile.clone());
@@ -422,7 +409,9 @@ pub async fn profiles_create(
 #[tauri::command]
 pub async fn profiles_rename(state: State<'_, AppState>, id: String, name: String) -> CmdResult<Profile> {
     let name = clean_name(&name)?;
-    update_profile(&state, &id, |p| p.name = name).await
+    let renamed = update_profile(&state, &id, |p| p.name = name).await?;
+    // Its folder takes the new name too, unless something is using it (then at a later start).
+    Ok(crate::profilefolder::follow(&state, &id).await.unwrap_or(renamed))
 }
 
 /// Sets or clears (None) a profile's own memory. Applies from the next launch.
@@ -494,6 +483,23 @@ fn copy_tree(from: &std::path::Path, to: &std::path::Path, depth: u32) -> std::i
     Ok(())
 }
 
+/// The record of a copy of `source`: its icon (`icon`, its own copy of a picture), version, loader and settings, but
+/// unpinned, unplayed, in a folder of its own and not marked as imported (the import is the original, not the copy).
+fn duplicate_of(source: Profile, id: String, name: String, icon: Option<Value>) -> Profile {
+    Profile {
+        id,
+        name,
+        created_at: now_secs(),
+        last_played: None,
+        icon,
+        pinned_at: None,
+        play_seconds: 0,
+        folder: None,
+        origin: None,
+        ..source
+    }
+}
+
 /// Copies a profile into a brand-new folder. The original profile is only read.
 #[tauri::command]
 pub async fn profiles_duplicate(state: State<'_, AppState>, id: String, name: String) -> CmdResult<Profile> {
@@ -504,24 +510,22 @@ pub async fn profiles_duplicate(state: State<'_, AppState>, id: String, name: St
     let name = clean_name(&name)?;
     let new_id = random_hex(6);
     let from = state.paths.profile_dir(&id);
-    let to = state.paths.profile_dir(&new_id);
-    let staging = to.with_file_name(format!("{new_id}.flint-importing"));
+    let staging = state.paths.root.join("profiles").join(format!("{new_id}.flint-importing"));
     let (from_c, staging_c) = (from.clone(), staging.clone());
     let copied = tokio::task::spawn_blocking(move || copy_tree(&from_c, &staging_c, 0)).await.map_err(|e| e.to_string())?;
     if let Err(e) = copied {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(format!("Could not copy the profile: {e}"));
     }
-    std::fs::rename(&staging, &to).map_err(err("Could not finish the copy"))?;
-    let profile = Profile {
-        id: new_id,
-        name,
-        created_at: now_secs(),
-        last_played: None,
-        ..source
-    };
+    let icon = crate::profileicon::copy_for(&state, source.icon.as_ref(), &new_id);
+    let mut profile = duplicate_of(source, new_id, name, icon);
     let _guard = state.file_lock.lock().await;
     let mut file = load_profiles(&state);
+    crate::profilefolder::assign(&state, &file, &mut profile);
+    if let Err(e) = std::fs::rename(&staging, state.paths.profile_dir(&profile.id)) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("Could not finish the copy: {e}"));
+    }
     file.profiles.push(profile.clone());
     save_profiles(&state, &file)?;
     Ok(profile)
@@ -539,13 +543,17 @@ pub async fn profiles_delete(state: State<'_, AppState>, id: String, delete_file
         return Err("Close Minecraft before removing this profile.".into());
     }
     let _guard = state.file_lock.lock().await;
+    let dir = state.paths.profile_dir(&id);
     let mut file = load_profiles(&state);
+    // Its own picture goes with it (the folder may be kept; the picture is Flint's, not the game's).
+    if let Some(gone) = file.profiles.iter().find(|p| p.id == id) {
+        crate::profileicon::remove_picture(&state, gone.icon.as_ref());
+    }
     file.profiles.retain(|p| p.id != id);
     if file.selected.as_deref() == Some(id.as_str()) {
         file.selected = file.profiles.first().map(|p| p.id.clone());
     }
     save_profiles(&state, &file)?;
-    let dir = state.paths.profile_dir(&id);
     let kept = if delete_files {
         if dir.starts_with(state.paths.root.join("profiles")) && dir.exists() {
             std::fs::remove_dir_all(&dir).map_err(err("The profile was removed, but its folder couldn't be deleted"))?;
@@ -557,24 +565,130 @@ pub async fn profiles_delete(state: State<'_, AppState>, id: String, delete_file
     Ok(json!({ "keptFolder": kept }))
 }
 
-/// Largest heap Flint will hand Minecraft: three quarters of physical RAM, so the system keeps room to breathe.
+/// This computer's memory in MB: what is installed (the "8 GB" on the box) and what the system can use
+/// (a little less: firmware and integrated graphics keep some).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Memory {
+    pub installed_mb: u64,
+    pub usable_mb: u64,
+}
+
+/// What this computer's memory allows Minecraft, in MB: the size Settings shows, the largest heap Flint
+/// hands the game (three quarters of the usable memory, so the system keeps room to breathe), the heap
+/// suggested for modded play, and the point past which Settings warns.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryLimits {
+    pub total_mb: Option<u64>,
+    pub max_mb: u64,
+    pub recommended_mb: u64,
+    pub warn_mb: Option<u64>,
+}
+
+/// The ceiling when the memory size can't be read: safe on the smallest computers Flint runs on.
+const UNKNOWN_MAX_MB: u64 = 4096;
+
+pub fn memory_limits(memory: Option<Memory>) -> MemoryLimits {
+    let Some(Memory { installed_mb, usable_mb }) = memory else {
+        return MemoryLimits { total_mb: None, max_mb: UNKNOWN_MAX_MB, recommended_mb: 3072, warn_mb: None };
+    };
+    let steps = |mb: u64| mb / 512 * 512;
+    let max_mb = steps(usable_mb * 3 / 4).clamp(1024, 32768);
+    let recommended_mb = if installed_mb <= 8192 {
+        3072
+    } else if installed_mb <= 16384 {
+        4096
+    } else {
+        6144
+    }
+    .min(max_mb);
+    MemoryLimits { total_mb: Some(installed_mb), max_mb, recommended_mb, warn_mb: Some(steps(usable_mb * 3 / 5).max(1024)) }
+}
+
+/// Largest heap Flint will hand Minecraft on this computer (see [`memory_limits`]).
 pub fn max_memory_mb() -> u64 {
-    total_memory().map(|b| (b / (1024 * 1024) * 3 / 4) / 512 * 512).unwrap_or(16384).clamp(2048, 32768)
+    memory_limits(memory()).max_mb
 }
 
 #[tauri::command]
 pub async fn system_info() -> Value {
-    // Reading total memory starts a short-lived system process; keep it off the main thread.
+    // macOS reads its memory size through a short-lived system process; keep it off the main thread.
     tokio::task::spawn_blocking(system_summary).await.unwrap_or_default()
 }
 
 fn system_summary() -> Value {
+    let memory = memory();
     json!({
-        "totalMemory": total_memory(),
+        "totalMemory": memory.map(|m| m.installed_mb * 1024 * 1024),
+        "memory": memory_limits(memory),
         "cpus": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
     })
+}
+
+/// Settings → Troubleshooting → "Copy troubleshooting details": what support needs to know about this Flint and
+/// computer, as plain text, redacted (no account name, token, path with the user's name in it, or profile name).
+#[tauri::command]
+pub async fn diagnostics_text(app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    Ok(crate::redact::redact(&diagnostics_summary(&app, &state).await))
+}
+
+/// The text of `diagnostics_text`, before redaction (the diagnostics file's `summary.txt` redacts it too).
+pub async fn diagnostics_summary(app: &AppHandle, state: &AppState) -> String {
+    let settings = load_settings(state);
+    let mb = |v: u64| format!("{:.1} GB", v as f64 / 1024.0);
+    let mut lines = vec![
+        format!(
+            "Flint Client {}{}{}",
+            app.package_info().version,
+            option_env!("FLINT_BUILD").filter(|b| !b.is_empty()).map(|b| format!(" build {b}")).unwrap_or_default(),
+            option_env!("FLINT_COMMIT").filter(|c| !c.is_empty()).map(|c| format!(" ({c})")).unwrap_or_default()
+        ),
+        format!("System: {} {}, {} CPU threads", std::env::consts::OS, std::env::consts::ARCH, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)),
+    ];
+    let memory = tokio::task::spawn_blocking(memory).await.unwrap_or(None);
+    let limits = memory_limits(memory);
+    lines.push(match memory {
+        Some(m) => format!("Memory: {} installed, {} usable, up to {} for Minecraft", mb(m.installed_mb), mb(m.usable_mb), mb(limits.max_mb)),
+        None => format!("Memory: unknown, up to {} for Minecraft", mb(limits.max_mb)),
+    });
+    let setting_mb = settings["memoryMb"].as_u64().unwrap_or(4096);
+    lines.push(format!("Memory setting: {} (launches with {})", mb(setting_mb), mb(setting_mb.clamp(1024, limits.max_mb))));
+    lines.push(match settings["javaPath"].as_str().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => match inspect_java(path).await {
+            Ok(java) => format!("Java: custom, {}", java.summary),
+            Err(e) => format!("Java: custom, can't be used ({e})"),
+        },
+        None => "Java: managed by Flint".to_owned(),
+    });
+    let runtimes: Vec<String> = std::fs::read_dir(state.paths.runtimes())
+        .map(|entries| entries.flatten().filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect())
+        .unwrap_or_default();
+    lines.push(format!("Managed Java installed: {}", if runtimes.is_empty() { "none".to_owned() } else { runtimes.join(", ") }));
+    let extra = settings["jvmArgs"].as_str().map(str::trim).unwrap_or_default();
+    lines.push(format!("Extra Java arguments: {}", if extra.is_empty() { "none" } else { extra }));
+    let on = |key: &str, default: bool| if settings[key].as_bool().unwrap_or(default) { "on" } else { "off" };
+    lines.push(format!(
+        "Settings: in-game menu {}, Automatic Optimization {}, Auto Sync {}, performance mods {}, open the game maximized {}, when the game starts: {}",
+        on("inGameMenu", true),
+        on("automaticOptimization", true),
+        on("autoSync", true),
+        on("performanceMods", true),
+        on("gameMaximized", true),
+        settings["gameStartBehavior"].as_str().unwrap_or("minimize")
+    ));
+    lines.push(format!(
+        "Downloads: {} files at once, {} installs at once",
+        crate::storage::download_limit(&settings),
+        crate::storage::install_slots(&settings)
+    ));
+    let profiles = load_profiles(state).profiles;
+    let mut versions: Vec<String> = profiles.iter().map(|p| format!("{} {}{}", p.game_version, p.loader, if p.installed { "" } else { " (not installed)" })).collect();
+    versions.sort();
+    lines.push(format!("Profiles ({}): {}", profiles.len(), if versions.is_empty() { "none".to_owned() } else { versions.join(", ") }));
+    lines.push(format!("Accounts signed in: {}", crate::auth::load_accounts(state).accounts.len()));
+    lines.join("\n")
 }
 
 /// Output of macOS `sysctl -n <keys>`: one value per line, in the order asked. A key this Mac doesn't
@@ -588,30 +702,46 @@ pub fn sysctl(keys: &[&str]) -> Option<String> {
         .and_then(|o| String::from_utf8(o.stdout).ok())
 }
 
-/// Physical memory in bytes.
+/// Usable physical memory in bytes.
 pub fn total_memory() -> Option<u64> {
-    if cfg!(target_os = "macos") {
-        sysctl(&["hw.memsize"]).and_then(|s| s.trim().parse::<u64>().ok())
-    } else if cfg!(target_os = "windows") {
-        let mut command = std::process::Command::new("powershell");
-        command.args(["-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"]);
-        // No console window flashing up while the launcher reads the memory size.
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        command
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .and_then(|s| s.trim().parse::<u64>().ok())
-    } else {
-        std::fs::read_to_string("/proc/meminfo")
-            .ok()
-            .and_then(|s| s.lines().find(|l| l.starts_with("MemTotal")).and_then(|l| l.split_whitespace().nth(1)).and_then(|kb| kb.parse::<u64>().ok()))
-            .map(|kb| kb * 1024)
+    memory().map(|m| m.usable_mb * 1024 * 1024)
+}
+
+/// This computer's memory, read from the system itself. (It was read through PowerShell's WMI query on
+/// Windows, which can fail or be blocked; the fallback then offered a 16 GB slider on an 8 GB computer.)
+#[cfg(windows)]
+pub fn memory() -> Option<Memory> {
+    use windows_sys::Win32::System::SystemInformation::{GetPhysicallyInstalledSystemMemory, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: both calls only write into the values handed to them, sized as the API requires.
+    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 || status.ullTotalPhys == 0 {
+        return None;
     }
+    let usable_mb = status.ullTotalPhys / (1024 * 1024);
+    let mut installed_kb = 0u64;
+    // Installed memory comes from the firmware's tables; some virtual machines don't have them.
+    let installed_mb = if unsafe { GetPhysicallyInstalledSystemMemory(&mut installed_kb) } != 0 && installed_kb / 1024 >= usable_mb {
+        installed_kb / 1024
+    } else {
+        usable_mb
+    };
+    Some(Memory { installed_mb, usable_mb })
+}
+
+#[cfg(target_os = "macos")]
+pub fn memory() -> Option<Memory> {
+    let mb = sysctl(&["hw.memsize"]).and_then(|s| s.trim().parse::<u64>().ok()).filter(|b| *b > 0)? / (1024 * 1024);
+    Some(Memory { installed_mb: mb, usable_mb: mb })
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn memory() -> Option<Memory> {
+    let kb = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("MemTotal")).and_then(|l| l.split_whitespace().nth(1)).and_then(|kb| kb.parse::<u64>().ok()))
+        .filter(|kb| *kb > 0)?;
+    Some(Memory { installed_mb: kb / 1024, usable_mb: kb / 1024 })
 }
 
 /// Reads the version string and major version from `java -version` output
@@ -683,9 +813,9 @@ pub async fn version_catalog(state: State<'_, AppState>) -> CmdResult<Value> {
                 let entry = manifest["versions"]
                     .as_array()
                     .and_then(|v| v.iter().find(|x| x["id"].as_str() == Some(id)));
-                let fabric = fabric_games
-                    .as_array()
-                    .is_some_and(|g| g.iter().any(|x| x["version"].as_str() == Some(id)));
+                // Official Fabric's meta doesn't list 1.8.9; Flint gets its Fabric from Ornithe's (see game.rs).
+                let fabric = *id == "1.8.9"
+                    || fabric_games.as_array().is_some_and(|g| g.iter().any(|x| x["version"].as_str() == Some(id)));
                 json!({
                     "id": id,
                     "available": entry.is_some(),
@@ -720,8 +850,101 @@ pub async fn version_catalog(state: State<'_, AppState>) -> CmdResult<Value> {
 
 // ---------- skins ----------
 
+/// How long a cached skin counts as current; an older one is still shown at once while a fresh one is fetched.
+const SKIN_FRESH: Duration = Duration::from_secs(6 * 3600);
+/** A skin lookup gets this long in all (Mojang's profile, then the texture): Mojang's session server answered in 6–8
+ * seconds about one request in three when it was measured (2026-11-03), and the app's general limit is 45 seconds. */
+const SKIN_LOOKUP_LIMIT: Duration = Duration::from_secs(12);
+
+/// Skins being fetched in the background right now, so a refresh is never started twice for one player.
+fn refreshing() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// A player's skin as the web view shows it: the cached texture (and cape) as data URLs and the arm model.
+fn skin_json(bytes: &[u8], model: &str, cape: Option<&[u8]>) -> Value {
+    json!({
+        "dataUrl": format!("data:image/png;base64,{}", STANDARD.encode(bytes)),
+        "capeUrl": cape.map(|c| format!("data:image/png;base64,{}", STANDARD.encode(c))),
+        "model": model,
+    })
+}
+
+/// The skin (and cape) Mojang's session server gives for `uuid`, within [`SKIN_LOOKUP_LIMIT`].
+async fn fetch_skin(http: &reqwest::Client, uuid: &str) -> CmdResult<(Vec<u8>, &'static str, Option<Vec<u8>>)> {
+    let lookup = async {
+        let profile = get_json(http, &format!("https://sessionserver.mojang.com/session/minecraft/profile/{uuid}"), "Skin lookup").await?;
+        let encoded = profile["properties"]
+            .as_array()
+            .and_then(|p| p.iter().find(|x| x["name"] == "textures"))
+            .and_then(|x| x["value"].as_str())
+            .ok_or("No textures")?;
+        let textures: Value = serde_json::from_slice(&STANDARD.decode(encoded).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let skin = &textures["textures"]["SKIN"];
+        let url = skin["url"].as_str().ok_or("No skin")?.replace("http://", "https://");
+        let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+        if parsed.host_str() != Some("textures.minecraft.net") {
+            return Err("Unexpected skin host".to_string());
+        }
+        let model = if skin["metadata"]["model"].as_str() == Some("slim") { "slim" } else { "classic" };
+        let bytes = texture_png(http, parsed).await?;
+        let cape = match textures["textures"]["CAPE"]["url"].as_str() {
+            Some(cape_url) => match url::Url::parse(&cape_url.replace("http://", "https://")) {
+                Ok(u) if u.host_str() == Some("textures.minecraft.net") => texture_png(http, u).await.ok(),
+                _ => None,
+            },
+            None => None,
+        };
+        Ok((bytes, model, cape))
+    };
+    tokio::time::timeout(SKIN_LOOKUP_LIMIT, lookup).await.map_err(|_| "Skin lookup: Mojang didn't answer in time".to_string())?
+}
+
+/// Writes a fetched skin to the cache; true when it differs from what was cached (a new skin, model or cape).
+fn store_skin(dir: &std::path::Path, uuid: &str, bytes: &[u8], model: &str, cape: Option<&[u8]>) -> bool {
+    let file = dir.join(format!("{uuid}.png"));
+    let meta_file = dir.join(format!("{uuid}.json"));
+    let cape_file = dir.join(format!("{uuid}-cape.png"));
+    let changed = std::fs::read(&file).ok().as_deref() != Some(bytes)
+        || read_json_opt::<Value>(&meta_file).and_then(|m| m["model"].as_str().map(str::to_owned)).as_deref() != Some(model)
+        || std::fs::read(&cape_file).ok().as_deref() != cape;
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(&file, bytes);
+    match cape {
+        Some(c) => {
+            let _ = std::fs::write(&cape_file, c);
+        }
+        None => {
+            let _ = std::fs::remove_file(&cape_file);
+        }
+    }
+    let _ = write_json(&meta_file, &json!({ "model": model }));
+    changed
+}
+
+/// Asks Mojang's session server for `uuid`'s current skin and cape in the background (once at a time per player) and,
+/// if anything changed, caches it and tells the web view ("skin-updated"), which asks for the skin again.
+fn refresh_skin_in_background(app: AppHandle, http: reqwest::Client, dir: std::path::PathBuf, uuid: String) {
+    if !refreshing().lock().unwrap().insert(uuid.clone()) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Ok((bytes, model, cape)) = fetch_skin(&http, &uuid).await {
+            if store_skin(&dir, &uuid, &bytes, model, cape.as_deref()) {
+                let _ = app.emit("skin-updated", json!({ "uuid": uuid }));
+            }
+        }
+        refreshing().lock().unwrap().remove(&uuid);
+    });
+}
+
+/// A player's skin for heads, the Home character and the Skins page. A cached skin is answered at once, whatever its
+/// age, so heads never wait on Mojang; one older than [`SKIN_FRESH`] is fetched again in the background, and if it
+/// changed the web view hears "skin-updated" and asks again. Only a player with no cached skin waits for the lookup,
+/// at most [`SKIN_LOOKUP_LIMIT`]; if that fails the web view retries later.
 #[tauri::command]
-pub async fn skin_texture(state: State<'_, AppState>, uuid: String) -> CmdResult<Value> {
+pub async fn skin_texture(app: AppHandle, state: State<'_, AppState>, uuid: String) -> CmdResult<Value> {
     if uuid.len() != 32 || !uuid.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("Invalid UUID".into());
     }
@@ -729,12 +952,6 @@ pub async fn skin_texture(state: State<'_, AppState>, uuid: String) -> CmdResult
     let file = dir.join(format!("{uuid}.png"));
     let meta_file = dir.join(format!("{uuid}.json"));
     let cape_file = dir.join(format!("{uuid}-cape.png"));
-    let fresh = std::fs::metadata(&file)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age < Duration::from_secs(6 * 3600));
-    let cached_meta: Value = read_json_opt(&meta_file).unwrap_or_else(|| json!({}));
 
     let accounts = crate::auth::load_accounts(&state);
     let stored = accounts.accounts.iter().find(|a| a.uuid == uuid).cloned();
@@ -742,72 +959,49 @@ pub async fn skin_texture(state: State<'_, AppState>, uuid: String) -> CmdResult
         return Ok(json!({ "dataUrl": null, "model": "classic" }));
     }
 
-    if !fresh {
-        let lookup = async {
-            let profile = get_json(
-                &state.http,
-                &format!("https://sessionserver.mojang.com/session/minecraft/profile/{uuid}"),
-                "Skin lookup",
-            )
-            .await?;
-            let encoded = profile["properties"]
-                .as_array()
-                .and_then(|p| p.iter().find(|x| x["name"] == "textures"))
-                .and_then(|x| x["value"].as_str())
-                .ok_or("No textures")?;
-            let textures: Value = serde_json::from_slice(&STANDARD.decode(encoded).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-            let skin = &textures["textures"]["SKIN"];
-            let url = skin["url"].as_str().ok_or("No skin")?.replace("http://", "https://");
-            let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
-            if parsed.host_str() != Some("textures.minecraft.net") {
-                return Err("Unexpected skin host".to_string());
-            }
-            let model = if skin["metadata"]["model"].as_str() == Some("slim") { "slim" } else { "classic" };
-            let bytes = texture_png(&state, parsed).await?;
-            let cape = match textures["textures"]["CAPE"]["url"].as_str() {
-                Some(cape_url) => match url::Url::parse(&cape_url.replace("http://", "https://")) {
-                    Ok(u) if u.host_str() == Some("textures.minecraft.net") => texture_png(&state, u).await.ok(),
-                    _ => None,
-                },
-                None => None,
-            };
-            Ok::<(Vec<u8>, &str, Option<Vec<u8>>), String>((bytes, model, cape))
+    if let Ok(bytes) = std::fs::read(&file) {
+        let fresh = std::fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age < SKIN_FRESH);
+        if !fresh {
+            refresh_skin_in_background(app, state.http.clone(), dir.clone(), uuid.clone());
         }
-        .await;
-        if let Ok((bytes, model, cape)) = lookup {
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(&file, &bytes);
-            match &cape {
-                Some(c) => {
-                    let _ = std::fs::write(&cape_file, c);
-                }
-                None => {
-                    let _ = std::fs::remove_file(&cape_file);
-                }
-            }
-            let _ = write_json(&meta_file, &json!({ "model": model }));
-            return Ok(json!({
-                "dataUrl": format!("data:image/png;base64,{}", STANDARD.encode(&bytes)),
-                "capeUrl": cape.map(|c| format!("data:image/png;base64,{}", STANDARD.encode(c))),
-                "model": model,
-            }));
+        let cached_meta: Value = read_json_opt(&meta_file).unwrap_or_else(|| json!({}));
+        let model = cached_meta["model"].as_str().map(str::to_owned).or(stored.and_then(|a| a.skin_model)).unwrap_or_else(|| "classic".to_owned());
+        let cape = std::fs::read(&cape_file).ok();
+        return Ok(skin_json(&bytes, &model, cape.as_deref()));
+    }
+
+    // A signed-in account: its skin's link from sign-in goes straight to Mojang's texture server (a fraction of a
+    // second), so its head never waits on the session server, whose answers take from one to over ten seconds. The
+    // session server is still asked, in the background, for a changed skin and the cape.
+    let account_skin = stored
+        .as_ref()
+        .and_then(|a| a.skin_url.as_deref())
+        .and_then(|u| url::Url::parse(&u.replace("http://", "https://")).ok())
+        .filter(|u| u.host_str() == Some("textures.minecraft.net"));
+    if let Some(link) = account_skin {
+        if let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_secs(8), texture_png(&state.http, link)).await {
+            let model = stored.as_ref().and_then(|a| a.skin_model.clone()).filter(|m| m == "slim").unwrap_or_else(|| "classic".to_owned());
+            store_skin(&dir, &uuid, &bytes, &model, None);
+            refresh_skin_in_background(app, state.http.clone(), dir, uuid);
+            return Ok(skin_json(&bytes, &model, None));
         }
     }
-    let cape = std::fs::read(&cape_file).ok().map(|c| format!("data:image/png;base64,{}", STANDARD.encode(c)));
-    match std::fs::read(&file) {
-        Ok(bytes) => Ok(json!({
-            "dataUrl": format!("data:image/png;base64,{}", STANDARD.encode(&bytes)),
-            "capeUrl": cape,
-            "model": cached_meta["model"].as_str().or(stored.and_then(|a| a.skin_model).as_deref()).unwrap_or("classic"),
-        })),
-        Err(_) => Ok(json!({ "dataUrl": null, "model": "classic" })),
+
+    match fetch_skin(&state.http, &uuid).await {
+        Ok((bytes, model, cape)) => {
+            store_skin(&dir, &uuid, &bytes, model, cape.as_deref());
+            Ok(skin_json(&bytes, model, cape.as_deref()))
+        }
+        Err(_) => Ok(json!({ "dataUrl": null, "model": stored.and_then(|a| a.skin_model).unwrap_or_else(|| "classic".to_owned()) })),
     }
 }
 
-async fn texture_png(state: &AppState, url: url::Url) -> CmdResult<Vec<u8>> {
-    let bytes = state
-        .http
+async fn texture_png(http: &reqwest::Client, url: url::Url) -> CmdResult<Vec<u8>> {
+    let bytes = http
         .get(url)
         .send()
         .await
@@ -832,43 +1026,109 @@ pub fn forget_skin(state: &AppState, uuid: &str) {
 
 // ---------- news ----------
 
+/// Flint's public release feed (schema 1, newest first, plain text only): app/scripts/release-notes-feed.mjs writes it at
+/// release time, promote-update.yml copies it to the fixed `site-data` release, and flintclient.com builds its changelog
+/// from the same file. Home's news reads it so a new Flint release shows before this copy of Flint has updated; the notes
+/// bundled with this build stay the fallback. Minecraft's own patch notes are not shown (owner, 1.0.1).
+const RELEASE_FEED: &str = "https://github.com/IconicDemon/Flint-Client/releases/download/site-data/release-notes.json";
+
+/// How many feed releases Home is given; it shows the newest three of these and its bundled notes together.
+const FEED_RELEASES: usize = 6;
+
+/// A plain release version (`1.0.1`): exactly three numbers of one to three digits each.
+fn release_version(v: &str) -> Option<(u16, u16, u16)> {
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() != 3 || !parts.iter().all(|p| (1..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    Some((parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?))
+}
+
+/// A real calendar day written YYYY-MM-DD.
+fn real_day(d: &str) -> bool {
+    let b = d.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |from: usize, to: usize| d.get(from..to).filter(|s| s.bytes().all(|c| c.is_ascii_digit())).and_then(|s| s.parse::<u32>().ok());
+    let (Some(year), Some(month), Some(day)) = (num(0, 4), num(5, 7), num(8, 10)) else {
+        return false;
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    (2000..=2999).contains(&year) && (1..=days).contains(&day)
+}
+
+/// A feed text Home may show: at most `max` characters and no control characters (it is only ever shown as plain text).
+fn feed_text(value: &Value, max: usize) -> Option<String> {
+    let text = value.as_str()?.trim();
+    (!text.is_empty() && text.chars().count() <= max && !text.chars().any(char::is_control)).then(|| text.to_string())
+}
+
+/// The releases Home may show from Flint's feed: schema 1 only; each entry checked field by field and left out, never
+/// repaired, when any check fails; newest first, one per version, at most FEED_RELEASES. `page_url` is passed on only when
+/// it is exactly that version's page on flintclient.com (the one address the site serves a version at).
+pub fn feed_releases(feed: &Value) -> Vec<Value> {
+    if feed["schema"].as_u64() != Some(1) {
+        return Vec::new();
+    }
+    let mut releases: Vec<((u16, u16, u16), Value)> = feed["versions"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .take(500)
+                .filter_map(|entry| {
+                    let version = entry["version"].as_str()?;
+                    let order = release_version(version)?;
+                    let date = entry["date"].as_str().filter(|d| real_day(d))?;
+                    let title = feed_text(&entry["title"], 120)?;
+                    let summary = match &entry["summary"] {
+                        Value::Null => String::new(),
+                        Value::String(s) if s.trim().is_empty() => String::new(),
+                        other => feed_text(other, 400)?,
+                    };
+                    let page = format!("https://flintclient.com/releases/{version}/");
+                    let page_url = (entry["page_url"].as_str() == Some(page.as_str())).then_some(page);
+                    Some((order, json!({ "version": version, "date": date, "title": title, "summary": summary, "page_url": page_url })))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    releases.sort_by_key(|r| std::cmp::Reverse(r.0));
+    releases.dedup_by(|a, b| a.0 == b.0);
+    releases.into_iter().take(FEED_RELEASES).map(|(_, release)| release).collect()
+}
+
 #[tauri::command]
 pub async fn news_feed(state: State<'_, AppState>) -> CmdResult<Value> {
+    // Earlier builds kept Minecraft's patch notes in this file: a cache that isn't Flint's own feed is never shown.
     let cache_path = state.paths.cache().join("news.json");
-    let fetched = get_json(&state.http, "https://launchercontent.mojang.com/v2/javaPatchNotes.json", "Patch notes").await;
-    match fetched {
-        Ok(value) => {
-            let entries: Vec<Value> = value["entries"]
-                .as_array()
-                .map(|entries| {
-                    entries
-                        .iter()
-                        .filter(|e| e["type"].as_str() == Some("release"))
-                        .take(4)
-                        .map(|e| {
-                            json!({
-                                "id": e["id"],
-                                "title": e["title"],
-                                "version": e["version"],
-                                "date": e["date"],
-                                "summary": e["shortText"],
-                                "image": e["image"]["url"].as_str().map(|u| format!("https://launchercontent.mojang.com{u}")),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let out = json!({ "entries": entries, "offline": false });
+    let cached = || read_json_opt::<Value>(&cache_path).filter(|c| c["source"] == "flint");
+    let offline = |error: String| match cached() {
+        Some(mut cache) => {
+            cache["offline"] = json!(true);
+            Ok(cache)
+        }
+        None => Err(error),
+    };
+    match get_json(&state.http, RELEASE_FEED, "Flint news").await {
+        Ok(feed) => {
+            let entries = feed_releases(&feed);
+            if entries.is_empty() {
+                // A feed with nothing usable never replaces a good saved one.
+                return offline("Flint news: the release feed had no usable releases".to_string());
+            }
+            let out = json!({ "source": "flint", "entries": entries, "offline": false });
             let _ = write_json(&cache_path, &out);
             Ok(out)
         }
-        Err(error) => match read_json_opt::<Value>(&cache_path) {
-            Some(mut cached) => {
-                cached["offline"] = json!(true);
-                Ok(cached)
-            }
-            None => Err(error),
-        },
+        Err(error) => offline(error),
     }
 }
 
@@ -895,7 +1155,99 @@ pub fn app_data_root(app: &AppHandle) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::TestDir;
+
+    /// Live (network): Flint's own skin lookup against Mojang, timed. `cargo test -- --ignored skin_lookup_live`;
+    /// FLINT_SKIN_TEST_UUID picks the player (default: Notch).
+    #[tokio::test]
+    #[ignore]
+    async fn skin_lookup_live() {
+        let uuid = std::env::var("FLINT_SKIN_TEST_UUID").unwrap_or_else(|_| "069a79f444e94726a5befca90e38aaf5".to_owned());
+        let (http, _) = crate::core::build_clients();
+        let started = std::time::Instant::now();
+        let result = fetch_skin(&http, &uuid).await;
+        eprintln!("skin lookup: {:?} in {} ms", result.as_ref().map(|(b, m, c)| (b.len(), *m, c.as_ref().map(Vec::len))), started.elapsed().as_millis());
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn a_refreshed_skin_tells_the_window_only_when_something_changed() {
+        let dir = std::env::temp_dir().join(format!("flint-skin-test-{}", crate::core::random_hex(6)));
+        let uuid = "069a79f444e94726a5befca90e38aaf5";
+        let skin = b"\x89PNG skin one";
+        assert!(store_skin(&dir, uuid, skin, "classic", None), "the first skin is new");
+        assert!(!store_skin(&dir, uuid, skin, "classic", None), "the same skin again changes nothing");
+        assert!(store_skin(&dir, uuid, skin, "slim", None), "a new arm model is a change");
+        assert!(store_skin(&dir, uuid, skin, "slim", Some(b"\x89PNG cape")), "a new cape is a change");
+        assert!(!store_skin(&dir, uuid, skin, "slim", Some(b"\x89PNG cape")));
+        assert!(store_skin(&dir, uuid, skin, "slim", None), "a removed cape is a change");
+        assert!(store_skin(&dir, uuid, b"\x89PNG skin two", "slim", None), "a new skin is a change");
+        assert_eq!(std::fs::read(dir.join(format!("{uuid}.png"))).unwrap(), b"\x89PNG skin two");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn feed(versions: Value) -> Value {
+        json!({ "schema": 1, "generated_at": "2026-11-08T12:00:00Z", "versions": versions })
+    }
+
+    fn release(version: &str, date: &str) -> Value {
+        json!({ "version": version, "date": date, "title": "Title", "summary": "Summary.", "points": ["A point"], "release_url": "https://github.com/IconicDemon/Flint-Client/releases/tag/v1.0.1", "page_url": format!("https://flintclient.com/releases/{version}/") })
+    }
+
+    #[test]
+    fn news_reads_flints_own_release_feed_newest_first() {
+        let shown = feed_releases(&feed(json!([release("0.9.1", "2026-11-04"), release("1.0.1", "2026-11-08"), release("0.10.0", "2026-11-06"), release("1.0.1", "2026-11-08")])));
+        let versions: Vec<&str> = shown.iter().map(|r| r["version"].as_str().unwrap()).collect();
+        assert_eq!(versions, ["1.0.1", "0.10.0", "0.9.1"], "by version number, not text, one per version");
+        assert_eq!(shown[0], json!({ "version": "1.0.1", "date": "2026-11-08", "title": "Title", "summary": "Summary.", "page_url": "https://flintclient.com/releases/1.0.1/" }), "only what Home shows");
+        let many: Vec<Value> = (0..20).map(|n| release(&format!("1.0.{n}"), "2026-11-08")).collect();
+        assert_eq!(feed_releases(&feed(json!(many))).len(), FEED_RELEASES);
+    }
+
+    #[test]
+    fn news_leaves_out_any_release_that_fails_a_check() {
+        assert!(feed_releases(&json!({ "schema": 2, "versions": [release("1.0.1", "2026-11-08")] })).is_empty(), "another schema");
+        assert!(feed_releases(&json!({ "schema": 1 })).is_empty());
+        assert!(feed_releases(&json!([release("1.0.1", "2026-11-08")])).is_empty());
+        for version in ["1.0", "1.0.1.2", "1.0.1-beta", "../1.0.1", "1.0.1/", "1000.0.1", "", " 1.0.1"] {
+            assert!(feed_releases(&feed(json!([release(version, "2026-11-08")]))).is_empty(), "version {version:?}");
+        }
+        for date in ["2026-02-30", "2026-13-01", "2026-11-8", "08-11-2026", "2026-11-08T00:00:00Z", "1999-12-31"] {
+            assert!(feed_releases(&feed(json!([release("1.0.1", date)]))).is_empty(), "date {date:?}");
+        }
+        assert_eq!(feed_releases(&feed(json!([release("1.0.1", "2028-02-29")]))).len(), 1, "a leap day is real");
+        let mut long = release("1.0.1", "2026-11-08");
+        long["title"] = json!("x".repeat(121));
+        let mut control = release("1.0.1", "2026-11-08");
+        control["summary"] = json!("A line\u{0007}with a bell");
+        let mut untitled = release("1.0.1", "2026-11-08");
+        untitled["title"] = json!("  ");
+        let mut not_text = release("1.0.1", "2026-11-08");
+        not_text["summary"] = json!({ "html": "<b>x</b>" });
+        for bad in [long, control, untitled, not_text] {
+            assert!(feed_releases(&feed(json!([bad]))).is_empty(), "{bad}");
+        }
+        let mut no_summary = release("1.0.1", "2026-11-08");
+        no_summary["summary"] = Value::Null;
+        assert_eq!(feed_releases(&feed(json!([no_summary])))[0]["summary"], "", "a missing summary is just empty");
+    }
+
+    #[test]
+    fn news_opens_only_the_versions_own_page() {
+        for (page, kept) in [
+            (json!("https://flintclient.com/releases/1.0.1/"), true),
+            (json!("https://flintclient.com/releases/0.9.1/"), false),
+            (json!("https://flintclient.com/releases/1.0.1"), false),
+            (json!("http://flintclient.com/releases/1.0.1/"), false),
+            (json!("https://flintclient.com.evil.example/releases/1.0.1/"), false),
+            (Value::Null, false),
+        ] {
+            let mut entry = release("1.0.1", "2026-11-08");
+            entry["page_url"] = page.clone();
+            let shown = feed_releases(&feed(json!([entry])));
+            assert_eq!(shown.len(), 1, "a release without its page is still news");
+            assert_eq!(shown[0]["page_url"].is_string(), kept, "{page}");
+        }
+    }
 
     #[test]
     fn ai_gateway_must_be_https_or_this_computer() {
@@ -918,48 +1270,13 @@ mod tests {
     }
 
     #[test]
-    fn clear_cache_removes_only_cache_entries_and_reports_them() {
-        let dir = TestDir::new();
-        let cache = dir.0.join("cache");
-        std::fs::create_dir_all(cache.join("skins")).unwrap();
-        std::fs::write(cache.join("skins/a.png"), vec![0u8; 100]).unwrap();
-        std::fs::write(cache.join("news.json"), "{}").unwrap();
-        std::fs::write(cache.join("keep-me.json"), "{}").unwrap();
-        std::fs::create_dir_all(dir.0.join("profiles/p/saves/World")).unwrap();
-        std::fs::write(dir.0.join("profiles/p/saves/World/level.dat"), "w").unwrap();
-
-        let result = clear_cache_dir(&cache);
-        assert_eq!(result["removedBytes"], 102);
-        assert_eq!(result["failed"], json!([]));
-        assert!(!cache.join("skins").exists() && !cache.join("news.json").exists());
-        assert!(cache.join("keep-me.json").exists(), "unknown files are left alone");
-        assert!(dir.0.join("profiles/p/saves/World/level.dat").exists(), "worlds are never touched");
-        // Running again on an already clean cache is a no-op, not an error.
-        assert_eq!(clear_cache_dir(&cache)["removedBytes"], 0);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn clear_cache_reports_entries_it_could_not_remove() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = TestDir::new();
-        let cache = dir.0.join("cache");
-        std::fs::create_dir_all(cache.join("skins")).unwrap();
-        std::fs::write(cache.join("skins/a.png"), "x").unwrap();
-        std::fs::set_permissions(cache.join("skins"), std::fs::Permissions::from_mode(0o500)).unwrap();
-        let result = clear_cache_dir(&cache);
-        std::fs::set_permissions(cache.join("skins"), std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(result["failed"][0]["name"], "skins", "{result}");
-    }
-
-    #[test]
     fn profile_names_and_versions_are_validated() {
         assert_eq!(clean_name("  My\u{7}World  ").unwrap(), "MyWorld");
         assert!(clean_name("   ").is_err());
         assert_eq!(clean_name(&"x".repeat(80)).unwrap().len(), 40);
         assert!(validate_version("26.3", "fabric").is_ok());
         assert!(validate_version("1.8.9", "vanilla").is_ok());
-        assert!(validate_version("1.8.9", "fabric").is_err());
+        assert!(validate_version("1.8.9", "fabric").is_ok(), "Fabric from Ornithe");
         assert!(validate_version("1.12.2", "vanilla").is_err());
         assert!(validate_version("26.3", "forge").is_err());
     }
@@ -996,5 +1313,53 @@ mod tests {
         assert_eq!(launch_memory_mb(&profile, Some(3072), 4096), 4096, "never above the computer's limit");
         profile.memory_mb = Some(512);
         assert_eq!(launch_memory_mb(&profile, Some(3072), 8192), 1024);
+    }
+
+    #[test]
+    fn memory_limits_follow_the_computer_and_clamp_what_was_saved() {
+        // An 8 GB PC (Windows can use about 7.8 GB of it): it says 8 GB and offers at most 5.5 GB.
+        let eight = memory_limits(Some(Memory { installed_mb: 8192, usable_mb: 7990 }));
+        assert_eq!(eight, MemoryLimits { total_mb: Some(8192), max_mb: 5632, recommended_mb: 3072, warn_mb: Some(4608) });
+        // A 16 GB allocation saved earlier (or on another computer) launches with what this one can spare.
+        let mut profile = Profile::default();
+        assert_eq!(launch_memory_mb(&profile, Some(16384), eight.max_mb), 5632);
+        profile.memory_mb = Some(12288);
+        assert_eq!(launch_memory_mb(&profile, Some(3072), eight.max_mb), 5632);
+
+        let sixteen = memory_limits(Some(Memory { installed_mb: 16384, usable_mb: 16200 }));
+        assert_eq!((sixteen.total_mb, sixteen.max_mb, sixteen.recommended_mb), (Some(16384), 11776, 4096));
+        assert_eq!(memory_limits(Some(Memory { installed_mb: 65536, usable_mb: 65400 })).max_mb, 32768, "never above 32 GB");
+        let four = memory_limits(Some(Memory { installed_mb: 4096, usable_mb: 3900 }));
+        assert_eq!((four.max_mb, four.recommended_mb), (2560, 2560), "the suggestion never exceeds the limit");
+        assert_eq!(memory_limits(Some(Memory { installed_mb: 1024, usable_mb: 900 })).max_mb, 1024, "the slider's floor");
+        // Unknown memory: a ceiling safe on small computers rather than a guess of 16 GB.
+        let unknown = memory_limits(None);
+        assert_eq!((unknown.total_mb, unknown.max_mb, unknown.warn_mb), (None, 4096, None));
+        // The size Settings shows is read from this computer.
+        if let Some(memory) = memory() {
+            assert!(memory.installed_mb >= memory.usable_mb && memory.usable_mb > 0);
+        }
+    }
+
+    #[test]
+    fn an_imported_profile_keeps_its_origin_but_a_copy_does_not() {
+        let origin = crate::import::ImportOrigin { launcher: "prism".into(), key: "a1b2c3".into(), imported_at: 1_700_000_000 };
+        let imported = Profile { id: "aaaaaaaaaaaa".into(), name: "PvP".into(), game_version: "26.3".into(), loader: "fabric".into(), origin: Some(origin.clone()), ..Default::default() };
+        let value = serde_json::to_value(&imported).unwrap();
+        assert_eq!(value["origin"], json!({ "launcher": "prism", "key": "a1b2c3", "importedAt": 1_700_000_000u64 }));
+        let read: Profile = serde_json::from_value(value).unwrap();
+        assert_eq!(read.origin, Some(origin));
+        assert!(serde_json::to_value(Profile::default()).unwrap().get("origin").is_none(), "absent when not imported");
+
+        let copy = duplicate_of(imported, "bbbbbbbbbbbb".into(), "PvP copy".into(), None);
+        assert_eq!(copy.origin, None, "a copy isn't the import");
+        assert_eq!((copy.game_version.as_str(), copy.loader.as_str(), copy.name.as_str()), ("26.3", "fabric", "PvP copy"));
+
+        // A damaged or future origin never makes profiles.json unreadable: the profile loads without it.
+        for odd in [json!("text"), json!({ "launcher": 7 }), json!(null), json!({ "key": "k" })] {
+            let file: ProfilesFile = serde_json::from_value(json!({ "profiles": [{ "id": "p", "name": "P", "gameVersion": "26.3", "loader": "fabric", "origin": odd }] })).unwrap();
+            assert_eq!(file.profiles.len(), 1);
+            assert_eq!(file.profiles[0].origin, None, "{odd}");
+        }
     }
 }

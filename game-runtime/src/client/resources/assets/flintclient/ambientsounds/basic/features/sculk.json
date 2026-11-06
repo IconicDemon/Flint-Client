@@ -1,0 +1,8 @@
+{
+    "name": "sculk",
+    "groups": [
+        "sculk"
+    ],
+    "low-count": 20,
+    "high-count": 50
+}

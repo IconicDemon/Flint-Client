@@ -5,6 +5,7 @@
  */
 import type { InstalledItem, PlanItem, ResolveRequest } from "../../lib/api.ts";
 import { selectPlan } from "../../lib/assistPlan.ts";
+import { t } from "../../lib/i18n.ts";
 
 /** `goal` is the display group of the goal a pick came from (Flint AI or smart search). */
 export type PlanEntry = PlanItem & { selected: boolean; goal?: string | null };
@@ -33,7 +34,7 @@ export function withoutPick(plan: PlanEntry[], projectId: string): PlanEntry[] {
   return rest.filter((i) => {
     if (i.source !== "dependency" && i.source !== "optional") return true;
     const by = linked(i);
-    return !by.includes(title) || by.some((t) => t !== title && titles.has(t));
+    return !by.includes(title) || by.some((other) => other !== title && titles.has(other));
   });
 }
 
@@ -158,10 +159,16 @@ export function rebasePlan(old: PlanEntry[], fresh: PlanItem[]): PlanEntry[] {
  * 1.21.11), so the release name stays in the tooltip, not in the row.
  */
 export function compatibility(item: Pick<PlanItem, "versionNumber" | "versionType">, gameVersion: string): { label: string; title: string } {
-  const pre = item.versionType && item.versionType !== "release" ? ` (${item.versionType})` : "";
+  // Modrinth's channel name (beta, alpha) is shown as Modrinth writes it.
+  const channel = item.versionType && item.versionType !== "release" ? item.versionType : null;
+  const release = item.versionNumber;
   return {
-    label: `Works with Minecraft ${gameVersion}`,
-    title: item.versionNumber ? `Release ${item.versionNumber}${pre}. Its author lists it for Minecraft ${gameVersion} on Modrinth.` : `Listed for Minecraft ${gameVersion} on Modrinth.`,
+    label: t("onboarding.compat.label", { version: gameVersion }),
+    title: !release
+      ? t("onboarding.compat.listed", { version: gameVersion })
+      : channel
+        ? t("onboarding.compat.releaseChannel", { release, channel, version: gameVersion })
+        : t("onboarding.compat.release", { release, version: gameVersion }),
   };
 }
 

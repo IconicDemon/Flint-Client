@@ -1,0 +1,19 @@
+{
+	"sounds": [
+		{
+			"name": "light-wind",
+			"files": [
+				"minecraft:block.dry_grass.ambient"
+			],
+			"category": "wind",
+			"air": {
+				"min": 0.6
+			},
+			"pause": {
+				"min": 20,
+				"max": 120
+			},
+			"volume": 0.3
+		}
+	]
+}

@@ -12,6 +12,16 @@ public final class Features {
 	public static final ZoomState ZOOM = new ZoomState();
 	public static final FreelookState FREELOOK = new FreelookState();
 	public static final SpeedTracker SPEED = new SpeedTracker();
+	/** The server's tick rate, from its time updates (the TPS module). */
+	public static final ServerTicks SERVER_TICKS = new ServerTicks();
+	/** The Stopwatch module's watch. */
+	public static final StopwatchState STOPWATCH = new StopwatchState();
+	/** Snaplook and Auto Perspective's views. */
+	public static final CameraViews VIEWS = new CameraViews();
+	/** The Camera module's third-person distance, gliding. */
+	public static final CameraDistance CAMERA_DISTANCE = new CameraDistance();
+	/** Autohide HUD's timers. */
+	public static final AutoHide AUTO_HIDE = new AutoHide();
 	private static @org.jspecify.annotations.Nullable WaypointStore waypoints;
 	private static @org.jspecify.annotations.Nullable PackFolders packFolders;
 	/** When the game process started (wall clock, ms). */
@@ -77,5 +87,8 @@ public final class Features {
 		COMBAT.reset();
 		MOVEMENT.reset();
 		SPEED.reset();
+		SERVER_TICKS.reset();
+		CAMERA_DISTANCE.reset();
+		AUTO_HIDE.reset();
 	}
 }

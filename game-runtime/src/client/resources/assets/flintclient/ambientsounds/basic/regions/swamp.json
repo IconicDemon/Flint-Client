@@ -1,0 +1,72 @@
+{
+	"name": "swamp",
+	"bad-regions": [
+		"rain"
+	],
+	"biomes": [
+		"swamp",
+		"bayou",
+		"bog",
+		"marsh",
+		"moor",
+		"fen",
+		"mystic grove",
+		"bamboo marsh",
+		"silkglades",
+		"sludgepit",
+		"wetland",
+		"quagmire",
+		"dead forest",
+		"patchy islands",
+		"deep waters",
+		"coarse islands",
+		"erebus",
+		"fungal forest",
+		"tyros swamp"
+	],
+	"temperature": {
+		"min": 0.5,
+		"max": 2
+	},
+	"sounds": [
+		{
+			"name": "cricket-swamp",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_day",
+			"volume": 0.3,
+			"overall-raining": false,
+			"pause": {
+				"min": 20,
+				"max": 100
+			}
+		},
+		{
+			"name": "cricket-warm-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_night",
+			"overall-raining": false,
+			"volume": 0.3,
+			"pause": {
+				"min": 10,
+				"max": 60
+			}
+		},
+		{
+			"name": "frog",
+			"files": [
+				"minecraft:entity.frog.ambient"
+			],
+			"category": "animal",
+			"pause": {
+				"min": 100,
+				"max": 750
+			},
+			"day": 0.05,
+			"night": 0.15
+		}
+	]
+}

@@ -14,4 +14,11 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface KeyMappingAccessor {
 	@Accessor("key")
 	InputConstants.Key flint$boundKey();
+
+	/** Keybind Search presses a keybind as a key would: one more click for what counts clicks. */
+	@Accessor("clickCount")
+	int flint$clickCount();
+
+	@Accessor("clickCount")
+	void flint$setClickCount(int count);
 }

@@ -68,6 +68,8 @@
 }
 
 .page-body.settings {
+  /* The menu, the gap and the widest group: the two columns stay together in the middle of a wide window. */
+  --page-max: calc(240px + 36px + 860px + 6px);
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 36px;
@@ -202,6 +204,139 @@
 
 .settings-row-control .slider {
   width: 260px;
+}
+
+/* Settings → Language: one card per language, two to a line where they fit. */
+.lang-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lang-picker > .field {
+  max-width: 320px;
+  margin: 0;
+}
+
+.lang-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lang-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lang-group h3 {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.lang-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+
+.lang-option {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 14px 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-align: left;
+  transition:
+    box-shadow var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease);
+}
+
+.lang-option:hover {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.lang-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.lang-option.is-active {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.lang-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-4);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.lang-option.is-active .lang-mark {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-text);
+}
+
+.lang-names {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.lang-names strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.lang-names span {
+  color: var(--text-3);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.lang-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lang-check {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+
+.lang-option.is-active .lang-check {
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--accent-ink);
 }
 
 .row-inline {
@@ -636,59 +771,6 @@
   color: var(--text-3);
 }
 
-/* Store */
-.store-page {
-  display: flex;
-  flex-direction: column;
-}
-
-.store-hero {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  flex: 1;
-  overflow: hidden;
-  min-height: 360px;
-  border-radius: var(--r-xl);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-
-.store-hero-art {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: saturate(0.7);
-}
-
-.store-hero-shade {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(100deg, rgba(var(--bg-rgb), 0.94) 20%, rgba(var(--bg-rgb), 0.55) 60%, rgba(var(--bg-rgb), 0.25));
-}
-
-.store-hero-content {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  max-width: 520px;
-  padding: 44px 40px;
-  color: var(--accent-text);
-}
-
-.store-hero-content h1 {
-  font-size: clamp(32px, 3vw, 44px);
-  color: var(--fg);
-}
-
-.store-hero-content p {
-  color: var(--text-2);
-  line-height: 1.55;
-}
-
 @media (max-width: 1100px) {
   .skins-layout {
     grid-template-columns: minmax(0, 1fr) 300px;
@@ -705,10 +787,10 @@
   width: 100%;
 }
 
-.memory-control .slider {
+.memory-control .memory-slider {
   flex: 1;
-  min-width: 240px;
-  max-width: 520px;
+  min-width: 260px;
+  max-width: 560px;
 }
 
 .java-control {
@@ -718,6 +800,101 @@
 
 .java-control .row-inline .field {
   flex: 1;
+}
+
+/* Settings → Java and memory: each group of versions and its Java */
+.java-plan {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.java-plan-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.4fr);
+  gap: 16px;
+  padding: 11px 14px;
+}
+
+.java-plan-row + .java-plan-row {
+  border-top: 1px solid var(--line);
+}
+
+.java-plan-versions {
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.java-plan-java {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.java-plan-java strong {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+/* Settings → Syncing: the profiles that take part */
+.sync-profiles {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.sync-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.sync-profile + .sync-profile {
+  border-top: 1px solid var(--line);
+}
+
+.sync-profile-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sync-profile-text strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.sync-profile-text .faint {
+  font-size: 12.5px;
+}
+
+.sync-profile.is-out .sync-profile-text strong {
+  color: var(--text-2);
+}
+
+.sync-start {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sync-start-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .settings-warn,
@@ -747,4 +924,685 @@
 .skins-drop.is-hint .faint {
   font-weight: 400;
   font-size: 12.5px;
+}
+
+/* Settings → Storage. The categories' colours: one fixed order, checked for colour-blind separation on Flint's dark
+   surfaces (every theme is dark), with a 2px gap between segments and a legend that names each one. */
+.page-body.settings {
+  --storage-game: #3987e5;
+  --storage-profiles: #d95926;
+  --storage-runtimes: #199e70;
+  --storage-cache: #c98500;
+  --storage-rollback: #d55181;
+  --storage-sync: #008300;
+  --storage-temporary: #9085e9;
+  --storage-other: #6e6a64;
+}
+
+.storage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.storage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.storage-total strong {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.storage-total .spinner {
+  align-self: center;
+}
+
+.storage-bar {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--surface-3);
+}
+
+.storage-segment {
+  flex: 1 1 0;
+  min-width: 3px;
+  background: var(--storage-swatch);
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.storage-segment.is-dim {
+  opacity: 0.32;
+}
+
+.storage-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.storage-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  transition:
+    background var(--t-micro) var(--ease),
+    opacity var(--t-micro) var(--ease);
+}
+
+.storage-legend li.is-active {
+  background: rgba(var(--ink-rgb), 0.045);
+}
+
+.storage-legend li.is-dim {
+  opacity: 0.55;
+}
+
+.storage-swatch {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: var(--storage-swatch);
+}
+
+.storage-legend li.is-empty .storage-swatch {
+  opacity: 0.3;
+}
+
+.storage-legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.storage-legend-name {
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.storage-legend-text .faint,
+.storage-legend-size .faint {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.storage-legend-size {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--fg);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.storage-legend li.is-empty .storage-legend-size {
+  color: var(--text-3);
+}
+
+.storage-note {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.storage-profiles {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.storage-profiles summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--text-2);
+  font-weight: 550;
+  list-style: none;
+  cursor: pointer;
+}
+
+.storage-profiles summary::-webkit-details-marker {
+  display: none;
+}
+
+.storage-profiles summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin: 0 3px 0 1px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--t-micro) var(--ease);
+}
+
+.storage-profiles[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.storage-profiles summary:hover {
+  color: var(--fg);
+}
+
+.storage-profiles ul {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.storage-profiles li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 72px 28px;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.storage-profiles li + li {
+  border-top: 1px solid var(--line);
+}
+
+.storage-profile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.storage-profile-text strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-profile-text .faint {
+  font-size: 12px;
+}
+
+.storage-profile-meter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-3);
+}
+
+.storage-profile-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--storage-profiles);
+}
+
+.storage-profile-size {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A cleanup's confirmation: exactly what goes, and what never does. */
+.cleanup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cleanup-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.cleanup-list {
+  margin: 0;
+  padding: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line);
+  list-style: none;
+}
+
+.cleanup-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.cleanup-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.cleanup-list .faint {
+  font-size: 12px;
+}
+
+.cleanup-list strong {
+  color: var(--fg);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cleanup-note {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+/* Settings → Troubleshooting */
+.env-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.env-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.env-card div:last-child {
+  grid-column: 1 / -1;
+}
+
+.env-card dt {
+  font-size: 12px;
+}
+
+.env-card dd {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.env-card dd.mono {
+  font-size: 12.5px;
+}
+
+.backup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.backup-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.backup-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.backup-text strong {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.backup-text .faint {
+  font-size: 12px;
+}
+
+.errors {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.errors-list {
+  width: 100%;
+  max-height: 340px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line);
+  list-style: none;
+}
+
+.errors-list li {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 11px;
+  padding: 11px 14px;
+}
+
+.errors-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.errors-list li > svg {
+  margin-top: 2px;
+  color: var(--danger);
+}
+
+.errors-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.errors-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.errors-head strong {
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.errors-head time {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.errors-text .muted {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.errors-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+@media (max-width: 1180px) {
+  .storage-legend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .storage-profiles li {
+    grid-template-columns: minmax(0, 1fr) 90px 68px 28px;
+  }
+}
+
+/* ---------- Settings → Accounts → Connected accounts (ConnectedAccounts.tsx) ---------- */
+
+.connections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  scroll-margin: 24px;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.connection-face {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+}
+
+.connection-face img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-4);
+}
+
+/* Discord's mark, in Discord's colour: alone, or as a small badge on the linked avatar. */
+.connection-face.is-mark {
+  border-radius: 12px;
+  color: #fff;
+}
+
+.connection-mark.is-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #5865f2;
+  box-shadow: 0 0 0 2px var(--surface-3);
+  color: #fff;
+}
+
+.connection-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.connection-text strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.connection-text > span {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The line under the name wraps (two lines at most) instead of cutting a long language short. */
+.connection-text > span.faint {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 550;
+  color: var(--text-2);
+}
+
+.connection-state.is-success {
+  color: var(--success);
+}
+
+.connection-state.is-warning {
+  color: var(--warning);
+}
+
+.connection-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.connections-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.connections-note.is-warn {
+  color: var(--warning);
+}
+
+/* Connect Discord: the Store's disclosure, word for word. */
+.disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+.disclosure p {
+  margin: 0;
+}
+
+.disclosure strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.disclosure h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.disclosure ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.disclosure li::marker {
+  color: var(--text-3);
+}
+
+.disclosure code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(var(--ink-rgb), 0.07);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--fg);
+}
+
+.disclosure .muted {
+  font-size: 12.5px;
+}
+
+/* The dialog while Discord's page is open, and how it ended. */
+.link-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 4px;
+  text-align: center;
+}
+
+.link-state h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.link-state p {
+  max-width: 400px;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.link-state-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(var(--ink-rgb), 0.06);
+  color: var(--text-2);
+}
+
+.link-state-icon.is-done {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.link-state-icon.is-problem {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.link-state p.link-state-status {
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.link-state p.link-state-status.is-warn {
+  color: var(--warning);
+}
+
+.unlink-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.unlink-copy p {
+  margin: 0;
 }

@@ -1,51 +1,78 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, errorText, releaseLabel, subscribe, type Account, type AutoSyncStatus, type DiscordStatus } from "../../lib/api";
-import { bytes, dashedUuid } from "../../lib/format";
-import { autoSyncLine } from "../../lib/autoSync";
+import { api, errorText, releaseLabel, subscribe, type Account, type DiscordStatus } from "../../lib/api";
+import { dashedUuid } from "../../lib/format";
 import { DEFAULT_SETTINGS, EFFECTS, useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { useStore } from "../../lib/store";
 import { Badge, Button, IconButton, Segmented, Slider, Switch, TextField } from "../../ui/controls";
 import { Icon, type IconName } from "../../ui/Icon";
-import { FontPicker, ThemePicker } from "../../ui/AppearancePickers";
+import { searchable, translator, useT, type MessageKey } from "../../lib/i18n";
+import { useJavaRows } from "./SettingsJava";
+import { requestConnectionsFocus, useConnectedAccountsRows } from "./ConnectedAccounts";
+import { LanguagePicker } from "./LanguageSettings";
+import { useSyncRows } from "./SettingsSync";
+import { EFFECT_TEXT, FontPicker, ThemePicker } from "../../ui/AppearancePickers";
 import { Modal, useToast } from "../../ui/overlays";
 import { Avatar } from "../onboarding/steps";
 import { checkForUpdates, useUpdates } from "../../lib/updater";
+import { DOWNLOAD_LIMITS } from "../../lib/storage";
+import { CleanupButton, StorageOverviewCard } from "./StorageSettings";
+import { BackupsList, CopyDetailsButton, EnvironmentCard, ErrorHistory, ExportDiagnosticsButton, FolderButtons, useHasBackups } from "./TroubleshootingSettings";
 
-type SectionId = "general" | "minecraft" | "java" | "storage" | "appearance" | "accounts" | "audio" | "advanced";
+export type SectionId = "general" | "appearance" | "language" | "accounts" | "minecraft" | "java" | "sync" | "audio" | "storage" | "troubleshooting" | "advanced";
 
-const SECTIONS: { id: SectionId; label: string; icon: IconName }[] = [
-  { id: "general", label: "General", icon: "sliders" },
-  { id: "minecraft", label: "Minecraft", icon: "cube" },
-  { id: "java", label: "Java", icon: "cup" },
-  { id: "storage", label: "Storage", icon: "drive" },
-  { id: "appearance", label: "Appearance", icon: "palette" },
-  { id: "accounts", label: "Accounts", icon: "users" },
-  { id: "audio", label: "Audio", icon: "volume" },
-  { id: "advanced", label: "Advanced", icon: "lock" },
+const SECTIONS: { id: SectionId; label: MessageKey; icon: IconName }[] = [
+  { id: "general", label: "settings.sections.general", icon: "sliders" },
+  { id: "appearance", label: "settings.sections.appearance", icon: "palette" },
+  { id: "language", label: "settings.sections.language", icon: "globe" },
+  { id: "accounts", label: "settings.sections.accounts", icon: "users" },
+  { id: "minecraft", label: "settings.sections.minecraft", icon: "cube" },
+  { id: "java", label: "settings.sections.java", icon: "cup" },
+  { id: "sync", label: "settings.sections.sync", icon: "sync" },
+  { id: "audio", label: "settings.sections.audio", icon: "volume" },
+  { id: "storage", label: "settings.sections.storage", icon: "drive" },
+  { id: "troubleshooting", label: "settings.sections.troubleshooting", icon: "wrench" },
+  { id: "advanced", label: "settings.sections.advanced", icon: "lock" },
 ];
 
-type RowDef = { section: SectionId; title: string; desc?: string; keywords?: string; render: () => ReactNode; block?: boolean; status?: ReactNode };
+/** "Installs at once" as Flint started with it: a change applies from the next start. */
+let installsAtStart: number | null = null;
+
+/**
+ * One setting. `keywords` is a message of extra search words; search matches them in the interface
+ * language and in English, so "ram" or "fps" still finds its row in any language.
+ */
+export type RowDef = { section: SectionId; title: string; desc?: string; keywords?: MessageKey; render: () => ReactNode; block?: boolean; status?: ReactNode };
+
+const english = translator("en", {});
+
+/** A section, or a target inside one: "connections" is Accounts → Connected accounts. */
+const sectionOf = (target: string | undefined): SectionId | null =>
+  target === "connections" ? "accounts" : SECTIONS.some((s) => s.id === target) ? (target as SectionId) : null;
 
 export default function SettingsPage({ initialSection }: { initialSection?: string }) {
-  const [section, setSection] = useState<SectionId>(() => (SECTIONS.some((s) => s.id === initialSection) ? (initialSection as SectionId) : "general"));
+  const [section, setSection] = useState<SectionId>(() => sectionOf(initialSection) ?? "general");
   const [query, setQuery] = useState("");
   const rows = useRows();
+  const t = useT();
 
   useEffect(() => {
-    if (initialSection && SECTIONS.some((s) => s.id === initialSection)) setSection(initialSection as SectionId);
+    const target = sectionOf(initialSection);
+    if (target) setSection(target);
+    if (initialSection === "connections") requestConnectionsFocus();
   }, [initialSection]);
 
-  const q = query.trim().toLowerCase();
-  const visible = q ? rows.filter((r) => `${r.title} ${r.desc ?? ""} ${r.keywords ?? ""} ${r.section}`.toLowerCase().includes(q)) : rows.filter((r) => r.section === section);
+  const q = searchable(query.trim());
+  const searchText = (r: RowDef) => searchable([r.title, r.desc, r.keywords && t(r.keywords), r.keywords && english(r.keywords), r.section].join(" "));
+  const visible = q ? rows.filter((r) => searchText(r).includes(q)) : rows.filter((r) => r.section === section);
   const groups = SECTIONS.filter((s) => visible.some((r) => r.section === s.id));
 
   return (
     <div className="page-body settings">
       <aside className="settings-side">
-        <h1>Settings</h1>
-        <TextField icon="search" placeholder="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search settings" />
-        <nav aria-label="Settings sections">
+        <h1>{t("settings.page.title")}</h1>
+        <TextField icon="search" placeholder={t("settings.page.search")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("settings.page.search")} />
+        <nav aria-label={t("settings.page.sections")}>
           {SECTIONS.map((s) => (
             <button
               key={s.id}
@@ -59,16 +86,16 @@ export default function SettingsPage({ initialSection }: { initialSection?: stri
               }}
             >
               <Icon name={s.icon} size={16} />
-              {s.label}
+              {t(s.label)}
             </button>
           ))}
         </nav>
       </aside>
       <div className="settings-main scroll">
-        {groups.length === 0 && <p className="muted settings-none">No settings match “{query}”.</p>}
+        {groups.length === 0 && <p className="muted settings-none">{t("settings.page.noMatch", { query })}</p>}
         {groups.map((g) => (
           <section key={g.id} className="settings-group">
-            <h2>{g.label}</h2>
+            <h2>{t(g.label)}</h2>
             <div className="settings-rows">
               {visible
                 .filter((r) => r.section === g.id)
@@ -90,23 +117,26 @@ export default function SettingsPage({ initialSection }: { initialSection?: stri
   );
 }
 
-/** A quiet line under the Rich Presence switch; it only changes when Flint's connection does. */
-const DISCORD_NOTE: Record<DiscordStatus, string> = {
-  off: "",
-  idle: " It appears while a game launched from Flint is running.",
-  connected: " Shared with Discord now.",
-  unavailable: " Can't reach Discord right now. Flint connects when Discord is open.",
+/** A quiet sentence after the Rich Presence description; it only changes when Flint's connection does. */
+const DISCORD_NOTE: Record<DiscordStatus, MessageKey | null> = {
+  off: null,
+  idle: "settings.general.discord.noteIdle",
+  connected: "settings.general.discord.noteConnected",
+  unavailable: "settings.general.discord.noteUnavailable",
 };
 
 function useRows(): RowDef[] {
+  const t = useT();
   const { settings, update } = useSettings();
   const store = useStore();
   const toast = useToast();
   const [loginItem, setLoginItem] = useState<boolean | null>(null);
-  const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.storageUsage>> | null>(null);
-  const [totalMemory, setTotalMemory] = useState<number | null>(null);
+  const hasBackups = useHasBackups();
+  installsAtStart ??= settings.maxInstalls;
   const [discord, setDiscord] = useState<DiscordStatus>("idle");
-  const [autoSync, setAutoSync] = useState<AutoSyncStatus | null>(null);
+  const syncRows = useSyncRows();
+  const javaRows = useJavaRows();
+  const connectionRows = useConnectedAccountsRows();
 
   // The backend reports changes as they happen; nothing here polls.
   useEffect(() => {
@@ -115,30 +145,20 @@ function useRows(): RowDef[] {
   }, []);
 
   useEffect(() => {
-    void api.autoSyncStatus().then(setAutoSync).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     void api.launchAtLoginGet().then(setLoginItem).catch(() => setLoginItem(null));
-    void api.storageUsage().then(setUsage).catch(() => {});
-    void api
-      .systemInfo()
-      .then((i) => setTotalMemory(i.totalMemory))
-      .catch(() => {});
   }, []);
 
-  const memory = useMemo(() => memoryAdvice(totalMemory), [totalMemory]);
-
-  return useMemo<RowDef[]>(
+  const discordNote = DISCORD_NOTE[settings.discordPresence ? discord : "off"];
+  const rows = useMemo<RowDef[]>(
     () => [
       {
         section: "general",
-        title: "Open Flint at login",
-        desc: "Starts Flint when you sign in to your computer. Only for your user account.",
-        keywords: "startup boot autostart launch",
+        title: t("settings.general.openAtLogin.title"),
+        desc: t("settings.general.openAtLogin.desc"),
+        keywords: "settings.general.openAtLogin.keywords",
         render: () => (
           <Switch
-            label="Open Flint at login"
+            label={t("settings.general.openAtLogin.title")}
             checked={loginItem ?? settings.launchAtLogin}
             onChange={async (v) => {
               try {
@@ -146,7 +166,7 @@ function useRows(): RowDef[] {
                 setLoginItem(actual);
                 update({ launchAtLogin: actual });
               } catch (e) {
-                toast({ tone: "danger", title: "Couldn't change login item", body: errorText(e) });
+                toast({ tone: "danger", title: t("settings.general.openAtLogin.failed"), body: errorText(e) });
               }
             }}
           />
@@ -154,293 +174,364 @@ function useRows(): RowDef[] {
       },
       {
         section: "general",
-        title: "Flint Assist",
-        desc: "Enable Flint's AI-powered recommendations and assistant features.",
-        keywords: "ai flint ai assistant suggestions recommendations smart",
-        render: () => <Switch label="Flint Assist" checked={settings.flintAssist} onChange={(v) => update({ flintAssist: v })} />,
+        title: t("settings.general.flintAssist.title"),
+        desc: t("settings.general.flintAssist.desc"),
+        keywords: "settings.general.flintAssist.keywords",
+        render: () => <Switch label={t("settings.general.flintAssist.title")} checked={settings.flintAssist} onChange={(v) => update({ flintAssist: v })} />,
       },
       {
         section: "general",
-        title: "Minimize when the game starts",
-        desc: "Keeps Flint out of the way while you play.",
-        keywords: "hide window",
-        render: () => <Switch label="Minimize when the game starts" checked={settings.minimizeOnLaunch} onChange={(v) => update({ minimizeOnLaunch: v })} />,
-      },
-      {
-        section: "general",
-        title: "Auto Sync",
-        desc: "Keep your compatible game settings, resource packs, shaders, and mod configurations consistent across Flint profiles.",
-        keywords: "sync profiles options resource packs shaders mods configs copy consistent",
-        status: <AutoSyncLine on={settings.autoSync} status={autoSync} onDismiss={(id) => void api.autoSyncDismiss(id).then(setAutoSync).catch(() => {})} />,
+        title: t("settings.general.gameStart.title"),
+        desc: t(
+          settings.gameStartBehavior === "tray"
+            ? "settings.general.gameStart.descTray"
+            : settings.gameStartBehavior === "keep"
+              ? "settings.general.gameStart.descKeep"
+              : "settings.general.gameStart.descMinimize",
+        ),
+        keywords: "settings.general.gameStart.keywords",
         render: () => (
-          <Switch
-            label="Auto Sync"
-            checked={settings.autoSync}
-            onChange={(v) => {
-              update({ autoSync: v });
-              void api.autoSyncSetEnabled(v).then(setAutoSync).catch((e) => toast({ tone: "danger", title: "Couldn't change Auto Sync", body: errorText(e) }));
-            }}
+          <Segmented
+            label={t("settings.general.gameStart.title")}
+            value={settings.gameStartBehavior}
+            onChange={(v) => update({ gameStartBehavior: v })}
+            options={[
+              { value: "minimize", label: t("settings.general.gameStart.minimize") },
+              { value: "keep", label: t("settings.general.gameStart.keep") },
+              { value: "tray", label: t("settings.general.gameStart.tray") },
+            ]}
           />
         ),
       },
+      ...(store.info.platform === "windows"
+        ? [
+            {
+              section: "general" as const,
+              title: t("settings.general.maximized.title"),
+              desc: t("settings.general.maximized.desc"),
+              keywords: "settings.general.maximized.keywords" as const,
+              render: () => <Switch label={t("settings.general.maximized.title")} checked={settings.gameMaximized} onChange={(v) => update({ gameMaximized: v })} />,
+            },
+          ]
+        : []),
       {
         section: "general",
-        title: "Discord Rich Presence",
-        desc: `Show your Minecraft activity on Discord when playing through Flint.${DISCORD_NOTE[settings.discordPresence ? discord : "off"]}`,
-        keywords: "discord rich presence activity status profile",
-        render: () => <Switch label="Discord Rich Presence" checked={settings.discordPresence} onChange={(v) => update({ discordPresence: v })} />,
+        title: t("settings.general.importInSidebar.title"),
+        desc: t("settings.general.importInSidebar.desc"),
+        keywords: "settings.general.importInSidebar.keywords",
+        render: () => <Switch label={t("settings.general.importInSidebar.title")} checked={settings.importInSidebar} onChange={(v) => update({ importInSidebar: v })} />,
       },
       {
         section: "general",
-        title: "Show Minecraft version and loader",
-        desc: "Adds the version and loader, like “Minecraft 26.3 · Fabric”. When off, Discord shows only “Playing Minecraft”.",
-        keywords: "discord privacy version loader details",
+        title: t("settings.general.friendsInSidebar.title"),
+        desc: t("settings.general.friendsInSidebar.desc"),
+        keywords: "settings.general.friendsInSidebar.keywords",
+        render: () => <Switch label={t("settings.general.friendsInSidebar.title")} checked={settings.friendsInSidebar} onChange={(v) => update({ friendsInSidebar: v })} />,
+      },
+      {
+        section: "general",
+        title: t("settings.general.discord.title"),
+        desc: discordNote ? `${t("settings.general.discord.desc")} ${t(discordNote)}` : t("settings.general.discord.desc"),
+        keywords: "settings.general.discord.keywords",
+        render: () => <Switch label={t("settings.general.discord.title")} checked={settings.discordPresence} onChange={(v) => update({ discordPresence: v })} />,
+      },
+      {
+        section: "general",
+        title: t("settings.general.discordDetails.title"),
+        desc: t("settings.general.discordDetails.desc"),
+        keywords: "settings.general.discordDetails.keywords",
         render: () => (
-          <Switch label="Show Minecraft version and loader" checked={settings.discordDetails} disabled={!settings.discordPresence} onChange={(v) => update({ discordDetails: v })} />
+          <Switch label={t("settings.general.discordDetails.title")} checked={settings.discordDetails} disabled={!settings.discordPresence} onChange={(v) => update({ discordDetails: v })} />
         ),
       },
       {
         section: "general",
-        title: "About Flint",
-        desc: `Version ${releaseLabel(store.info)} · ${store.info.platform} ${store.info.arch}`,
-        keywords: "version build update release",
+        title: t("settings.general.about.title"),
+        desc: t("settings.general.about.desc", { version: releaseLabel(store.info), platform: store.info.platform, arch: store.info.arch }),
+        keywords: "settings.general.about.keywords",
         render: () => <AboutVersion version={store.info.version} />,
       },
       {
         section: "minecraft",
-        title: "Memory",
-        desc: memory.desc,
-        keywords: "ram xmx allocation",
-        block: true,
-        render: () => (
-          <div className="memory-control">
-            <Slider label="Memory" min={1024} max={memory.max} step={512} value={Math.min(settings.memoryMb, memory.max)} onChange={(v) => update({ memoryMb: v })} format={(v) => `${(v / 1024).toFixed(1)} GB`} />
-            {memory.recommended && settings.memoryMb !== memory.recommended && (
-              <Button size="sm" variant="ghost" onClick={() => update({ memoryMb: memory.recommended! })}>
-                Use {(memory.recommended / 1024).toFixed(0)} GB
-              </Button>
-            )}
-            {memory.warn && settings.memoryMb > memory.warn && <p className="settings-warn">That leaves little memory for your system. Minecraft may stutter or your computer may slow down.</p>}
-          </div>
-        ),
+        title: t("settings.minecraft.performanceMods.title"),
+        desc: t("settings.minecraft.performanceMods.desc"),
+        keywords: "settings.minecraft.performanceMods.keywords",
+        render: () => <Switch label={t("settings.minecraft.performanceMods.title")} checked={settings.performanceMods} onChange={(v) => update({ performanceMods: v })} />,
       },
       {
         section: "minecraft",
-        title: "Performance mods for new profiles",
-        desc: "New Fabric profiles start with Sodium, Lithium, FerriteCore, ImmediatelyFast, EntityCulling and Dynamic FPS where they support the version. Each can be removed in the profile. Existing profiles are never changed.",
-        keywords: "fps sodium lithium optimization performance",
-        render: () => <Switch label="Performance mods for new profiles" checked={settings.performanceMods} onChange={(v) => update({ performanceMods: v })} />,
+        title: t("settings.minecraft.optimization.title"),
+        desc: t("settings.minecraft.optimization.desc"),
+        keywords: "settings.minecraft.optimization.keywords",
+        render: () => <Switch label={t("settings.minecraft.optimization.title")} checked={settings.automaticOptimization} onChange={(v) => update({ automaticOptimization: v })} />,
       },
       {
         section: "minecraft",
-        title: "Automatic Optimization",
-        desc: "Lets Flint Performance Core choose Java settings for each Minecraft version and run Flint's in-game optimizations (with Flint's main menu, Minecraft 26.3). Your Minecraft video settings, mods and worlds are never changed. Takes effect the next time you press Play.",
-        keywords: "performance fps java gc automatic optimization tuning",
-        render: () => <Switch label="Automatic Optimization" checked={settings.automaticOptimization} onChange={(v) => update({ automaticOptimization: v })} />,
+        title: t("settings.minecraft.inGameMenu.title"),
+        desc: t("settings.minecraft.inGameMenu.desc"),
+        keywords: "settings.minecraft.inGameMenu.keywords",
+        render: () => <Switch label={t("settings.minecraft.inGameMenu.title")} checked={settings.inGameMenu} onChange={(v) => update({ inGameMenu: v })} />,
       },
       {
         section: "minecraft",
-        title: "Flint main menu in Minecraft",
-        desc: "Replaces Minecraft's title screen with Flint's menu. Works with Minecraft 26.3 profiles that use Fabric; other profiles keep Minecraft's own menu. Takes effect the next time you press Play.",
-        keywords: "title screen main menu in-game runtime mod",
-        render: () => <Switch label="Flint main menu in Minecraft" checked={settings.inGameMenu} onChange={(v) => update({ inGameMenu: v })} />,
-      },
-      {
-        section: "minecraft",
-        title: "Profiles folder",
-        desc: "Worlds, mods and screenshots live inside each profile.",
-        keywords: "saves worlds directory",
+        title: t("settings.minecraft.profilesFolder.title"),
+        desc: t("settings.minecraft.profilesFolder.desc"),
+        keywords: "settings.minecraft.profilesFolder.keywords",
         render: () => (
-          <Button size="sm" icon="folder" onClick={() => void api.revealFolder("profiles").catch((e) => toast({ tone: "danger", title: "Couldn't open the folder", body: errorText(e) }))}>
-            Open
-          </Button>
-        ),
-      },
-      {
-        section: "java",
-        title: "Managed Java",
-        desc: "Flint downloads Mojang's official Java for each version: Java 25 for 26.x, Java 21 for 1.21.x, Java 8 for 1.8.9.",
-        keywords: "runtime jre jdk",
-        render: () => <Badge tone="success">Automatic</Badge>,
-      },
-      {
-        section: "java",
-        title: "Custom Java executable",
-        desc: "Leave empty to use managed Java. A custom Java must match the version the profile needs, or Minecraft won't start.",
-        keywords: "runtime path jre jdk",
-        block: true,
-        render: () => <JavaPathControl />,
-      },
-      {
-        section: "storage",
-        title: "Disk usage",
-        desc: usage
-          ? `Game files ${bytes(usage.game)} · Java ${bytes(usage.runtimes)} · Profiles ${bytes(usage.profiles)} · Cache ${bytes(usage.cache)}`
-          : "Calculating…",
-        keywords: "space size",
-        render: () => (
-          <Button size="sm" icon="folder" onClick={() => void api.revealFolder("data")}>
-            Show in folder
-          </Button>
-        ),
-      },
-      {
-        section: "storage",
-        title: "Clear cache",
-        desc: "Removes cached skins, news and version lists. Worlds, mods, configs, profiles and accounts are never touched.",
-        keywords: "clean temporary",
-        render: () => (
-          <Button
-            size="sm"
-            onClick={async () => {
-              try {
-                const result = await api.clearCache();
-                if (result.failed.length > 0) {
-                  toast({
-                    tone: "danger",
-                    title: "Some cached files couldn't be removed",
-                    body: `${result.failed.map((f) => f.name).join(", ")} may be in use. Freed ${bytes(result.removedBytes)}.`,
-                  });
-                } else {
-                  toast({ tone: "success", title: "Cache cleared", body: result.removedBytes > 0 ? `Freed ${bytes(result.removedBytes)}.` : "The cache was already empty." });
-                }
-              } catch (e) {
-                toast({ tone: "danger", title: "Couldn't clear the cache", body: errorText(e) });
-              }
-              setUsage(await api.storageUsage().catch(() => null));
-            }}
-          >
-            Clear
+          <Button size="sm" icon="folder" onClick={() => void api.revealFolder("profiles").catch((e) => toast({ tone: "danger", title: t("settings.folder.openFailed"), body: errorText(e) }))}>
+            {t("settings.folder.open")}
           </Button>
         ),
       },
       {
         section: "appearance",
-        title: "Theme",
-        desc: "Changes colours across Flint right away.",
-        keywords: "color colour dark ember obsidian moss bloodstone red dusk violet purple",
+        title: t("settings.appearance.theme.title"),
+        desc: t("settings.appearance.theme.desc"),
+        keywords: "settings.appearance.theme.keywords",
         block: true,
         render: () => <ThemePicker value={settings.theme} onChange={(v) => update({ theme: v })} />,
       },
       {
         section: "appearance",
-        title: "Typography",
-        desc: "All fonts are bundled with Flint and licensed for redistribution (SIL Open Font License).",
-        keywords: "font typeface minecraft pixel modern technical",
+        title: t("settings.appearance.typography.title"),
+        desc: t("settings.appearance.typography.desc"),
+        keywords: "settings.appearance.typography.keywords",
         block: true,
         render: () => <FontPicker value={settings.font} onChange={(v) => update({ font: v })} />,
       },
       {
         section: "appearance",
-        title: "Animations",
-        desc: "Page transitions and the character's idle motion.",
-        keywords: "motion",
-        render: () => <Switch label="Animations" checked={settings.animations} onChange={(v) => update({ animations: v })} />,
+        title: t("settings.appearance.animations.title"),
+        desc: t("settings.appearance.animations.desc"),
+        keywords: "settings.appearance.animations.keywords",
+        render: () => <Switch label={t("settings.appearance.animations.title")} checked={settings.animations} onChange={(v) => update({ animations: v })} />,
       },
       {
         section: "appearance",
-        title: "Wallpaper parallax",
-        desc: "The Home wallpaper shifts a few pixels with your cursor.",
-        keywords: "motion mouse",
-        render: () => <Switch label="Wallpaper parallax" checked={settings.parallax} onChange={(v) => update({ parallax: v })} />,
+        title: t("settings.appearance.parallax.title"),
+        desc: t("settings.appearance.parallax.desc"),
+        keywords: "settings.appearance.parallax.keywords",
+        render: () => <Switch label={t("settings.appearance.parallax.title")} checked={settings.parallax} onChange={(v) => update({ parallax: v })} />,
       },
       {
         section: "appearance",
-        title: "Wallpaper brightness",
-        desc: "How much Flint darkens the version wallpaper behind panels and text.",
-        keywords: "background dim dark bright wallpaper",
+        title: t("settings.appearance.wallpaperDim.title"),
+        desc: t("settings.appearance.wallpaperDim.desc"),
+        keywords: "settings.appearance.wallpaperDim.keywords",
         render: () => (
           <Slider
-            label="Wallpaper dimming"
+            label={t("settings.appearance.wallpaperDim.slider")}
             min={0}
             max={1}
             step={0.05}
             value={settings.wallpaperDim}
             onChange={(v) => update({ wallpaperDim: v })}
-            format={(v) => (v < 0.05 ? "Brightest" : `${Math.round(v * 100)}% dimmer`)}
+            format={(v) => (v < 0.05 ? t("settings.appearance.wallpaperDim.brightest") : t("settings.appearance.wallpaperDim.dimmer", { percent: Math.round(v * 100) }))}
           />
         ),
       },
       {
         section: "appearance",
-        title: "Visual effects",
-        desc: EFFECTS.find((e) => e.id === settings.effects)?.note ?? "",
-        keywords: "performance blur 3d low lag fps reduced",
-        render: () => <Segmented label="Visual effects" value={settings.effects} onChange={(v) => update({ effects: v })} options={EFFECTS.map((e) => ({ value: e.id, label: e.name }))} />,
+        title: t("settings.appearance.effects.title"),
+        desc: t(EFFECT_TEXT[settings.effects].note),
+        keywords: "settings.appearance.effects.keywords",
+        render: () => (
+          <Segmented
+            label={t("settings.appearance.effects.title")}
+            value={settings.effects}
+            onChange={(v) => update({ effects: v })}
+            options={EFFECTS.map((e) => ({ value: e.id, label: t(EFFECT_TEXT[e.id].name) }))}
+          />
+        ),
       },
       {
         section: "accounts",
-        title: "Minecraft accounts",
-        desc: "Sign-in tokens are stored in your system keychain, never in Flint's files.",
-        keywords: "microsoft login sign in",
+        title: t("settings.accounts.list.title"),
+        desc: t("settings.accounts.list.desc"),
+        keywords: "settings.accounts.list.keywords",
         block: true,
         render: () => <AccountsControl />,
       },
       {
         section: "audio",
-        title: "Interface sounds",
-        desc: "Quiet cues when a download finishes, a game launches or something fails.",
-        keywords: "sound sfx",
-        render: () => <Switch label="Interface sounds" checked={settings.sounds} onChange={(v) => update({ sounds: v })} />,
+        title: t("settings.audio.sounds.title"),
+        desc: t("settings.audio.sounds.desc"),
+        keywords: "settings.audio.sounds.keywords",
+        render: () => <Switch label={t("settings.audio.sounds.title")} checked={settings.sounds} onChange={(v) => update({ sounds: v })} />,
       },
       {
         section: "audio",
-        title: "Volume",
-        keywords: "sound loud",
+        title: t("settings.audio.volume.title"),
+        keywords: "settings.audio.volume.keywords",
         render: () => (
           <div className="row-inline">
-            <Slider label="Volume" min={0} max={1} step={0.05} value={settings.volume} disabled={!settings.sounds} onChange={(v) => update({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
-            <IconButton icon="play" label="Preview sound" size="sm" disabled={!settings.sounds} onClick={() => sound.play("success", true)} />
+            <Slider
+              label={t("settings.audio.volume.title")}
+              min={0}
+              max={1}
+              step={0.05}
+              value={settings.volume}
+              disabled={!settings.sounds}
+              onChange={(v) => update({ volume: v })}
+              format={(v) => t("settings.audio.volume.value", { percent: Math.round(v * 100) })}
+            />
+            <IconButton icon="play" label={t("settings.audio.volume.preview")} size="sm" disabled={!settings.sounds} onClick={() => sound.play("success", true)} />
           </div>
         ),
       },
       {
-        section: "advanced",
-        title: "Mod assistant service",
-        desc: !settings.flintAssist
-          ? "Flint Assist is off (Settings → General), so the assistant service isn't used."
-          : store.info.gatewayConfigured || settings.aiGatewayUrl
-            ? "Flint's AI gateway is configured. Leave this empty to use the built-in service, or set another https address."
-            : "No AI gateway configured. Mod suggestions use Flint's built-in keyword matching.",
-        keywords: "ai gateway url assistant",
+        section: "storage",
+        title: t("settings.rows.storage.spaceUsed.title"),
+        keywords: "settings.rows.storage.spaceUsed.keywords",
         block: true,
+        render: () => <StorageOverviewCard />,
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.clearCache.title"),
+        desc: t("settings.rows.storage.clearCache.desc"),
+        keywords: "settings.rows.storage.clearCache.keywords",
+        render: () => <CleanupButton kind="cache" />,
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.temporary.title"),
+        desc: t("settings.rows.storage.temporary.desc"),
+        keywords: "settings.rows.storage.temporary.keywords",
+        render: () => <CleanupButton kind="temporary" />,
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.unusedGame.title"),
+        desc: t("settings.rows.storage.unusedGame.desc"),
+        keywords: "settings.rows.storage.unusedGame.keywords",
+        render: () => <CleanupButton kind="unusedGame" />,
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.rollback.title"),
+        desc: t("settings.rows.storage.rollback.desc"),
+        keywords: "settings.rows.storage.rollback.keywords",
+        render: () => <CleanupButton kind="rollback" />,
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.downloads.title"),
+        desc: t("settings.rows.storage.downloads.desc"),
+        keywords: "settings.rows.storage.downloads.keywords",
         render: () => (
-          <TextField
-            placeholder="https://flint-ai-gateway.netlify.app"
-            value={settings.aiGatewayUrl}
-            onChange={(e) => update({ aiGatewayUrl: e.target.value.trim() })}
-            disabled={!settings.flintAssist}
-            aria-label="AI gateway URL"
-            spellCheck={false}
-            hint="Leave empty to use Flint's built-in gateway. Only https addresses are used. Flint never sends sign-in tokens to the assistant."
+          <div className="row-inline">
+            {settings.maxDownloads !== DOWNLOAD_LIMITS.maxDownloads.default && (
+              <Button size="sm" variant="ghost" onClick={() => update({ maxDownloads: DOWNLOAD_LIMITS.maxDownloads.default })}>
+                {t("settings.rows.storage.downloads.useDefault", { value: DOWNLOAD_LIMITS.maxDownloads.default })}
+              </Button>
+            )}
+            <Slider
+              label={t("settings.rows.storage.downloads.title")}
+              min={DOWNLOAD_LIMITS.maxDownloads.min}
+              max={DOWNLOAD_LIMITS.maxDownloads.max}
+              value={settings.maxDownloads}
+              onChange={(v) => update({ maxDownloads: v })}
+              format={(v) => String(v)}
+            />
+          </div>
+        ),
+      },
+      {
+        section: "storage",
+        title: t("settings.rows.storage.installs.title"),
+        desc: t("settings.rows.storage.installs.desc"),
+        keywords: "settings.rows.storage.installs.keywords",
+        status: settings.maxInstalls !== installsAtStart && <span className="faint settings-hint">{t("settings.rows.storage.installs.restart", { count: settings.maxInstalls })}</span>,
+        render: () => (
+          <Segmented
+            label={t("settings.rows.storage.installs.title")}
+            value={String(settings.maxInstalls) as "1" | "2" | "3" | "4"}
+            onChange={(v) => update({ maxInstalls: Number(v) })}
+            options={(["1", "2", "3", "4"] as const).map((n) => ({ value: n, label: n }))}
           />
         ),
       },
       {
-        section: "advanced",
-        title: "Reset preferences",
-        desc: "Restores theme, fonts, sounds, memory, Java and assistant settings to their defaults. Accounts, profiles, worlds and mods are not touched.",
-        keywords: "default restore",
-        render: () => <ResetControl />,
-      },
-      {
-        section: "advanced",
-        title: "Data folder",
+        section: "storage",
+        title: t("settings.rows.storage.dataFolder.title"),
         desc: store.info.dataDir,
-        keywords: "path directory",
+        keywords: "settings.rows.storage.dataFolder.keywords",
         render: () => (
-          <Button size="sm" icon="folder" onClick={() => void api.revealFolder("data")}>
-            Open
+          <Button size="sm" icon="folder" onClick={() => void api.revealFolder("data").catch((e) => toast({ tone: "danger", title: t("settings.folder.openFailed"), body: errorText(e) }))}>
+            {t("settings.folder.open")}
           </Button>
         ),
       },
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.environment.title"),
+        keywords: "settings.rows.troubleshooting.environment.keywords",
+        block: true,
+        render: () => <EnvironmentCard />,
+      },
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.copyDetails.title"),
+        desc: t("settings.rows.troubleshooting.copyDetails.desc"),
+        keywords: "settings.rows.troubleshooting.copyDetails.keywords",
+        render: () => <CopyDetailsButton />,
+      },
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.exportDiagnostics.title"),
+        desc: t("settings.rows.troubleshooting.exportDiagnostics.desc"),
+        keywords: "settings.rows.troubleshooting.exportDiagnostics.keywords",
+        render: () => <ExportDiagnosticsButton />,
+      },
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.clearCache.title"),
+        desc: t("settings.rows.troubleshooting.clearCache.desc"),
+        keywords: "settings.rows.troubleshooting.clearCache.keywords",
+        render: () => <CleanupButton kind="cache" />,
+      },
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.folders.title"),
+        desc: t("settings.rows.troubleshooting.folders.desc"),
+        keywords: "settings.rows.troubleshooting.folders.keywords",
+        render: () => <FolderButtons />,
+      },
+      ...(hasBackups
+        ? [
+            {
+              section: "troubleshooting" as const,
+              title: t("settings.rows.troubleshooting.backups.title"),
+              desc: t("settings.rows.troubleshooting.backups.desc"),
+              keywords: "settings.rows.troubleshooting.backups.keywords" as const,
+              block: true,
+              render: () => <BackupsList />,
+            },
+          ]
+        : []),
+      {
+        section: "troubleshooting",
+        title: t("settings.rows.troubleshooting.errorHistory.title"),
+        desc: t("settings.rows.troubleshooting.errorHistory.desc"),
+        keywords: "settings.rows.troubleshooting.errorHistory.keywords",
+        block: true,
+        render: () => <ErrorHistory />,
+      },
+      {
+        section: "advanced",
+        title: t("settings.advanced.reset.title"),
+        desc: t("settings.advanced.reset.desc"),
+        keywords: "settings.advanced.reset.keywords",
+        render: () => <ResetControl />,
+      },
+      // Development builds only (compiled out of releases), so it stays English and has no search words.
       ...(import.meta.env.DEV
         ? [
             {
               section: "advanced" as const,
               title: "Reopen onboarding (development)",
               desc: "Shows first-run setup again. Keeps accounts, profiles and mods. Compiled out of release builds.",
-              keywords: "dev qa test first run",
               render: () => (
                 <Button
                   size="sm"
@@ -457,31 +548,17 @@ function useRows(): RowDef[] {
           ]
         : []),
     ],
-    [settings, update, store.info, loginItem, usage, toast, memory, autoSync],
+    [settings, update, store.info, loginItem, toast, hasBackups, discordNote, t],
   );
-}
-
-/** The one quiet line under Auto Sync's switch: a notice to dismiss, or that it waits for a first game. */
-function AutoSyncLine({ on, status, onDismiss }: { on: boolean; status: AutoSyncStatus | null; onDismiss: (id: string) => void }) {
-  const line = autoSyncLine(on, status);
-  if (!line) return null;
-  const { text, dismissId } = line;
-  return (
-    <span className="muted">
-      {text}
-      {dismissId && (
-        <>
-          {" "}
-          <button type="button" className="launch-link" onClick={() => onDismiss(dismissId)}>
-            Dismiss
-          </button>
-        </>
-      )}
-    </span>
+  const languageRows = useMemo<RowDef[]>(
+    () => [{ section: "language", title: t("settings.language.title"), desc: t("settings.language.desc"), keywords: "settings.language.keywords", block: true, render: () => <LanguagePicker /> }],
+    [t],
   );
+  return [...rows, ...connectionRows, ...languageRows, ...javaRows, ...syncRows];
 }
 
 function AccountsControl() {
+  const t = useT();
   const store = useStore();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -492,9 +569,9 @@ function AccountsControl() {
     try {
       const account = await api.signIn();
       await store.reloadAccounts();
-      toast({ tone: "success", title: `Signed in as ${account.username}` });
+      toast({ tone: "success", title: t("settings.accounts.signedIn", { name: account.username }) });
     } catch (e) {
-      toast({ tone: "danger", title: "Sign-in didn't finish", body: errorText(e) });
+      toast({ tone: "danger", title: t("settings.accounts.signInFailed"), body: errorText(e) });
     } finally {
       setAdding(false);
     }
@@ -504,9 +581,9 @@ function AccountsControl() {
     try {
       await api.refreshAccount(a.uuid);
       await store.reloadAccounts();
-      toast({ tone: "success", title: `${a.username} is up to date` });
+      toast({ tone: "success", title: t("settings.accounts.refreshed", { name: a.username }) });
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't refresh", body: errorText(e) });
+      toast({ tone: "danger", title: t("settings.accounts.refreshFailed"), body: errorText(e) });
     }
   };
 
@@ -522,33 +599,33 @@ function AccountsControl() {
             <span className="faint mono">{dashedUuid(a.uuid)}</span>
           </span>
           {a.uuid === store.activeAccount?.uuid ? (
-            <Badge tone="accent">Active</Badge>
+            <Badge tone="accent">{t("settings.accounts.active")}</Badge>
           ) : (
             <Button size="sm" onClick={() => void store.switchAccount(a.uuid)}>
-              Use
+              {t("settings.accounts.use")}
             </Button>
           )}
-          <IconButton icon="refresh" label={`Refresh ${a.username}`} size="sm" onClick={() => void refresh(a)} />
-          <IconButton icon="logout" label={`Sign out ${a.username}`} size="sm" onClick={() => setRemoving(a)} />
+          <IconButton icon="refresh" label={t("settings.accounts.refresh", { name: a.username })} size="sm" onClick={() => void refresh(a)} />
+          <IconButton icon="logout" label={t("settings.accounts.signOut", { name: a.username })} size="sm" onClick={() => setRemoving(a)} />
         </div>
       ))}
       <Button icon="microsoft" onClick={() => void add()} loading={adding}>
-        {adding ? "Waiting for browser…" : "Add Microsoft account"}
+        {adding ? t("settings.accounts.waiting") : t("settings.accounts.add")}
       </Button>
       {adding && (
         <button type="button" className="ob-link" onClick={() => void api.cancelSignIn()}>
-          Cancel sign-in
+          {t("settings.accounts.cancelSignIn")}
         </button>
       )}
       <Modal
         open={!!removing}
         onClose={() => setRemoving(null)}
-        title={`Sign out ${removing?.username ?? ""}?`}
+        title={t("settings.accounts.remove.title", { name: removing?.username ?? "" })}
         width={420}
         footer={
           <>
             <Button variant="ghost" onClick={() => setRemoving(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
@@ -557,126 +634,57 @@ function AccountsControl() {
                 try {
                   await api.removeAccount(removing.uuid);
                 } catch (e) {
-                  toast({ tone: "danger", title: "Couldn't sign out", body: errorText(e) });
+                  toast({ tone: "danger", title: t("settings.accounts.remove.failed"), body: errorText(e) });
                 }
                 await store.reloadAccounts();
                 setRemoving(null);
               }}
             >
-              Sign out
+              {t("settings.accounts.remove.confirm")}
             </Button>
           </>
         }
       >
-        <p className="muted">Flint forgets this account and deletes its saved sign-in from your keychain. Profiles and worlds stay.</p>
+        <p className="muted">{t("settings.accounts.remove.body")}</p>
       </Modal>
     </div>
   );
 }
 
-function memoryAdvice(total: number | null) {
-  const GB = 1024;
-  if (!total) return { max: 16 * GB, recommended: null as number | null, warn: null as number | null, desc: "How much RAM Minecraft may use. 4 GB suits most modded profiles." };
-  const totalMb = Math.floor(total / (1024 * 1024));
-  const max = Math.max(2 * GB, Math.min(32 * GB, Math.floor((totalMb * 0.75) / 512) * 512));
-  const recommended = totalMb <= 8 * GB ? 3 * GB : totalMb <= 16 * GB ? 4 * GB : 6 * GB;
-  const warn = Math.floor((totalMb * 0.6) / 512) * 512;
-  return {
-    max,
-    recommended: Math.min(recommended, max),
-    warn,
-    desc: `This computer has ${(totalMb / GB).toFixed(0)} GB. ${(Math.min(recommended, max) / GB).toFixed(0)} GB is a good fit for modded profiles; more rarely helps and can cause longer pauses.`,
-  };
-}
-
-function JavaPathControl() {
-  const { settings, update } = useSettings();
-  const [value, setValue] = useState(settings.javaPath);
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  useEffect(() => setValue(settings.javaPath), [settings.javaPath]);
-
-  const check = async () => {
-    const path = value.trim();
-    if (!path) {
-      update({ javaPath: "" });
-      setResult(null);
-      return;
-    }
-    setChecking(true);
-    try {
-      const info = await api.validateJava(path);
-      update({ javaPath: path });
-      setResult({ ok: true, text: info.summary || `Java ${info.version}` });
-    } catch (e) {
-      setResult({ ok: false, text: errorText(e) });
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="java-control">
-      <div className="row-inline">
-        <TextField
-          placeholder="/path/to/java"
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setResult(null);
-          }}
-          onKeyDown={(e) => e.key === "Enter" && void check()}
-          aria-label="Custom Java executable"
-          spellCheck={false}
-        />
-        <Button size="sm" onClick={() => void check()} loading={checking}>
-          {value.trim() ? "Check & save" : "Use managed Java"}
-        </Button>
-      </div>
-      {result && (
-        <p className={result.ok ? "settings-ok" : "settings-warn"}>
-          <Icon name={result.ok ? "check" : "alert"} size={13} /> {result.text}
-        </p>
-      )}
-      {!result && settings.javaPath && value === settings.javaPath && <p className="faint settings-hint">Using {settings.javaPath}</p>}
-    </div>
-  );
-}
-
 function ResetControl() {
+  const t = useT();
   const { settings, update } = useSettings();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
-        Reset…
+        {t("settings.advanced.reset.button")}
       </Button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Reset preferences?"
+        title={t("settings.advanced.reset.confirmTitle")}
         width={440}
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger"
               onClick={() => {
                 update({ ...DEFAULT_SETTINGS, launchAtLogin: settings.launchAtLogin });
                 setOpen(false);
-                toast({ tone: "success", title: "Preferences reset" });
+                toast({ tone: "success", title: t("settings.advanced.reset.done") });
               }}
             >
-              Reset
+              {t("settings.advanced.reset.confirm")}
             </Button>
           </>
         }
       >
-        <p className="muted modal-copy">Flint's look, sounds, memory, Java and assistant settings go back to their defaults. Your accounts, profiles, worlds and mods stay exactly as they are.</p>
+        <p className="muted modal-copy">{t("settings.advanced.reset.confirmBody")}</p>
       </Modal>
     </>
   );
@@ -684,20 +692,21 @@ function ResetControl() {
 
 /** About Flint's control: the version, a manual "Check for updates" and what it found. */
 function AboutVersion({ version }: { version: string }) {
+  const t = useT();
   const update = useUpdates();
   const status =
-    update.phase === "checking" ? "Checking…"
-    : update.phase === "current" ? "You're up to date"
-    : update.phase === "available" ? `Flint ${update.version} is available`
-    : update.phase === "downloading" ? `Downloading Flint ${update.version}`
-    : update.phase === "ready" ? "Restart Flint to finish updating"
+    update.phase === "checking" ? t("settings.general.about.checking")
+    : update.phase === "current" ? t("settings.general.about.upToDate")
+    : update.phase === "available" ? t("settings.general.about.available", { version: update.version })
+    : update.phase === "downloading" ? t("settings.general.about.downloading", { version: update.version })
+    : update.phase === "ready" ? t("settings.general.about.restart")
     : update.phase === "error" && update.during === "check" ? update.message
     : null;
   return (
     <span className="about-version">
       {status && <span className={`faint ${update.phase === "error" ? "is-danger" : ""}`}>{status}</span>}
       <Button size="sm" variant="ghost" disabled={update.phase === "checking" || update.phase === "downloading" || update.phase === "installing"} onClick={() => void checkForUpdates(true)}>
-        Check for updates
+        {t("settings.general.about.check")}
       </Button>
       <Badge>v{version}</Badge>
     </span>

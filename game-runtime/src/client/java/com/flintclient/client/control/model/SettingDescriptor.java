@@ -12,6 +12,9 @@ import org.jspecify.annotations.Nullable;
 public abstract sealed class SettingDescriptor<T> permits BoolSetting, IntSetting, FloatSetting, ChoiceSetting, RgbSetting, OptionSetting, KeySetting,
 	TextSetting, IdSetting, IdValuesSetting, IdListSetting {
 	private final String id;
+	/** The first module built with this setting and its position there: a lookup every frame then needs no search. */
+	@Nullable ModuleDescriptor owner;
+	int position = -1;
 	private final String label;
 	private final @Nullable String description;
 	private final T defaultValue;

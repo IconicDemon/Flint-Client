@@ -1,0 +1,241 @@
+import groovy.json.JsonSlurper
+
+// Flint's game runtime for an obfuscated Minecraft line (1.21.x), built from the same sources as the 26.x build in ../:
+// Loom's remap plugin with Mojang's names, Java 21, and the shared sources adapted by the line's overlay
+// (../src/mc<line>/shared-sources.rules, see buildSrc/SharedSources). The jar lands where the 26.x lines put theirs:
+// ../build/mc-<line>/libs/flint-game-runtime-<app>+<line>.jar.
+//   ./gradlew -p legacy build -Pminecraft_version=1.21.11
+plugins {
+	id "net.fabricmc.fabric-loom-remap" version "${loom_version}"
+}
+
+def appPackage = new JsonSlurper().parseText(
+	providers.fileContents(layout.projectDirectory.file("../../app/package.json")).asText.get())
+
+base {
+	archivesName = project.archive_base_name
+}
+
+version = appPackage.version
+group = project.maven_group
+
+def mcVersion = project.minecraft_version
+def mcLine = mcVersion
+// The overlay is the line's own (src/mc12111 for 1.21.11, src/mc12101 for 1.21.1: the patch number in two digits);
+// -Poverlay=mc12111 builds another release from it (a trial).
+def lineParts = mcLine.tokenize(".")
+def mcOverlay = project.findProperty("overlay") ?: "mc" + lineParts[0] + lineParts[1] + (lineParts.size() > 2 ? lineParts[2].padLeft(2, "0") : "00")
+def src = file("../src")
+layout.buildDirectory = file("../build/mc-${mcLine}")
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"flintclient" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+// The overlays this line is made of, base first: an overlay may build on another one (src/mc12110/overlay.properties:
+// base=mc12111), so 1.21.10 is 1.21.11's overlay plus what 1.21.10 does differently.
+// An overlay's compileOnly (comma-separated coordinates): libraries the sources compile against that its Minecraft
+// doesn't bring (1.21.10 has no jspecify).
+def layers = []
+def extraCompileOnly = []
+for (def name = mcOverlay; name != null;) {
+	if (name in layers) {
+		throw new GradleException("overlay ${name} builds on itself")
+	}
+	layers.add(0, name)
+	def props = new Properties()
+	def propsFile = new File(src, "${name}/overlay.properties")
+	if (propsFile.exists()) {
+		propsFile.withInputStream { props.load(it) }
+	}
+	extraCompileOnly += (props.getProperty("compileOnly") ?: "").split(",").collect { it.trim() }.findAll { it }
+	name = props.getProperty("base")
+}
+if (!extraCompileOnly.isEmpty()) {
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		extraCompileOnly.each {
+			compileOnly it
+			clientCompileOnly it
+		}
+	}
+}
+
+// Interfaces Loom adds to Minecraft's classes at compile time (intermediary names), from the nearest overlay's mod json.
+def overlayModJson = layers.reverse().collect { new File(src, "${it}/loom/fabric.mod.json") }.find { it.exists() }
+if (overlayModJson != null) {
+	loom.fabricModJsonPath = overlayModJson
+}
+
+def sharedJava = new File(src, "client/java")
+def testJava = new File(src, "test/java")
+def layerJava = layers.collect { new File(src, "${it}/java") }
+def layerRules = layers.collect { new File(src, "${it}/shared-sources.rules") }
+// Optional: test files a layer patches (shared-tests.rules, the same forms).
+def layerTestRules = layers.collect { new File(src, "${it}/shared-tests.rules") }
+def adaptedJava = layout.buildDirectory.dir("generated/shared-java")
+def adaptedTests = layout.buildDirectory.dir("generated/shared-tests")
+def overlayResources = layout.buildDirectory.dir("generated/overlay-resources")
+
+// Every source this line compiles: the shared sources renamed and patched by each overlay's rules in turn, each
+// overlay's own files replacing those of the same path. The shared files (and so every 26.x jar) are never touched.
+def adaptSharedSources = tasks.register("adaptSharedSources") {
+	inputs.dir(sharedJava)
+	layerJava.each { if (it.exists()) inputs.dir(it) }
+	inputs.files(layerRules)
+	outputs.dir(adaptedJava)
+	doLast {
+		SharedSources.adapt(sharedJava, layerRules, layerJava, adaptedJava.get().asFile)
+	}
+}
+def adaptSharedTests = tasks.register("adaptSharedTests") {
+	inputs.dir(testJava)
+	inputs.files(layerRules)
+	inputs.files(layerTestRules)
+	outputs.dir(adaptedTests)
+	doLast {
+		SharedSources.adaptTests(testJava, [layerRules, layerTestRules].transpose().flatten(), adaptedTests.get().asFile)
+	}
+}
+// The overlays' resources (version mixins, shaders), a later overlay's file replacing a base one of the same path.
+def mergeOverlayResources = tasks.register("mergeOverlayResources", Sync) {
+	layers.reverse().each { from(new File(src, "${it}/resources")) }
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	into(overlayResources)
+}
+
+sourceSets.main.java.setSrcDirs([])
+sourceSets.main.resources.setSrcDirs([new File(src, "main/resources")])
+sourceSets.client.java.setSrcDirs([])
+sourceSets.client.java.srcDir(adaptSharedSources)
+sourceSets.client.resources.setSrcDirs([new File(src, "client/resources")])
+sourceSets.client.resources.srcDir(mergeOverlayResources)
+sourceSets.test.java.setSrcDirs([])
+sourceSets.test.java.srcDir(adaptSharedTests)
+sourceSets.test.resources.setSrcDirs([])
+
+// Simple Voice Chat's API, compile only (as in ../build.gradle): stubs, never packaged.
+sourceSets {
+	voicechatApi {
+		java.srcDir(new File(src, "voicechat-api/java"))
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	clientCompileOnly sourceSets.voicechatApi.output
+
+	testImplementation platform("org.junit:junit-bom:5.14.0")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+sourceSets.test {
+	compileClasspath += sourceSets.client.output + sourceSets.client.compileClasspath
+	runtimeClasspath += sourceSets.client.output + sourceSets.client.runtimeClasspath
+}
+
+tasks.named("test") {
+	useJUnitPlatform()
+}
+
+def generatedResources = layout.buildDirectory.dir("generated/flint-resources")
+
+// The launcher's release notes, bundled for the in-game "What's new" card (as in the 26.x build).
+def generateFlintResources = tasks.register("generateFlintResources") {
+	def notes = file("../../app/src/data/releaseNotes.json")
+	inputs.file(notes)
+	outputs.dir(generatedResources)
+	doLast {
+		def root = generatedResources.get().asFile
+		root.deleteDir()
+		def target = new File(root, "assets/flintclient/whats_new.json")
+		target.parentFile.mkdirs()
+		target.text = notes.text
+	}
+}
+
+sourceSets.client.resources.srcDir(generatedResources)
+
+// Flint's online services (short profile codes), from FLINT_SUPABASE_URL / FLINT_SUPABASE_ANON_KEY at build time (as in ../).
+apply from: "../flint-services.gradle"
+
+processResources {
+	def modVersion = project.version
+	// A 1.21.x jar names the releases it was built and tested for (-Pminecraft_range to widen it).
+	def minecraftRange = project.findProperty("minecraft_range") ?: mcVersion
+	inputs.property "version", modVersion
+	inputs.property "builtFor", mcVersion
+	inputs.property "minecraftRange", minecraftRange
+
+	filesMatching("fabric.mod.json") {
+		expand "version": modVersion, "minecraftRange": minecraftRange, "builtFor": mcVersion
+		// 1.21.x runs on Java 21.
+		filter { it.replace('"java": ">=25"', '"java": ">=21"') }
+	}
+}
+
+processClientResources {
+	dependsOn generateFlintResources
+	// Mixin refuses a compatibility level above the running Java: 1.21.x runs on Java 21.
+	filesMatching("*.mixins.json") {
+		filter { it.replace('"JAVA_25"', '"JAVA_21"') }
+	}
+	// A shared mixin the line leaves out (a "skip" in its rules: its Minecraft doesn't have what the mixin changes) leaves
+	// the shared mixin config too.
+	def mixinSources = adaptedJava
+	def resourcesOut = destinationDir
+	inputs.files(adaptSharedSources)
+	doLast {
+		["flintclient.client.mixins.json", "flintclient.version.mixins.json"].each { name ->
+			def config = new File(resourcesOut, name)
+			if (!config.exists()) {
+				return
+			}
+			def json = new JsonSlurper().parse(config)
+			def pkg = json.package.replace(".", "/")
+			def root = mixinSources.get().asFile
+			def kept = json.client.findAll { new File(root, "${pkg}/${it.replace('.', '/')}.java").exists() }
+			if (kept.size() != json.client.size()) {
+				json.client = kept
+				config.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json))
+			}
+		}
+	}
+}
+
+tasks.matching { it.name in ["jar", "sourcesJar", "remapJar", "remapSourcesJar"] }.configureEach {
+	archiveVersion = "${project.version}+${mcLine}"
+}
+
+tasks.configureEach { task ->
+	if (task.name.toLowerCase().contains("sourcesjar")) {
+		task.dependsOn generateFlintResources
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 21
+	// -Pmaxerrs=N: javac reports up to N errors (100 by default), for measuring a line's port.
+	if (project.hasProperty("maxerrs")) {
+		options.compilerArgs += ["-Xmaxerrs", project.property("maxerrs").toString()]
+	}
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+	withSourcesJar()
+}

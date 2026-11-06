@@ -1,0 +1,42 @@
+# The shared code that must stay platform-free: no net.minecraft, com.mojang, org.joml or org.lwjgl, and no shared class
+# that isn't platform-free itself. It reaches the game only through the platform classes (src/client/java/.../platform),
+# which each engine provides at the same names, so every Minecraft line compiles it unchanged
+# (docs/LEGACY189_SHARED_MENU_PLAN.md). PlatformFreeSourcesTest (src/test, run by the 26.x and 1.21.x builds) reads this
+# file, with the files Minecraft 1.8.9 compiles (src/mc189/shared-sources.rules), and fails the build otherwise.
+# Same forms as shared-sources.rules: include GLOB, skip PATH.
+
+# Flint's log, without the 26.x entry point.
+include FlintLog.java
+# Start-up timings for the log, and the worker that loads the Right Shift menu's classes ahead.
+include StartupTrace.java
+include ClassWarmer.java
+# The saved settings and layouts every screen reads, and the quick state lookup over them.
+include control/ControlState.java
+include control/feature/Mods.java
+# The count of what Flint keeps on the GPU (the mask atlas reports its textures).
+include graphics/GpuResourceTracker.java
+# Canvas, text, the mask atlas, icons, card pictures (FontPreload prepares 26.x's TrueType fonts: engine code).
+include render/**
+skip render/FontPreload.java
+# The kit: nodes, controls, focus, scrolling, the kit screen.
+include ui/kit/**
+include ui/Motion.java
+include ui/FlintFrame.java
+# The Right Shift menu.
+include control/rshift/**
+# Screens and panels of mods only 26.x and 1.21.x have (their own engine's screens and packs).
+skip control/rshift/AdvancementsListScreen.java
+skip control/rshift/KeybindSearchScreen.java
+skip control/rshift/PacksPanel.java
+skip control/rshift/TierTaggerPanel.java
+# The HUD: its views and renderer, and the HUD editor the Right Shift HUD page sits on (they reach the game through the
+# platform classes HudData, HudEffects, ItemPainter and HudMaps), and the guard every Control Center path turns itself off with.
+include control/hud/render/**
+include control/editor/**
+include control/platform/HookGuard.java
+# The frame times FPS reads (each engine records them from its own frame hook).
+include perf/FrameStats.java
+# The game link to the Flint app (Music Player asks it what's playing; the account card its accounts).
+include module/account/LauncherLink.java
+# Friends and the Flint Store through the same link (the Friends and Cosmetics windows), and the credential guard.
+include module/social/**

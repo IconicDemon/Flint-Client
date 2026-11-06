@@ -1,0 +1,11 @@
+{
+	"name": "surface",
+	"surface-selector": {
+		"regions": [
+			"surface"
+		]
+	},
+	"biome-selector": {
+		"always": true
+	}
+}

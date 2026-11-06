@@ -5,6 +5,7 @@
  * player asked for is dropped. Projects named here are hints only: Flint's resolver checks every
  * one against Modrinth, the Minecraft version and the loader. Pure: no Tauri or API imports.
  */
+import { t, type MessageKey } from "./i18n.ts";
 import { CATEGORIES, GOALS, hasLookupCue, isPackFeature, lookupRequest, understand, type Category } from "./intents.ts";
 
 export type { Category };
@@ -38,8 +39,22 @@ export type AiIntents = {
   quota?: { limit: number; remaining: number; resetInMs: number | null } | null;
 };
 
-export type PlannedRequest = { project?: string; query?: string; source: "user" | "assistant"; reason: string; group: string; category: Category; kind: Kind };
+export type PlannedRequest = {
+  project?: string;
+  query?: string;
+  source: "user" | "assistant";
+  reason: string;
+  group: string;
+  category: Category;
+  kind: Kind;
+  /** A lookup candidate's card line: what it matched ("matches low fire, no fog"), without "Possible match —". */
+  match?: string;
+};
 
+/**
+ * Display group titles. The English titles are the planner's identifiers (groups are matched,
+ * ordered and explained by them); players read them through `goalLabel`.
+ */
 export const GROUP = {
   performance: "Performance essentials",
   pvp: "PvP & HUD",
@@ -56,6 +71,23 @@ export const GROUP = {
   dependencies: "Required dependencies",
   optional: "Optional extras",
 } as const;
+
+const GROUP_KEY: Record<keyof typeof GROUP, MessageKey> = {
+  performance: "ai.goal.performanceEssentials",
+  pvp: "ai.goal.pvpHud",
+  qol: "ai.goal.qualityOfLife",
+  visual: "ai.goal.visualEnhancements",
+  maps: "ai.goal.maps",
+  packs: "ai.goal.resourcePacks",
+  shaders: "ai.goal.shaderPacks",
+  shaderSupport: "ai.goal.shaderSupport",
+  lookup: "ai.goal.possibleMatches",
+  closest: "ai.goal.closestMatches",
+  named: "ai.goal.named",
+  picks: "ai.goal.picks",
+  dependencies: "ai.goal.dependencies",
+  optional: "ai.goal.optional",
+};
 
 const GROUP_OF: Partial<Record<Category, string>> = {
   performance: GROUP.performance,
@@ -193,6 +225,24 @@ export function parseIntents(raw: unknown): AiIntents | null {
 }
 
 const LOOKUP_LABEL = "The project you described";
+
+/** Every label and group title Flint writes itself (each category's default label is one of these). */
+const LABEL_KEYS = new Map<string, MessageKey>([
+  ...GOALS.map((g): [string, MessageKey] => [g.label, g.labelKey]),
+  ...(Object.keys(GROUP) as (keyof typeof GROUP)[]).map((id): [string, MessageKey] => [GROUP[id], GROUP_KEY[id]]),
+  [LEFTOVER_LABEL, "ai.goal.leftover"],
+  [LOOKUP_LABEL, "ai.goal.described"],
+]);
+
+/**
+ * A goal label or group title as players read it. Labels stay English inside the planner (they're
+ * matched against the request and the AI's words); Flint's own are translated here, and labels
+ * Flint AI wrote itself are shown as they came.
+ */
+export function goalLabel(label: string): string {
+  const key = LABEL_KEYS.get(label);
+  return key ? t(key) : label;
+}
 
 /**
  * The smart search's goals for a request: projects the player named, recognised wishes, and one
@@ -343,7 +393,7 @@ export function buildRequests(all: PlanGoal[], max = MAX_REQUESTS): PlannedReque
       ...(p.project ? { project: p.project } : { query: p.query }),
       // Picks from Flint AI are labelled as suggestions; the smart search's are the player's own words.
       source: first.from === "ai" ? "assistant" : "user",
-      reason: labels.length ? `For ${labels.join(" + ")}${p.query ? " (Modrinth search)" : ""}` : "You named it",
+      reason: labels.length ? t(p.query ? "ai.reason.forGoalsSearch" : "ai.reason.forGoals", { goals: labels.map(goalLabel).join(" + ") }) : t("ai.reason.named"),
       group: groupTitle({ ...shown, kind: p.kind }),
       category: shown.category,
       kind: p.kind,
@@ -353,15 +403,16 @@ export function buildRequests(all: PlanGoal[], max = MAX_REQUESTS): PlannedReque
 
 export type GroupableItem = { projectId: string; slug: string; source: string; reason?: string | null; goal?: string | null };
 
-/** Labels each requested item with the display group of the request it came from. */
+/** Labels each requested item with the display group of the request it came from (and a lookup candidate with what it matched). */
 export function tagItems<T extends GroupableItem>(items: T[], requests: PlannedRequest[], matches?: (string | null)[] | null): T[] {
   return items.map((item) => {
     if (item.source !== "user" && item.source !== "assistant") return item;
     let index = matches ? matches.indexOf(item.projectId) : -1;
     if (index < 0) index = requests.findIndex((r) => r.project && (r.project === item.slug || r.project === item.projectId));
     if (index < 0) index = requests.findIndex((r) => r.reason === item.reason);
-    const group = requests[index]?.group;
-    return group ? { ...item, goal: group } : item;
+    const request = requests[index];
+    if (!request?.group) return item;
+    return { ...item, goal: request.group, ...(request.match ? { match: request.match } : {}) };
   });
 }
 
@@ -581,11 +632,18 @@ export function lookupRequests(found: LookupFound, lookup: LookupPlan): PlannedR
     .map((c): PlannedRequest | null => {
       const project = c.hit.projectId ?? c.hit.project_id ?? c.hit.slug;
       if (!project) return null;
-      const name = hint && !c.hintMatch ? ` (${hint.length === 1 ? `doesn't start with “${hint.toUpperCase()}”` : `name doesn't contain “${hint}”`})` : "";
+      const features = c.matched.join(", ");
+      const match =
+        !hint || c.hintMatch
+          ? t("ai.reason.matches", { features })
+          : hint.length === 1
+            ? t("ai.reason.matchesNotStarting", { features, letter: hint.toUpperCase() })
+            : t("ai.reason.matchesNotContaining", { features, hint });
       return {
         project,
         source: lookup.from === "ai" ? "assistant" : "user",
-        reason: `${found.identified ? "Possible match" : "Closest match"} — matches ${c.matched.join(", ")}${name}`,
+        reason: t(found.identified ? "ai.reason.possibleMatch" : "ai.reason.closestMatch", { detail: match }),
+        match,
         group: found.identified ? GROUP.lookup : GROUP.closest,
         category: "other",
         kind: lookup.kind,
@@ -615,7 +673,7 @@ export function markMissing<T extends SelectableItem>(items: T[]): T[] {
     out = out.map((i) => {
       if (i.status !== "ok" || !missing.has(i.title)) return i;
       changed = true;
-      return { ...i, status: "unavailable", message: `Needs ${missing.get(i.title)}, which isn't available for this version` } as T;
+      return { ...i, status: "unavailable", message: t("ai.plan.needsMissing", { title: missing.get(i.title) ?? "" }) } as T;
     });
     if (!changed) break;
   }

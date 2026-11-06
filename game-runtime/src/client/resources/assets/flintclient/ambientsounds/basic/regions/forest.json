@@ -1,0 +1,72 @@
+{
+	"name": "forest",
+	"features": [
+		"tree"
+	],
+	"bad-regions": [
+		"taiga",
+		"forest.roofed",
+		"jungle",
+		"rain",
+		"pale-garden",
+		"vampire-forest"
+	],
+	"temperature": {
+		"min": 0.2,
+		"max": 1.5
+	},
+	"variants": [
+		{
+			"regions": [
+				"surface"
+			]
+		},
+		{
+			"biomes": [
+				"#is_forest",
+				"forest",
+				"blossom",
+				"mangrove",
+				"woods",
+				"orchard",
+				"origin island",
+				"thicket",
+				"woodland",
+				"grove",
+				"origin valley",
+				"rainforest",
+				"lush hills",
+				"orchad",
+				"valley",
+				"origin island",
+				"birch hills",
+				"twilight clearing",
+				"dacite_ridges",
+				"redwood_thicket",
+				"allium_shrubland",
+				"canadian_shield"
+			]
+		},
+		{
+			"regions": [
+				"swamp"
+			],
+			"volume": 0.3
+		}
+	],
+	"sounds": [
+		{
+			"name": "bird-ambience",
+			"files": [
+				"minecraft:entity.parrot.ambient"
+			],
+			"category": "bird_day",
+			"pause": {
+				"min": 20,
+				"max": 120
+			},
+			"pitch": 1.2,
+			"volume": 0.35
+		}
+	]
+}

@@ -40,8 +40,8 @@ public final class NewsCard extends FlintButton {
 		c.panel(x, y, w, h, c.px(3.2F), borderPx + (focus > 0.5F ? borderPx : 0), border, fill);
 
 		int inner = w - 2 * c.px(PAD_X);
-		if (fittedFor != w * 31 + c.scale()) {
-			fittedFor = w * 31 + c.scale();
+		if (fittedFor != w * 31 + Float.floatToIntBits(c.unitScale())) {
+			fittedFor = w * 31 + Float.floatToIntBits(c.unitScale());
 			fit(c, title, fullTitle, inner);
 			fit(c, summary, fullSummary, inner);
 		}

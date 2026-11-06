@@ -74,6 +74,8 @@ final class HudStyle {
 	 * that chooses its own shadow (FPS); every {@link #resolve} clears it.
 	 */
 	boolean minecraftShadow;
+	/** A border chosen in the look: drawn even where the panel's background is off. */
+	boolean borderAlone;
 
 	/**
 	 * Resolves the style of a module with overrides {@code module} in a layout styled {@code layout}, shown as
@@ -89,6 +91,46 @@ final class HudStyle {
 		Boolean labels = pick(module.showLabel(), layout.showLabel(), Appearance.SHOW_LABEL.defaultValue());
 		HudColor accentColor = pick(module.accentColor(), layout.accentColor(), HudColor.DEFAULT);
 		set(style, color, panelOn, opacity, padding, labels, step, unitPx, accentColor);
+		applyLook(layout, module, opacity);
+	}
+
+	/**
+	 * The look's own panel colour, border and shadow, where the module or the layout chose them; otherwise the style's
+	 * (so a layout that never set them draws exactly as before).
+	 */
+	private void applyLook(Appearance layout, Appearance module, int opacity) {
+		Integer panelRgb = either(module.backgroundColor(), layout.backgroundColor());
+		if (panelRgb != null) {
+			panel = Palette.withAlpha(0xFF000000 | panelRgb, Math.clamp(opacity, 0, 100) / 100.0F);
+			ink = 0xFF000000 | panelRgb;
+		}
+		Boolean borderOn = either(module.border(), layout.border());
+		Integer thickness = either(module.borderThickness(), layout.borderThickness());
+		Integer borderRgb = either(module.borderColor(), layout.borderColor());
+		if (borderOn != null && !borderOn) {
+			outlinePx = 0;
+		} else if (borderOn != null || outlinePx > 0) {
+			if (borderOn != null || thickness != null) {
+				outlinePx = Math.max(1, Math.round((thickness != null ? thickness : 1) * unitPx / 2.0F));
+			}
+			if (borderRgb != null) {
+				outline = 0xFF000000 | borderRgb;
+			} else if (outline == 0) {
+				outline = 0xFF000000;
+			}
+			borderAlone = borderOn != null;
+		}
+		Boolean shadow = either(module.textShadow(), layout.textShadow());
+		if (shadow != null && !shadow) {
+			shadowPx = 0;
+		} else if (shadow != null && shadowPx == 0) {
+			shadowPx = Math.max(1, Math.round(unitPx / 2.0F));
+			minecraftShadow = true;
+		}
+	}
+
+	private static <T> @Nullable T either(@Nullable T module, @Nullable T layout) {
+		return module != null ? module : layout;
 	}
 
 	/** Sets every field from resolved values, with the style's own accent (tests use it directly). */
@@ -101,6 +143,7 @@ final class HudStyle {
 		HudColor accentColor) {
 		this.theme = style;
 		this.minecraftShadow = false;
+		this.borderAlone = false;
 		this.stepIndex = ScaleSteps.index(step);
 		this.step = ScaleSteps.step(stepIndex);
 		this.unitPx = Math.max(1, unitPx);

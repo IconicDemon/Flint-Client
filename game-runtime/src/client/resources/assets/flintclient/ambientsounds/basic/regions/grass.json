@@ -1,0 +1,60 @@
+{
+	"name": "grass",
+	"features": [
+		"grass"
+	],
+	"bad-regions": [
+		"plains",
+		"savanna",
+		"swamp",
+		"ocean",
+		"highland",
+		"jungle",
+		"rain"
+	],
+	"temperature": {
+		"min": 0.2
+	},
+	"sounds": [
+		{
+			"name": "cricket",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_day",
+			"overall-raining": false,
+			"volume": 0.1,
+			"pause": {
+				"min": 20,
+				"max": 100
+			}
+		},
+		{
+			"name": "cricket-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_night",
+			"overall-raining": false,
+			"volume": 0.15,
+			"pause": {
+				"min": 10,
+				"max": 60
+			}
+		},
+		{
+			"name": "cicadas-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cicadas",
+			"time": "day",
+			"pause": {
+				"min": 40,
+				"max": 200
+			},
+			"pitch": 1.4,
+			"volume": 0.2
+		}
+	]
+}

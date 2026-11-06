@@ -1,21 +1,18 @@
 package com.flintclient.client.render;
 
-import com.flintclient.client.FlintClient;
+import com.flintclient.client.FlintLog;
+import com.flintclient.client.platform.Frame;
+import com.flintclient.client.platform.TextEngine;
+import com.flintclient.client.platform.TextRun;
+import com.flintclient.client.platform.Texture;
 import java.util.Arrays;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.renderer.RenderPipelines;
-import org.joml.Matrix3x2f;
-import org.joml.Matrix3x2fStack;
-import org.joml.Matrix3x2fc;
 
 /**
  * Draws in physical pixels instead of GUI units, so Flint's shapes and text land on whole screen pixels
  * at every GUI scale. Coordinates passed to it are pixels; {@link #px(float)} converts units. One
  * shared instance is reused every frame, so drawing allocates nothing.
  *
- * <p>A unit is normally a GUI unit ({@link #begin(GuiGraphicsExtractor)}). {@link #begin(GuiGraphicsExtractor, int)}
+ * <p>A unit is normally a GUI unit ({@link #begin(Frame)}). {@link #begin(Frame, int)}
  * picks another whole number of pixels per unit (the Control Center's own interface size): the pose
  * is the same, only {@link #px} and the text size change, and text is rasterised for that scale so it
  * stays crisp.
@@ -23,6 +20,9 @@ import org.joml.Matrix3x2fc;
  * <p>An opacity below 1 ({@link #setOpacity}) fades everything drawn through the canvas (fills, shapes,
  * icons and text) for fade animations; at 1 colours pass through untouched. {@link #pushOffset} moves
  * drawing by whole pixels (slide animations) without breaking {@link #pushClip}.
+ *
+ * <p>Everything the engine does (transforms, fills, textured quads, text runs, scissor rectangles) goes through the
+ * {@link Frame} it was begun on, so this class is the same on every Minecraft line.
  */
 public final class Canvas {
 	private static final Canvas SHARED = new Canvas(1);
@@ -36,23 +36,24 @@ public final class Canvas {
 	public static final int BOTTOM_RIGHT = 8;
 	public static final int ALL_CORNERS = 15;
 
-	private GuiGraphicsExtractor graphics;
-	private Font font;
-	/** Pixels per unit for {@link #px} and text. */
-	private int scale = 1;
+	private Frame frame;
+	private TextEngine text;
+	/**
+	 * Pixels per unit for {@link #px} and text: a whole number but for a frame begun at a fractional scale
+	 * ({@link #beginAtGuiScale(Frame, float)}: the main menu's own size), where text is rasterised for that exact size.
+	 */
+	private float scale = 1;
 	/** Pixels per GUI unit (the pose undoes it). */
 	private int guiScale = 1;
-	/** While above 0, what {@link #guiScale()} reports (a frame drawing a HUD at another size); clips still use the real one. */
-	private int guiOverride;
-	private int[] outerOverrides = new int[4];
+	/** While above 0, what {@link #unitsPerGui()} reports (a frame drawing a HUD at another size); clips still use the real one. */
+	private float guiOverride;
+	private float[] outerOverrides = new float[4];
 	private int depth;
 	/** The unit scale of each enclosing {@link #begin}, restored by {@link #end}. */
-	private int[] outerScales = new int[8];
+	private float[] outerScales = new float[8];
 	private float opacity = 1.0F;
 	private int clips;
 	private final int[] clipBox = new int[4];
-	/** The pose the outermost {@link #begin} set up (pixel space); scissor rectangles are given relative to it. */
-	private final Matrix3x2f pixelPose = new Matrix3x2f();
 	/** The total {@link #pushOffset} move in pixels, and each open one's move (x, y pairs) for {@link #popOffset}. */
 	/**
 	 * The transform {@link #pushOffset} and {@link #pushZoom} have applied since the outermost begin, as
@@ -71,25 +72,21 @@ public final class Canvas {
 	}
 
 	/** Starts pixel-space drawing in GUI units; pair with {@link #end()}. Nested calls share the same transform. */
-	public static Canvas begin(GuiGraphicsExtractor graphics) {
-		return begin(graphics, 0);
+	public static Canvas begin(Frame frame) {
+		return begin(frame, 0);
 	}
 
 	/**
 	 * Starts pixel-space drawing with {@code unitScale} pixels per unit ({@code 0}: the GUI scale); pair
-	 * with {@link #end()}. The outermost call sets up the transform (as {@link #begin(GuiGraphicsExtractor)}
+	 * with {@link #end()}. The outermost call sets up the transform (as {@link #begin(Frame)}
 	 * always has); nested calls keep it and only switch the unit scale until their {@code end}.
 	 */
-	public static Canvas begin(GuiGraphicsExtractor graphics, int unitScale) {
+	public static Canvas begin(Frame frame, int unitScale) {
 		Canvas canvas = SHARED;
 		if (canvas.depth == 0) {
-			Minecraft minecraft = Minecraft.getInstance();
-			canvas.graphics = graphics;
-			canvas.font = minecraft.font;
-			canvas.guiScale = Math.max(1, minecraft.getWindow().getGuiScale());
-			graphics.pose().pushMatrix();
-			graphics.pose().scale(1.0F / canvas.guiScale, 1.0F / canvas.guiScale);
-			canvas.pixelPose.set(graphics.pose());
+			canvas.frame = frame;
+			canvas.guiScale = Frame.windowGuiScale();
+			canvas.text = frame.beginPixels(canvas.guiScale);
 		}
 		canvas.enter(unitScale);
 		return canvas;
@@ -100,6 +97,11 @@ public final class Canvas {
 	 * every call stacks the unit scale it replaces.
 	 */
 	void enter(int unitScale) {
+		enter((float) unitScale);
+	}
+
+	/** {@link #enter(int)} at a scale that may be fractional (0: the enclosing frame's GUI scale). */
+	void enter(float unitScale) {
 		if (depth == 0) {
 			guiOverride = 0;
 			opacity = 1.0F;
@@ -119,7 +121,7 @@ public final class Canvas {
 		outerScales[depth++] = scale;
 		// Without a unit scale of its own, a nested frame draws GUI units at the enclosing frame's GUI scale (so a
 		// widget drawn inside a menu frame at a larger scale comes out at that size).
-		scale = unitScale > 0 ? unitScale : guiScale();
+		scale = unitScale > 0 ? unitScale : unitsPerGui();
 	}
 
 	/** {@link #end}'s bookkeeping: restores the enclosing unit scale; true when the outermost begin ended (an unbalanced end does nothing). */
@@ -146,9 +148,8 @@ public final class Canvas {
 	public static Canvas measuring() {
 		Canvas canvas = SHARED;
 		if (canvas.depth == 0) {
-			Minecraft minecraft = Minecraft.getInstance();
-			canvas.font = minecraft.font;
-			canvas.guiScale = Math.max(1, minecraft.getWindow().getGuiScale());
+			canvas.text = Frame.measuringText();
+			canvas.guiScale = Frame.windowGuiScale();
 			canvas.scale = canvas.guiScale;
 		}
 		return canvas;
@@ -160,13 +161,18 @@ public final class Canvas {
 	 * one; a mismatch is a layout bug, logged once rather than allowed to stop the game.
 	 */
 	public static Canvas measuring(int unitScale) {
+		return measuring((float) unitScale);
+	}
+
+	/** {@link #measuring(int)} at a scale that may be fractional (the main menu's own size, {@link #beginAtGuiScale(Frame, float)}). */
+	public static Canvas measuring(float unitScale) {
 		Canvas canvas = SHARED;
 		if (canvas.depth == 0) {
 			measuring();
-			canvas.scale = Math.max(1, unitScale);
+			canvas.scale = Math.max(1.0F, unitScale);
 		} else if (canvas.scale != unitScale && !warnedScale) {
 			warnedScale = true;
-			FlintClient.LOGGER.warn("Flint measured text at scale {} inside a frame drawn at {}", unitScale, canvas.scale, new IllegalStateException());
+			FlintLog.LOGGER.warn("Flint measured text at scale {} inside a frame drawn at {}", unitScale, canvas.scale, new IllegalStateException());
 		}
 		return canvas;
 	}
@@ -180,19 +186,29 @@ public final class Canvas {
 			while (offsetDepth > 0) {
 				popOffset();
 			}
-			graphics.pose().popMatrix();
-			graphics = null;
+			frame.endPixels();
+			frame = null;
 			opacity = 1.0F;
 		}
 	}
 
-	/** Pixels per unit. */
+	/** Pixels per unit, as a whole number (a fractional {@link #unitScale()} rounded; at least 1): line widths and the like. */
 	public int scale() {
+		return Math.max(1, Math.round(scale));
+	}
+
+	/** Pixels per unit exactly (fractional in a frame begun at a fractional scale): converting pixel sizes back to units. */
+	public float unitScale() {
 		return scale;
 	}
 
 	/** Pixels per GUI unit (the window's GUI scale, or a nested {@link #beginAtGuiScale} frame's), whatever the unit scale. */
 	public int guiScale() {
+		return guiOverride > 0 ? Math.max(1, Math.round(guiOverride)) : guiScale;
+	}
+
+	/** {@link #guiScale()} exactly: a nested frame without its own unit scale draws at this one. */
+	private float unitsPerGui() {
 		return guiOverride > 0 ? guiOverride : guiScale;
 	}
 
@@ -201,9 +217,26 @@ public final class Canvas {
 	 * and the unit scale both report it, so something drawn in GUI units (the HUD) comes out at that size, as crisp
 	 * as at its own. Clips keep landing on real pixels. Pair with {@link #end()}.
 	 */
-	public static Canvas beginAtGuiScale(GuiGraphicsExtractor graphics, int pixelsPerGuiUnit) {
-		Canvas canvas = begin(graphics, Math.max(1, pixelsPerGuiUnit));
-		canvas.guiOverride = Math.max(1, pixelsPerGuiUnit);
+	public static Canvas beginAtGuiScale(Frame frame, int pixelsPerGuiUnit) {
+		return beginAtGuiScale(frame, (float) Math.max(1, pixelsPerGuiUnit));
+	}
+
+	/**
+	 * {@link #beginAtGuiScale(Frame, int)} at a fractional number of pixels per unit (Flint's main menu, sized from the window
+	 * rather than Minecraft's GUI scale): {@link #px} rounds each position to a whole pixel, and text is rasterised for its exact
+	 * size there ({@link TextLine}), so it stays as crisp as at a whole scale. Widgets drawn inside (their own
+	 * {@link #begin(Frame)}) come out at the same scale.
+	 */
+	public static Canvas beginAtGuiScale(Frame frame, float pixelsPerGuiUnit) {
+		Canvas canvas = SHARED;
+		if (canvas.depth == 0) {
+			canvas.frame = frame;
+			canvas.guiScale = Frame.windowGuiScale();
+			canvas.text = frame.beginPixels(canvas.guiScale);
+		}
+		float units = Math.max(1.0F, pixelsPerGuiUnit);
+		canvas.enter(units);
+		canvas.guiOverride = units;
 		return canvas;
 	}
 
@@ -212,12 +245,14 @@ public final class Canvas {
 		return Math.round(units * scale);
 	}
 
-	public GuiGraphicsExtractor graphics() {
-		return graphics;
+	/** The frame this canvas draws into (the engine's drawing, for code on its side of the platform classes). */
+	public Frame frame() {
+		return frame;
 	}
 
-	Font font() {
-		return font;
+	/** The text engine text is measured and prepared with. */
+	public TextEngine text() {
+		return text;
 	}
 
 	// ---------- opacity ----------
@@ -250,8 +285,7 @@ public final class Canvas {
 		save();
 		moveX += zoom * dxPx;
 		moveY += zoom * dyPx;
-		graphics.pose().pushMatrix();
-		graphics.pose().translate(dxPx, dyPx);
+		frame.pushTranslate(dxPx, dyPx);
 	}
 
 	/**
@@ -266,11 +300,7 @@ public final class Canvas {
 		zoom *= scale;
 		moveX -= zoom * cx;
 		moveY -= zoom * cy;
-		Matrix3x2fStack pose = graphics.pose();
-		pose.pushMatrix();
-		pose.translate(cx, cy);
-		pose.scale(scale, scale);
-		pose.translate(-cx, -cy);
+		frame.pushZoom(scale, cx, cy);
 	}
 
 	private void save() {
@@ -290,7 +320,7 @@ public final class Canvas {
 			zoom = saved[3 * offsetDepth];
 			moveX = saved[3 * offsetDepth + 1];
 			moveY = saved[3 * offsetDepth + 2];
-			graphics.pose().popMatrix();
+			frame.pop();
 		}
 	}
 
@@ -298,9 +328,8 @@ public final class Canvas {
 
 	/**
 	 * Clips everything drawn until {@link #popClip()} to a pixel rectangle (nested clips intersect), moved
-	 * by any open {@link #pushOffset}. Minecraft keeps scissor rectangles in whole GUI units
-	 * ({@code GuiGraphicsExtractor.enableScissor} maps the corners through the pose and floors them;
-	 * {@code GuiRenderer} multiplies by the GUI scale), so a rectangle is rounded inwards to GUI units:
+	 * by any open {@link #pushOffset}. Minecraft keeps scissor rectangles in whole GUI units (it maps the corners
+	 * through the pose and floors them, then multiplies by the GUI scale), so a rectangle is rounded inwards to GUI units:
 	 * nothing ever shows outside it, and up to {@code guiScale - 1} pixels at its edges may be cut early.
 	 * The rectangle is in the canvas's own pixel space: transforms enclosing the outermost {@link #begin}
 	 * apply to it, pose changes made since (other than offsets) don't.
@@ -311,22 +340,8 @@ public final class Canvas {
 		// move the floored rectangle outwards.
 		toGuiInside(Math.round(zoom * x0 + moveX), Math.round(zoom * y0 + moveY), Math.round(zoom * x1 + moveX),
 			Math.round(zoom * y1 + moveY), guiScale, gui);
-		Matrix3x2fStack pose = graphics.pose();
-		pose.pushMatrix();
-		scissorPose(pose, pixelPose, guiScale);
-		graphics.enableScissor(gui[0], gui[1], gui[2], gui[3]);
-		pose.popMatrix();
+		frame.scissor(gui[0], gui[1], gui[2], gui[3], guiScale);
 		clips++;
-	}
-
-	/**
-	 * The pose a scissor rectangle in GUI units is given under: the outermost begin's pixel pose with its
-	 * 1/guiScale undone ({@code (1/g)·g} is exactly 1 in float for every GUI scale), so only the transform
-	 * enclosing the canvas remains.
-	 */
-	static void scissorPose(Matrix3x2f out, Matrix3x2fc pixelPose, int guiScale) {
-		out.set(pixelPose);
-		out.scale(guiScale, guiScale);
 	}
 
 	/** The largest whole-GUI-unit rectangle inside a pixel rectangle, into {@code out} (x0, y0, x1, y1; never inverted). */
@@ -340,7 +355,7 @@ public final class Canvas {
 	public void popClip() {
 		if (clips > 0) {
 			clips--;
-			graphics.disableScissor();
+			frame.endScissor();
 		}
 	}
 
@@ -352,12 +367,172 @@ public final class Canvas {
 
 	private void fillRaw(int x0, int y0, int x1, int y1, int argb) {
 		if (x1 > x0 && y1 > y0 && (argb >>> 24) != 0) {
-			graphics.fill(x0, y0, x1, y1, argb);
+			frame.fill(x0, y0, x1, y1, argb);
 		}
 	}
 
 	public void gradient(int x0, int y0, int x1, int y1, int top, int bottom) {
-		graphics.fillGradient(x0, y0, x1, y1, tint(top), tint(bottom));
+		frame.gradient(x0, y0, x1, y1, tint(top), tint(bottom));
+	}
+
+	/**
+	 * A rounded box whose colour runs from {@code top} to {@code bottom}: the middle and the sides as gradients, each
+	 * corner in the colour at its height (the gradients these boxes use are gentle enough that it can't be seen).
+	 */
+	public void roundGradient(int x, int y, int w, int h, int r, int top, int bottom) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
+		if (top == bottom) {
+			roundRectCorners(x, y, w, h, r, top);
+			return;
+		}
+		r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+		gradient(x + r, y, x + w - r, y + h, top, bottom);
+		if (r == 0) {
+			return;
+		}
+		int sideTop = Palette.lerp(top, bottom, r / (float) h);
+		int sideBottom = Palette.lerp(top, bottom, (h - r) / (float) h);
+		gradient(x, y + r, x + r, y + h - r, sideTop, sideBottom);
+		gradient(x + w - r, y + r, x + w, y + h - r, sideTop, sideBottom);
+		int cornerTop = Palette.lerp(top, bottom, r / 2.0F / h);
+		int cornerBottom = Palette.lerp(top, bottom, (h - r / 2.0F) / h);
+		quarter(x, y, r, TOP_LEFT, cornerTop);
+		quarter(x + w - r, y, r, TOP_RIGHT, cornerTop);
+		quarter(x, y + h - r, r, BOTTOM_LEFT, cornerBottom);
+		quarter(x + w - r, y + h - r, r, BOTTOM_RIGHT, cornerBottom);
+	}
+
+	/**
+	 * A rounded box filled as a CSS {@code linear-gradient(angle, stops...)}: {@code angleDeg} 0 runs to the top, 90 to the
+	 * right; the stops are evenly spaced. Drawn as vertical strips {@code stripPx} wide, each an exact vertical gradient
+	 * (split where it crosses a stop), so only the steps across the strips approximate the angle; each corner takes the
+	 * colour at its middle.
+	 */
+	public void roundLinear(int x, int y, int w, int h, int r, float angleDeg, int[] stops, int stripPx) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
+		r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+		Linear g = new Linear(x, y, w, h, angleDeg, stops);
+		int step = Math.abs(g.dx) < 0.02F ? w : Math.max(1, stripPx);
+		// The sides stop short of the corners (drawn after); the middle runs the full height.
+		g.strips(this, x, x + r, y + r, y + h - r, step);
+		g.strips(this, x + r, x + w - r, y, y + h, step);
+		g.strips(this, x + w - r, x + w, y + r, y + h - r, step);
+		if (r > 0) {
+			float half = r / 2.0F;
+			quarter(x, y, r, TOP_LEFT, g.at(x + half, y + half));
+			quarter(x + w - r, y, r, TOP_RIGHT, g.at(x + w - half, y + half));
+			quarter(x, y + h - r, r, BOTTOM_LEFT, g.at(x + half, y + h - half));
+			quarter(x + w - r, y + h - r, r, BOTTOM_RIGHT, g.at(x + w - half, y + h - half));
+		}
+	}
+
+	/**
+	 * The outline of a rounded box, {@code b} px wide, coloured as {@link #roundLinear}: the top and bottom edges in
+	 * {@code segments} steps, the sides as exact vertical gradients, each corner in the colour at its middle.
+	 */
+	public void ringLinear(int x, int y, int w, int h, int r, int b, float angleDeg, int[] stops, int segments) {
+		if (w <= 0 || h <= 0 || b <= 0) {
+			return;
+		}
+		r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+		Linear g = new Linear(x, y, w, h, angleDeg, stops);
+		int span = w - 2 * r;
+		int n = Math.max(1, Math.min(segments, span / 2));
+		for (int i = 0; i < n; i++) {
+			int sx = x + r + span * i / n;
+			int ex = x + r + span * (i + 1) / n;
+			float mid = (sx + ex) / 2.0F;
+			fill(sx, y, ex, y + b, g.at(mid, y + b / 2.0F));
+			fill(sx, y + h - b, ex, y + h, g.at(mid, y + h - b / 2.0F));
+		}
+		g.column(this, x, x + b, y + r, y + h - r);
+		g.column(this, x + w - b, x + w, y + r, y + h - r);
+		if (r > 0) {
+			int rb = Math.min(b, r);
+			float half = r / 2.0F;
+			ringQuarter(x, y, r, rb, TOP_LEFT, g.at(x + half, y + half));
+			ringQuarter(x + w - r, y, r, rb, TOP_RIGHT, g.at(x + w - half, y + half));
+			ringQuarter(x, y + h - r, r, rb, BOTTOM_LEFT, g.at(x + half, y + h - half));
+			ringQuarter(x + w - r, y + h - r, r, rb, BOTTOM_RIGHT, g.at(x + w - half, y + h - half));
+		}
+	}
+
+	/** A CSS linear gradient over one box: the colour at any point, and vertical runs of it drawn exactly. */
+	private static final class Linear {
+		final float dx;
+		final float dy;
+		final float cx;
+		final float cy;
+		final float length;
+		final int[] stops;
+
+		Linear(int x, int y, int w, int h, float angleDeg, int[] stops) {
+			double a = Math.toRadians(angleDeg);
+			this.dx = (float) Math.sin(a);
+			this.dy = (float) -Math.cos(a);
+			this.cx = x + w / 2.0F;
+			this.cy = y + h / 2.0F;
+			// As CSS: the gradient line is as long as the box's projection onto it.
+			this.length = Math.max(1, Math.abs(w * dx) + Math.abs(h * dy));
+			this.stops = stops;
+		}
+
+		/** How far along the gradient line ({@code px}, {@code py}) is: 0 at its start, 1 at its end. */
+		float t(float px, float py) {
+			return ((px - cx) * dx + (py - cy) * dy) / length + 0.5F;
+		}
+
+		int color(float t) {
+			int last = stops.length - 1;
+			if (last <= 0) {
+				return stops[0];
+			}
+			float u = Math.clamp(t, 0, 1) * last;
+			int i = Math.min(last - 1, (int) u);
+			return Palette.lerp(stops[i], stops[i + 1], u - i);
+		}
+
+		int at(float px, float py) {
+			return color(t(px, py));
+		}
+
+		/** {@code x0..x1} from {@code y0} to {@code y1} as columns at most {@code step} wide. */
+		void strips(Canvas c, int x0, int x1, int y0, int y1, int step) {
+			for (int sx = x0; sx < x1; sx += step) {
+				column(c, sx, Math.min(x1, sx + step), y0, y1);
+			}
+		}
+
+		/** The columns {@code x0..x1} from {@code y0} to {@code y1} as vertical gradients, split where they cross a stop. */
+		void column(Canvas c, int x0, int x1, int y0, int y1) {
+			if (x1 <= x0 || y1 <= y0) {
+				return;
+			}
+			float mid = (x0 + x1) / 2.0F;
+			float t0 = Math.clamp(t(mid, y0), 0, 1);
+			float t1 = Math.clamp(t(mid, y1), 0, 1);
+			int last = stops.length - 1;
+			int top = y0;
+			float tTop = t0;
+			if (last > 1 && t1 != t0) {
+				for (int k = 1; k < last; k++) {
+					float tk = k / (float) last;
+					if ((tk - t0) * (tk - t1) < 0) {
+						int at = Math.round(y0 + (y1 - y0) * (tk - t0) / (t1 - t0));
+						if (at > top && at < y1) {
+							c.gradient(x0, top, x1, at, color(tTop), color(tk));
+							top = at;
+							tTop = tk;
+						}
+					}
+				}
+			}
+			c.gradient(x0, top, x1, y1, color(tTop), color(t1));
+		}
 	}
 
 	/** A filled rectangle with antialiased rounded corners of radius {@code r} px. */
@@ -368,7 +543,7 @@ public final class Canvas {
 		}
 		r = Math.min(r, Math.min(w, h) / 2);
 		if (r <= 0) {
-			graphics.fill(x, y, x + w, y + h, argb);
+			frame.fill(x, y, x + w, y + h, argb);
 			return;
 		}
 		if (w * h <= SINGLE_QUAD_MAX_AREA) {
@@ -391,7 +566,7 @@ public final class Canvas {
 		}
 		r = Math.min(r, Math.min(w, h) / 2);
 		if (r <= 0) {
-			graphics.fill(x, y, x + w, y + h, argb);
+			frame.fill(x, y, x + w, y + h, argb);
 			return;
 		}
 		cornersAndFills(x, y, w, h, r, argb);
@@ -408,7 +583,7 @@ public final class Canvas {
 		}
 		r = Math.min(r, Math.min(w, h) / 2);
 		if (r <= 0 || corners == 0) {
-			graphics.fill(x, y, x + w, y + h, argb);
+			frame.fill(x, y, x + w, y + h, argb);
 			return;
 		}
 		corner(x, y, r, false, false, argb, (corners & TOP_LEFT) != 0);
@@ -524,23 +699,13 @@ public final class Canvas {
 		fillRaw(x + w - b, y + r, x + w, y + h - r, argb);
 	}
 
-	/**
-	 * Draws a picture filling the pixel box without stretching it: scaled to cover the box, centred, the overflowing side
-	 * cropped evenly. Tinted by the canvas opacity (so it fades with its screen); corners of {@code radius} px are
-	 * covered in {@code surroundArgb} (the colour around the box).
-	 */
-	public void picture(Picture.Level picture, int x, int y, int w, int h, int radius, int surroundArgb) {
-		if (w <= 0 || h <= 0) {
+	/** A whole {@code texW × texH} texture drawn into the pixel box, tinted by {@code argb} and the canvas opacity. */
+	public void texture(Texture texture, int x, int y, int w, int h, int texW, int texH, int argb) {
+		argb = tint(argb);
+		if ((argb >>> 24) == 0 || w <= 0 || h <= 0) {
 			return;
 		}
-		float scale = Math.max(w / (float) picture.width(), h / (float) picture.height());
-		float visibleW = Math.min(picture.width(), w / scale);
-		float visibleH = Math.min(picture.height(), h / scale);
-		float u = (picture.width() - visibleW) / 2;
-		float v = (picture.height() - visibleH) / 2;
-		graphics.blit(RenderPipelines.GUI_TEXTURED, picture.id(), x, y, u, v, w, h, Math.round(visibleW), Math.round(visibleH), picture.width(),
-			picture.height(), tint(0xFFFFFFFF));
-		roundCorners(x, y, w, h, radius, tint(surroundArgb));
+		frame.blit(texture, x, y, 0, 0, w, h, texW, texH, texW, texH, argb);
 	}
 
 	/** Rounds the corners of a square image by covering them in {@code surroundArgb}. */
@@ -557,10 +722,26 @@ public final class Canvas {
 		blit(n, x + w - r, y + h - r, r, r, true, true, surroundArgb);
 	}
 
+	/** A Font Awesome Solid glyph filling the {@code sizePx} square at ({@code x}, {@code y}) (one em, centred across). */
+	public void glyph(int codepoint, int x, int y, int sizePx, int argb) {
+		argb = tint(argb);
+		if ((argb >>> 24) != 0 && sizePx > 0) {
+			blit(MaskAtlas.get().glyph(codepoint, sizePx), x, y, sizePx, sizePx, false, false, argb);
+		}
+	}
+
 	public void icon(Icon icon, int x, int y, int sizePx, int argb) {
 		argb = tint(argb);
 		if ((argb >>> 24) != 0) {
 			blit(MaskAtlas.get().icon(icon, sizePx), x, y, sizePx, sizePx, false, false, argb);
+		}
+	}
+
+	/** A mod card's line icon ({@link CardIcons#index}), {@code sizePx} square. */
+	public void cardIcon(int index, int x, int y, int sizePx, int argb) {
+		argb = tint(argb);
+		if ((argb >>> 24) != 0 && sizePx > 0) {
+			blit(MaskAtlas.get().cardIcon(index, sizePx), x, y, sizePx, sizePx, false, false, argb);
 		}
 	}
 
@@ -583,20 +764,20 @@ public final class Canvas {
 		float v = flipY ? e.v() + e.height() : e.v();
 		int sw = flipX ? -e.width() : e.width();
 		int sh = flipY ? -e.height() : e.height();
-		graphics.blit(RenderPipelines.GUI_TEXTURED, e.texture(), x, y, u, v, w, h, sw, sh, e.textureWidth(), e.textureHeight(), argb);
+		frame.blit(e.texture(), x, y, u, v, w, h, sw, sh, e.textureWidth(), e.textureHeight(), argb);
 	}
 
 	// ---------- text ----------
 
 	/** Measures (and caches) a line at the current scale. */
 	public int width(TextLine line) {
-		line.prepare(scale, font);
+		line.prepare(scale, text);
 		return line.widthPx();
 	}
 
 	/** The width a line takes when drawn at most {@code maxPx} wide (shortened with an ellipsis if needed). */
 	public int width(TextLine line, int maxPx) {
-		return line.fitted(scale, font, maxPx).widthPx();
+		return line.fitted(scale, text, maxPx).widthPx();
 	}
 
 	/** Draws a line with its baseline at {@code baselinePx}. */
@@ -605,30 +786,24 @@ public final class Canvas {
 		if ((argb >>> 24) == 0) {
 			return;
 		}
-		line.prepare(scale, font);
-		Matrix3x2fStack pose = graphics.pose();
-		float top = (float) baselinePx / scale - FlintFonts.BASELINE;
-		pose.pushMatrix();
-		pose.scale(scale, scale);
-		if (line.whole() != null) {
-			pose.translate((float) x / scale, top);
-			graphics.text(font, line.whole(), 0, 0, argb, false);
+		line.prepare(scale, text);
+		int s = line.drawScale();
+		float top = (float) baselinePx / s - FlintFonts.BASELINE;
+		TextRun whole = line.whole();
+		if (whole != null) {
+			frame.text(whole, (float) x / s, top, s, argb);
 		} else {
 			int[] offsets = line.offsets();
-			var glyphs = line.glyphs();
+			TextRun[] glyphs = line.glyphs();
 			for (int i = 0; i < glyphs.length; i++) {
-				pose.pushMatrix();
-				pose.translate((float) (x + offsets[i]) / scale, top);
-				graphics.text(font, glyphs[i], 0, 0, argb, false);
-				pose.popMatrix();
+				frame.text(glyphs[i], (float) (x + offsets[i]) / s, top, s, argb);
 			}
 		}
-		pose.popMatrix();
 	}
 
 	/** Draws a line at most {@code maxPx} wide: cut short with an ellipsis when it is wider. */
 	public void text(TextLine line, int x, int baselinePx, int argb, int maxPx) {
-		text(line.fitted(scale, font, maxPx), x, baselinePx, argb);
+		text(line.fitted(scale, text, maxPx), x, baselinePx, argb);
 	}
 
 	/** Draws a line ending at {@code rightPx}. */
@@ -638,7 +813,7 @@ public final class Canvas {
 
 	/** Draws a line at most {@code maxPx} wide, ending at {@code rightPx}. */
 	public void textRight(TextLine line, int rightPx, int baselinePx, int argb, int maxPx) {
-		TextLine shown = line.fitted(scale, font, maxPx);
+		TextLine shown = line.fitted(scale, text, maxPx);
 		text(shown, rightPx - shown.widthPx(), baselinePx, argb);
 	}
 
@@ -649,18 +824,18 @@ public final class Canvas {
 
 	/** Draws a line at most {@code maxPx} wide, centred on {@code centerPx}. */
 	public void textCentered(TextLine line, int centerPx, int baselinePx, int argb, int maxPx) {
-		TextLine shown = line.fitted(scale, font, maxPx);
+		TextLine shown = line.fitted(scale, text, maxPx);
 		text(shown, centerPx - shown.widthPx() / 2, baselinePx, argb);
 	}
 
 	/** Baseline that vertically centres a line's capitals on {@code centerPx}. */
 	public int baselineFor(TextLine line, int centerPx) {
-		line.prepare(scale, font);
+		line.prepare(scale, text);
 		return Math.round(centerPx + line.capHeightPx(scale) / 2.0F);
 	}
 
 	/** Baseline that vertically centres capitals of {@code face} on {@code centerPx} (for {@link DigitRun}). */
 	public int baselineFor(FontFace face, int centerPx) {
-		return Math.round(centerPx + face.capHeightPx(scale) / 2.0F);
+		return Math.round(centerPx + TextLine.capHeightPx(face, scale) / 2.0F);
 	}
 }

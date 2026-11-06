@@ -1,0 +1,10 @@
+{
+	"name": "cave",
+	"dimension-names": [
+		"deep_dark",
+		"underground"
+	],
+	"biome-selector": {
+		"always": false
+	}
+}

@@ -10,6 +10,7 @@
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSyncExternalStore } from "react";
+import { formatLocale, t } from "./i18n.ts";
 
 /** Only the desktop app updates itself (the browser preview has no updater). */
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -60,13 +61,13 @@ export function useUpdates(): UpdateState {
  */
 export function friendlyError(error: unknown, during: "check" | "download" | "install" = "check"): string {
   const text = String(error instanceof Error ? error.message : error ?? "");
-  if (/signature|signed for version|different key/i.test(text)) return "The download didn't pass Flint's signature check, so it wasn't installed.";
-  if (/platform/i.test(text)) return "There's no update for this computer yet.";
-  if (/timed? ?out|timeout/i.test(text)) return "The update server didn't answer in time.";
-  if (during === "download" && /decoding response body|status: \d+/i.test(text)) return "The download didn't finish. Try again.";
-  if (/decoding response body|valid release JSON/i.test(text)) return "The update server didn't answer properly. Try again later.";
-  if (/network|connect|dns|resolve|offline|request/i.test(text)) return "Couldn't reach the update server. Check your connection.";
-  return "The update couldn't be completed.";
+  if (/signature|signed for version|different key/i.test(text)) return t("shell.update.errors.signature");
+  if (/platform/i.test(text)) return t("shell.update.errors.noBuild");
+  if (/timed? ?out|timeout/i.test(text)) return t("shell.update.errors.timeout");
+  if (during === "download" && /decoding response body|status: \d+/i.test(text)) return t("shell.update.errors.downloadIncomplete");
+  if (/decoding response body|valid release JSON/i.test(text)) return t("shell.update.errors.badResponse");
+  if (/network|connect|dns|resolve|offline|request/i.test(text)) return t("shell.update.errors.offline");
+  return t("shell.update.errors.generic");
 }
 
 /**
@@ -173,6 +174,12 @@ export function startUpdateChecks(): () => void {
 
 /** "45%" when the size is known, else the amount received ("12.3 MB"). */
 export function progressLabel(received: number, total: number | null): string {
-  if (total && total > 0) return `${Math.min(100, Math.floor((received / total) * 100))}%`;
-  return `${(received / 1_000_000).toFixed(1)} MB`;
+  if (total && total > 0) return t("shell.update.percent", { percent: Math.min(100, Math.floor((received / total) * 100)) });
+  return megabytes(received);
+}
+
+/** A download size in decimal megabytes with one decimal ("12.3 MB"), in the interface language. */
+export function megabytes(bytes: number): string {
+  const amount = new Intl.NumberFormat(formatLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(bytes / 1_000_000);
+  return t("shell.update.megabytes", { amount });
 }

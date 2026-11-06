@@ -1,0 +1,216 @@
+import groovy.json.JsonSlurper
+
+// Flint's game runtime for Minecraft 1.8.9 (Fabric Loader through Ornithe's intermediary). Its Minecraft-facing code is its
+// own (src/main: the 26.x and 1.21.x runtimes are written against an engine ten years newer); the Minecraft-free part of the
+// shared sources (the mod model, stores, HUD placement, catalog: ../src/mc189/shared-sources.rules) is compiled in
+// unchanged through the shared-sources step (../build-logic/SharedSources), with a modern Gson relocated beside it. Runs
+// on Java 21, as the launcher gives Flint's 1.8.9 (app/src-tauri/src/runtime.rs JAVA_FOR_LINE). Reuses Flint's assets from
+// ../src/client/resources: the card pictures, the Font Awesome glyph font, the catalog and the licences.
+// The jar lands where the other lines put theirs: ../build/mc-1.8.9/libs/flint-game-runtime-<app>+1.8.9.jar.
+//   ./gradlew -p legacy189 build
+plugins {
+	id "net.fabricmc.fabric-loom-remap" version "${loom_version}"
+	id "ploceus" version "${ploceus_version}"
+}
+
+def appPackage = new JsonSlurper().parseText(
+	providers.fileContents(layout.projectDirectory.file("../../app/package.json")).asText.get())
+
+base {
+	archivesName = project.archive_base_name
+}
+
+def mcLine = project.minecraft_version
+version = "${appPackage.version}+${mcLine}"
+group = project.maven_group
+layout.buildDirectory = file("../build/mc-${mcLine}")
+
+// The launcher runs 1.8.9 on Mojang's own libraries (log4j 2.0, Guava 17, Gson 2.2.4): compile against exactly those.
+ploceus {
+	disableLibraryUpgrades()
+}
+
+loom {
+	// Mojang's own 1.8.9 version file, the one the launcher installs (Ornithe's copy swaps in Legacy Fabric's LWJGL builds,
+	// whose maven is offline).
+	customMinecraftMetadata = "https://piston-meta.mojang.com/v1/packages/d546f1707a3f2b7d034eece5ea2e311eda875787/1.8.9.json"
+}
+
+configurations {
+	// Gson's published sources, compiled into this jar under Flint's own package (relocateGson).
+	gsonSources {
+		canBeConsumed = false
+		transitive = false
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings ploceus.featherMappings(project.feather_build)
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	gsonSources "com.google.code.gson:gson:${project.gson_version}:sources"
+	// Annotations only (never needed at run time): Gson's own, and the shared sources' nullness marks.
+	compileOnly "com.google.errorprone:error_prone_annotations:${project.error_prone_annotations_version}"
+	compileOnly "org.jspecify:jspecify:${project.jspecify_version}"
+	testCompileOnly "org.jspecify:jspecify:${project.jspecify_version}"
+
+	testImplementation platform("org.junit:junit-bom:5.14.0")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+// The tests run on the Java 1.8.9 players get: Mojang's Java 21 (java-runtime-delta), as Flint's launcher or the QA runner
+// installed it on this computer (-Ptest_java=PATH names another java). Without one, on the build's own JDK.
+def mojangJava21 = {
+	if (project.hasProperty("test_java")) {
+		return file(project.property("test_java"))
+	}
+	def home = System.getProperty("user.home")
+	// The app's data folder ("Flint Client"; older versions of Flint kept it in "com.flintclient.desktop").
+	def bases = [System.getenv("APPDATA"), "${home}/Library/Application Support", "${home}/.local/share"].findAll { it != null }
+	def roots = bases.collectMany { base -> ["Flint Client", "com.flintclient.desktop"].collect { "${base}/${it}" } } + ["${home}/FlintQA/mc-cache"]
+	for (def root : roots.findAll { it != null }) {
+		def dir = new File(root, "runtimes/java-runtime-delta")
+		for (def platform : (dir.listFiles() ?: []).findAll { it.isDirectory() }) {
+			for (def java : ["bin/java.exe", "bin/java", "jre.bundle/Contents/Home/bin/java"]) {
+				def f = new File(platform, java)
+				if (f.isFile()) {
+					return f
+				}
+			}
+		}
+	}
+	return null
+}()
+
+tasks.named("test") {
+	useJUnitPlatform()
+	if (mojangJava21 != null) {
+		executable = mojangJava21.absolutePath
+	}
+	doFirst {
+		logger.lifecycle("Tests run on ${mojangJava21 ?: "the build's JDK (no Mojang Java 21 found)"}")
+	}
+}
+
+// ---------- the shared sources ----------
+
+def src = file("../src")
+def sharedJava = new File(src, "client/java")
+def sharedTests = new File(src, "test/java")
+def overlay = new File(src, "mc189")
+def overlayJava = new File(overlay, "java")
+def overlayRules = new File(overlay, "shared-sources.rules")
+def overlayTestRules = new File(overlay, "shared-tests.rules")
+def adaptedJava = layout.buildDirectory.dir("generated/shared-java")
+def adaptedTests = layout.buildDirectory.dir("generated/shared-tests")
+def relocatedGson = layout.buildDirectory.dir("generated/gson-java")
+
+// The platform-free shared files (src/mc189/shared-sources.rules: its includes), Gson and slf4j renamed for 1.8.9, with
+// the 1.8.9 overlay's own files (src/mc189/java: McCompat). The shared files themselves are never touched; a rule that
+// stops matching fails the build.
+def adaptSharedSources = tasks.register("adaptSharedSources") {
+	inputs.dir(sharedJava)
+	inputs.dir(overlayJava)
+	inputs.file(overlayRules)
+	outputs.dir(adaptedJava)
+	doLast {
+		SharedSources.adapt(sharedJava, [overlayRules], [overlayJava], adaptedJava.get().asFile)
+	}
+}
+// Their unit tests (src/mc189/shared-tests.rules), run here on Java 21 against 1.8.9's libraries.
+def adaptSharedTests = tasks.register("adaptSharedTests") {
+	inputs.dir(sharedTests)
+	inputs.file(overlayRules)
+	inputs.file(overlayTestRules)
+	outputs.dir(adaptedTests)
+	doLast {
+		SharedSources.adaptTests(sharedTests, overlayRules, overlayTestRules, adaptedTests.get().asFile)
+	}
+}
+// Gson as the shared sources know it (26.3's version), under com.flintclient.shaded.gson: Minecraft 1.8.9 ships Gson 2.2.4
+// under com.google.gson, which this jar's own 1.8.9 code keeps using.
+def relocateGson = tasks.register("relocateGson", Sync) {
+	from(zipTree(configurations.gsonSources.singleFile)) {
+		include "com/google/gson/**/*.java"
+		eachFile { it.path = it.path.replace("com/google/gson/", "com/flintclient/shaded/gson/") }
+		filter { it.replace("com.google.gson", "com.flintclient.shaded.gson") }
+	}
+	includeEmptyDirs = false
+	into(relocatedGson)
+}
+
+sourceSets.main.java.srcDir(adaptSharedSources)
+sourceSets.main.java.srcDir(relocateGson)
+sourceSets.test.java.srcDir(adaptSharedTests)
+// The shared tests read Flint's assets (the catalog, sound data, fonts) from the class path.
+sourceSets.test.resources.srcDir(new File(src, "client/resources"))
+
+// Flint's shared assets this runtime shows: the mod cards' pictures and line icons, the glyph font and its licence.
+def shared = file("../src/client/resources")
+
+// Flint's online services (Flint marks, daily rewards, short profile codes), from FLINT_SUPABASE_URL /
+// FLINT_SUPABASE_ANON_KEY at build time (as in ../ and ../legacy).
+apply from: "../flint-services.gradle"
+
+processResources {
+	def modVersion = project.version
+	inputs.property "version", modVersion
+	filesMatching("fabric.mod.json") {
+		expand "version": modVersion
+	}
+	// The shared Right Shift menu's cards: every picture (the legacy HUD's own names among them) and the line icons.
+	from(new File(shared, "assets/flintclient/textures/mods")) {
+		include "*.png"
+		into "assets/flintclient/textures/mods"
+	}
+	from(new File(shared, "assets/flintclient/icons")) {
+		include "cards.txt"
+		into "assets/flintclient/icons"
+	}
+	// Armor's warning sign (uku's Armor HUD, as on every line).
+	from(new File(shared, "assets/flintclient/textures/gui")) {
+		include "armor_warning.png"
+		// The Merit, Flint's daily-reward currency (the Rewards tab and the balance).
+		include "merit.png"
+		into "assets/flintclient/textures/gui"
+	}
+	// The Flint marks before Flint players' names (nametags and the player list).
+	from(new File(shared, "assets/flintclient/textures/font")) {
+		include "tag_*.png"
+		into "assets/flintclient/textures/font"
+	}
+	from(new File(shared, "assets/flintclient/font")) {
+		include "fa-solid-900.ttf"
+		into "assets/flintclient/font"
+	}
+	// The shared Right Shift catalog (cards, sections, rows), which the shared model in this jar reads.
+	from(new File(shared, "assets/flintclient/rshift")) {
+		include "catalog.json"
+		into "assets/flintclient/rshift"
+	}
+	// Every licence of what the shared sources adapt (the glyph font's among them), and Gson's.
+	from(new File(shared, "META-INF/licenses")) {
+		into "META-INF/licenses"
+	}
+	from(new File(overlay, "resources"))
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = "UTF-8"
+	// Java 21: the shared sources are Java 21 code, and the launcher runs Flint's 1.8.9 on Mojang's Java 21.
+	it.options.release = 21
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+jar {
+	from("../../LICENSE") {
+		rename { "LICENSE_flintclient" }
+	}
+}

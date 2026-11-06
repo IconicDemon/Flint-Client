@@ -13,7 +13,7 @@ public final class HookGuard {
 	/** Hears about a path's first failure. */
 	@FunctionalInterface
 	public interface Reporter {
-		void failed(String path, RuntimeException error);
+		void failed(String path, Throwable error);
 	}
 
 	private final String path;
@@ -34,8 +34,11 @@ public final class HookGuard {
 		return path;
 	}
 
-	/** Turns the path off; only the first failure is reported. */
-	public void fail(RuntimeException error) {
+	/**
+	 * Turns the path off; only the first failure is reported. A linkage error counts too: on a Minecraft version Flint
+	 * wasn't built for, a method or field the path uses may have changed, and that should cost the feature, not the game.
+	 */
+	public void fail(Throwable error) {
 		if (!on) {
 			return;
 		}

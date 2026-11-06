@@ -1,0 +1,6 @@
+# The unit tests (src/test/java) as Minecraft 1.21.11 runs them: shared-sources.rules' renames, then these (same forms;
+# paths relative to src/test/java's com/flintclient/client).
+
+file control/platform/UiSoundsTest.java
+# 1.21.11's sound classes reach the registries as they load, so the test bootstraps Minecraft first (26.x doesn't need it).
+s \nclass UiSoundsTest \{\n => \nclass UiSoundsTest {\n\t@org.junit.jupiter.api.BeforeAll\n\tstatic void bootstrap() {\n\t\tnet.minecraft.SharedConstants.tryDetectVersion();\n\t\tnet.minecraft.server.Bootstrap.bootStrap();\n\t}\n\n

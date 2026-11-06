@@ -1,0 +1,29 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.flintclient.client.mixin",
+  "plugin": "com.flintclient.client.FlintMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "GuiBridgeMixin",
+    "GraphicsBridgeMixin",
+    "bridge.CameraBridgeMixin",
+    "bridge.ClientAdvancementsAccessor",
+    "bridge.ChatBridgeMixin",
+    "bridge.ChatLineBridgeMixin",
+    "bridge.ContainerContentsBridgeMixin",
+    "bridge.CullFrustumMixin",
+    "bridge.GameBridgeMixin",
+    "bridge.LevelBridgeMixin",
+    "feature.AbstractWidgetTooltipMixin",
+    "feature.CameraFovMixin",
+    "feature.NameTagShadowMixin",
+    "feature.PlayerTabOverlayHeadsMixin",
+    "feature.HudFoodMixin",
+    "feature.ModelGapFixMixin",
+    "feature.ModelGapSpriteMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

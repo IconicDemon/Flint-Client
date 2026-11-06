@@ -1,0 +1,19 @@
+// Flint's game runtime for Minecraft 1.8.9: a code base of its own (a 2015 engine: Java 8, LWJGL 2, fixed-function OpenGL),
+// built with Ornithe's toolchain (Ploceus on Loom's remap plugin, Feather mappings, Calamus intermediary gen 2) and run by the
+// official Fabric Loader. Build from game-runtime with: ./gradlew -p legacy189 build
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		maven {
+			name = "Ornithe Releases"
+			url = "https://maven.ornithemc.net/releases"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = "flint-game-runtime-189"

@@ -1,10 +1,9 @@
 package com.flintclient.client.render;
 
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import org.joml.Matrix3x2fStack;
+import com.flintclient.client.platform.FontRef;
+import com.flintclient.client.platform.Frame;
+import com.flintclient.client.platform.TextEngine;
+import com.flintclient.client.platform.TextRun;
 
 /**
  * Numbers that change every frame (FPS, coordinates, timers) drawn with tabular figures: each digit
@@ -22,7 +21,7 @@ public final class DigitRun {
 
 	private final FontFace face;
 	/** Per pixel scale (index), built the first time it is drawn at that scale. */
-	private final Component[][] glyphs = new Component[MAX_CACHED_SCALE + 1][];
+	private final TextRun[][] glyphs = new TextRun[MAX_CACHED_SCALE + 1][];
 	private final int[][] widths = new int[MAX_CACHED_SCALE + 1][];
 	private final int[][] offsets = new int[MAX_CACHED_SCALE + 1][];
 
@@ -60,15 +59,11 @@ public final class DigitRun {
 			return x + width(c, text);
 		}
 		int s = c.scale();
-		GuiGraphicsExtractor graphics = c.graphics();
-		Matrix3x2fStack pose = graphics.pose();
-		pose.pushMatrix();
-		pose.scale(s, s);
+		Frame frame = c.frame();
 		float top = (float) baselinePx / s - FlintFonts.BASELINE;
 		for (int i = 0; i < text.length(); i++) {
-			x = glyph(graphics, pose, c.font(), DigitCells.slot(text.charAt(i)), index, s, x, top, argb);
+			x = glyph(frame, DigitCells.slot(text.charAt(i)), index, s, x, top, argb);
 		}
-		pose.popMatrix();
 		return x;
 	}
 
@@ -80,15 +75,11 @@ public final class DigitRun {
 			return x + width(c, text, length);
 		}
 		int s = c.scale();
-		GuiGraphicsExtractor graphics = c.graphics();
-		Matrix3x2fStack pose = graphics.pose();
-		pose.pushMatrix();
-		pose.scale(s, s);
+		Frame frame = c.frame();
 		float top = (float) baselinePx / s - FlintFonts.BASELINE;
 		for (int i = 0; i < length; i++) {
-			x = glyph(graphics, pose, c.font(), DigitCells.slot(text[i]), index, s, x, top, argb);
+			x = glyph(frame, DigitCells.slot(text[i]), index, s, x, top, argb);
 		}
-		pose.popMatrix();
 		return x;
 	}
 
@@ -97,16 +88,13 @@ public final class DigitRun {
 		draw(c, text, rightPx - width(c, text), baselinePx, argb);
 	}
 
-	private int glyph(GuiGraphicsExtractor graphics, Matrix3x2fStack pose, Font font, int slot, int index, int s, int x, float top, int argb) {
+	private int glyph(Frame frame, int slot, int index, int s, int x, float top, int argb) {
 		if (slot < 0) {
 			return x;
 		}
-		Component glyph = glyphs[index][slot];
+		TextRun glyph = glyphs[index][slot];
 		if (glyph != null) {
-			pose.pushMatrix();
-			pose.translate((float) (x + offsets[index][slot]) / s, top);
-			graphics.text(font, glyph, 0, 0, argb, false);
-			pose.popMatrix();
+			frame.text(glyph, (float) (x + offsets[index][slot]) / s, top, s, argb);
 		}
 		return x + widths[index][slot];
 	}
@@ -122,15 +110,15 @@ public final class DigitRun {
 		if (glyphs[index] != null) {
 			return index;
 		}
-		Font font = c.font();
-		Style style = Style.EMPTY.withFont(face.forScale(s));
-		Component[] built = new Component[DigitCells.SLOTS];
+		TextEngine engine = c.text();
+		FontRef font = face.forScale(s);
+		TextRun[] built = new TextRun[DigitCells.SLOTS];
 		int[] advances = new int[DigitCells.SLOTS];
 		for (int slot = 0; slot < DigitCells.SLOTS; slot++) {
 			char ch = DigitCells.CHARS.charAt(slot);
 			// The space draws nothing; only its cell matters.
-			built[slot] = ch == ' ' ? null : Component.literal(String.valueOf(ch)).withStyle(style);
-			advances[slot] = Math.round(font.getSplitter().stringWidth(Component.literal(String.valueOf(ch)).withStyle(style)) * s);
+			built[slot] = ch == ' ' ? null : engine.run(String.valueOf(ch), font);
+			advances[slot] = Math.round(engine.width(engine.run(String.valueOf(ch), font)) * s);
 		}
 		int[] w = new int[DigitCells.SLOTS];
 		int[] o = new int[DigitCells.SLOTS];

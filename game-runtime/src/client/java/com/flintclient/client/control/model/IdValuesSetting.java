@@ -21,10 +21,23 @@ public final class IdValuesSetting extends SettingDescriptor<Map<String, Integer
 	private final int step;
 	private final int entryDefault;
 	private final String unit;
+	/** The value Add gives an id ({@link #addable}); {@code Integer.MIN_VALUE}: every id is listed with − and +. */
+	private int addValue = Integer.MIN_VALUE;
+	/** Values are hundredths shown as a size ("1.50×") rather than a number and the unit. */
+	private boolean times;
 
 	public IdValuesSetting(String id, String label, @Nullable String description, IdKind kind, int entryDefault, int min, int max, int step,
 		String unit) {
-		super(id, label, description, Map.of());
+		this(id, label, description, kind, entryDefault, min, max, step, unit, Map.of());
+	}
+
+	/**
+	 * With some ids set from the start ({@code defaults}: Sound Physics' sound rates leave rain and thunder out). An id the
+	 * player sets back to {@code entryDefault} leaves the map, so it then has {@code entryDefault}, not its starting value.
+	 */
+	public IdValuesSetting(String id, String label, @Nullable String description, IdKind kind, int entryDefault, int min, int max, int step,
+		String unit, Map<String, Integer> defaults) {
+		super(id, label, description, sorted(defaults));
 		if (min > max || step < 1 || entryDefault < min || entryDefault > max) {
 			throw new IllegalArgumentException("bad range for " + id);
 		}
@@ -34,6 +47,13 @@ public final class IdValuesSetting extends SettingDescriptor<Map<String, Integer
 		this.step = step;
 		this.entryDefault = entryDefault;
 		this.unit = unit;
+		if (!valid(defaultValue())) {
+			throw new IllegalArgumentException("bad default entries for " + id);
+		}
+	}
+
+	private static Map<String, Integer> sorted(Map<String, Integer> defaults) {
+		return defaults.isEmpty() ? Map.of() : java.util.Collections.unmodifiableMap(new TreeMap<>(defaults));
 	}
 
 	public IdKind kind() {
@@ -59,6 +79,44 @@ public final class IdValuesSetting extends SettingDescriptor<Map<String, Integer
 
 	public String unit() {
 		return unit;
+	}
+
+	/**
+	 * A list the player adds ids to (UHC Overlay's items): an id not in it shows Add, which sets {@code startValue}; one in it
+	 * shows − and + and a remove. Set once, where the setting is declared.
+	 */
+	public IdValuesSetting addable(int startValue) {
+		if (startValue == entryDefault || clampEntry(startValue) != startValue) {
+			throw new IllegalArgumentException("bad start value for " + id());
+		}
+		addValue = startValue;
+		return this;
+	}
+
+	/** Whether ids are added to this list one by one ({@link #addable}). */
+	public boolean addable() {
+		return addValue != Integer.MIN_VALUE;
+	}
+
+	/** The value Add gives an id. */
+	public int addValue() {
+		return addValue;
+	}
+
+	/** Values are hundredths of a size, shown as "1.50×". Set once, where the setting is declared. */
+	public IdValuesSetting times() {
+		times = true;
+		return this;
+	}
+
+	/** Whether values are shown as a size ("1.50×", hundredths) rather than the number and the unit. */
+	public boolean shownAsSize() {
+		return times;
+	}
+
+	/** {@code value} as the menu shows it: "1.50×" for a size, else the number and the unit ("80%"). */
+	public String format(int value) {
+		return times ? String.format(java.util.Locale.ROOT, "%.2f×", value / 100.0) : value + unit;
 	}
 
 	/** {@code id}'s value in {@code values}. */

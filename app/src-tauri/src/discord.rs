@@ -43,6 +43,12 @@ const KEEPER_FLAG: &str = "--flint-discord-keeper";
 const KEEPER_FILE: &str = "discord-keeper.json";
 /// A keeper never outlives this, whatever happens to the game it watches.
 const KEEPER_MAX: Duration = Duration::from_secs(48 * 3600);
+/// What the game reports about the player (written by Flint's Discord mod while it's on), in the game's folder.
+const REPORT_FILE: &str = "flint-presence.json";
+/// How often a shown game's report is read again. Discord takes five updates per 20 seconds; this stays under that.
+const REPORT_POLL: Duration = Duration::from_secs(5);
+/// Discord cuts an activity's details and state at this many characters.
+const LINE_MAX: usize = 128;
 
 /// One running game, as Discord shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,6 +60,9 @@ pub struct Session {
     pub loader: String,
     /// When the game started, in Unix seconds (Discord's elapsed timer counts from here).
     pub started_at: u64,
+    /// The game's folder, where it writes its report (`REPORT_FILE`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -61,7 +70,7 @@ pub struct Session {
 pub enum Status {
     /// The setting is off.
     Off,
-    /// On, but no game is running, so Flint isn't connected.
+    /// On, with nothing shown on Discord (only while it stops showing; Flint idles on Discord when no game runs).
     Idle,
     /// A game is running and Discord accepted its activity. Discord still decides what the profile
     /// shows (for example, when it has also detected the game by itself).
@@ -83,12 +92,98 @@ pub fn activity(session: &Session, details: bool) -> Value {
             "vanilla" => "Vanilla",
             other => other,
         };
-        activity["details"] = json!(format!("Minecraft {}", session.version));
-        activity["state"] = json!(format!("{loader} · Playing Minecraft"));
+        match report(session) {
+            Some(report) => {
+                let (details, state) = described(&report);
+                activity["details"] = json!(details);
+                if let Some(state) = state {
+                    activity["state"] = json!(state);
+                }
+                if let Some(buttons) = buttons(&report) {
+                    activity["buttons"] = buttons;
+                }
+            }
+            None => {
+                activity["details"] = json!(format!("Minecraft {}", session.version));
+                activity["state"] = json!(format!("{loader} · Playing Minecraft"));
+            }
+        }
     } else {
         activity["details"] = json!("Playing Minecraft");
     }
     activity
+}
+
+/// The activity while Flint is open and no game is running: Flint idling, timed from when Flint opened.
+pub fn idle_activity(opened_at: u64, details: bool) -> Value {
+    json!({
+        "details": if details { "In the launcher" } else { "Flint Client" },
+        "state": "Idling",
+        "timestamps": { "start": opened_at },
+        "assets": { "large_image": LARGE_IMAGE, "large_text": LARGE_TEXT },
+        "instance": false,
+    })
+}
+
+/// The game's report, if it wrote one during this session (one left from an earlier run is ignored).
+fn report(session: &Session) -> Option<Value> {
+    let path = session.game_dir.as_ref()?.join(REPORT_FILE);
+    let written = std::fs::metadata(&path).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    if written + 1 < session.started_at {
+        return None;
+    }
+    serde_json::from_slice::<Value>(&std::fs::read(&path).ok()?).ok().filter(Value::is_object)
+}
+
+/// The report's profile buttons (the Discord mod's Simple Discord Rich Presence options): at most two, each a label of up to
+/// 32 characters and an http(s) address, as Discord takes them; None when there are none.
+fn buttons(report: &Value) -> Option<Value> {
+    let list: Vec<Value> = report
+        .get("buttons")?
+        .as_array()?
+        .iter()
+        .filter_map(|b| {
+            let label = b.get("label")?.as_str()?.trim();
+            let url = b.get("url")?.as_str()?.trim();
+            let ok = !label.is_empty() && label.chars().count() <= 32 && url.len() <= 512 && (url.starts_with("https://") || url.starts_with("http://"));
+            ok.then(|| json!({ "label": label, "url": url }))
+        })
+        .take(2)
+        .collect();
+    (!list.is_empty()).then_some(Value::Array(list))
+}
+
+/// A report as Discord's two lines: what is being played ("Minecraft 26.3 · Multiplayer"), then where ("Hypixel · In
+/// Overworld · Plains"), which is left out when the report has none of it. A server address never shows.
+fn described(report: &Value) -> (String, Option<String>) {
+    let text = |key: &str| report.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let mut first: Vec<String> = Vec::new();
+    first.extend(text("version").map(|v| format!("Minecraft {v}")));
+    first.extend(text("state"));
+    // The world or public server's name leads the second line, then the Discord mod's status ("In Overworld").
+    let mut second: Vec<String> = Vec::new();
+    second.extend(text("world").or_else(|| text("server").filter(|s| !looks_like_address(s))));
+    second.extend(["status", "dimension", "biome"].into_iter().filter_map(text));
+    second.extend(text("riding").map(|r| format!("Riding {r}")));
+    let first = if first.is_empty() { "Playing Minecraft".to_owned() } else { line(&first) };
+    (first, (!second.is_empty()).then(|| line(&second)))
+}
+
+/// Whether a server "name" is really an address (older Flint runtimes sent it): an IP, a host name or a port. Shown
+/// to everyone on Discord, a private server's address would be its owner's.
+fn looks_like_address(name: &str) -> bool {
+    name.contains(['.', ':', '/']) || name.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ':')
+}
+
+/// Parts joined with " · ", cut to what Discord shows.
+fn line(parts: &[String]) -> String {
+    let joined = parts.join(" · ");
+    if joined.chars().count() <= LINE_MAX {
+        return joined;
+    }
+    let mut cut: String = joined.chars().take(LINE_MAX - 1).collect();
+    cut.push('…');
+    cut
 }
 
 /// The session Discord shows: the most recently started one that has settled.
@@ -356,6 +451,7 @@ impl Publisher {
                 self.sent = Some((*pid, activity.clone()));
                 Status::Connected
             }
+            #[cfg_attr(not(debug_assertions), allow(unused_variables))]
             other => {
                 #[cfg(debug_assertions)]
                 eprintln!("[discord] update failed: {other:?}");
@@ -468,6 +564,9 @@ fn run(rx: Receiver<Msg>, shared: Shared, adopted: Vec<Session>, on_status: impl
     sessions.extend(adopted.into_iter().map(|s| (s, long_ago)));
     let mut publisher = Publisher::new();
     let mut status = *shared.status.lock().unwrap();
+    // With no game running, Flint itself shows as idling, timed from when it opened.
+    let opened_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let me = std::process::id();
     loop {
         let now = Instant::now();
         let (enabled, details) = *shared.settings.lock().unwrap();
@@ -480,7 +579,9 @@ fn run(rx: Receiver<Msg>, shared: Shared, adopted: Vec<Session>, on_status: impl
             }
         }
         *shared.sessions.lock().unwrap() = sessions.iter().map(|(s, _)| s.clone()).collect();
-        let desired = if enabled { shown(&sessions, now).map(|s| (s.pid, activity(s, details))) } else { None };
+        let game = if enabled { shown(&sessions, now).map(|s| (s.pid, activity(s, details))) } else { None };
+        let showing_game = game.is_some();
+        let desired = if enabled { game.or_else(|| Some((me, idle_activity(opened_at, details)))) } else { None };
         let next = if enabled {
             publisher.apply(desired.as_ref(), now)
         } else {
@@ -496,7 +597,12 @@ fn run(rx: Receiver<Msg>, shared: Shared, adopted: Vec<Session>, on_status: impl
 
         // Sleep until a message, a session settling, a retry/heartbeat, or a watched game check.
         let settling = sessions.iter().map(|(_, since)| *since + SETTLE).filter(|at| *at > now).min();
-        let wake = [settling, publisher.next_wake(now, desired.is_some()), (!watched.is_empty()).then(|| now + Duration::from_secs(5))].into_iter().flatten().min();
+        // A shown game's report is read again every few seconds (only a change is sent).
+        let reread = (details && showing_game).then(|| now + REPORT_POLL);
+        let wake = [settling, publisher.next_wake(now, desired.is_some()), (!watched.is_empty()).then(|| now + Duration::from_secs(5)), reread]
+            .into_iter()
+            .flatten()
+            .min();
         let msg = match wake {
             Some(at) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
                 Ok(msg) => Some(msg),
@@ -534,8 +640,18 @@ struct KeeperState {
     sessions: Vec<Session>,
 }
 
+/// Whether `pid` (read back from a file) names one process: `kill` takes 0 as Flint's own process group, 1 is
+/// init, and an id past `pid_t` turns negative, a whole process group (or, as -1, every process the user owns).
+#[cfg_attr(not(unix), allow(dead_code))] // only Unix signals processes
+fn single_process(pid: u32) -> bool {
+    pid > 1 && pid <= i32::MAX as u32
+}
+
 #[cfg(unix)]
 pub fn process_alive(pid: u32) -> bool {
+    if !single_process(pid) {
+        return false;
+    }
     // Signal 0 checks the process exists without touching it; EPERM still means it exists.
     let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -638,7 +754,57 @@ mod tests {
     use super::*;
 
     fn session(id: &str, version: &str, loader: &str, started_at: u64) -> Session {
-        Session { id: id.into(), pid: 1, version: version.into(), loader: loader.into(), started_at }
+        Session { id: id.into(), pid: 1, version: version.into(), loader: loader.into(), started_at, game_dir: None }
+    }
+
+    #[test]
+    fn the_games_report_says_where_the_player_is() {
+        let dir = std::env::temp_dir().join(format!("flint-presence-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = session("p", "26.3", "fabric", 1);
+        s.game_dir = Some(dir.clone());
+        let a = activity(&s, true);
+        assert_eq!(a["details"], "Minecraft 26.3", "no report yet: the plain activity");
+        std::fs::write(dir.join(REPORT_FILE), r#"{"version":"26.3","state":"Singleplayer","world":"New World","dimension":"Overworld","biome":"Plains","riding":"Horse"}"#).unwrap();
+        let a = activity(&s, true);
+        assert_eq!(a["details"], "Minecraft 26.3 · Singleplayer");
+        assert_eq!(a["state"], "New World · Overworld · Plains · Riding Horse");
+        std::fs::write(dir.join(REPORT_FILE), r#"{"version":"26.3","state":"Multiplayer","server":"power-1.mantranodes.fun:19195","status":"In Overworld"}"#).unwrap();
+        let a = activity(&s, true);
+        assert_eq!(a["details"], "Minecraft 26.3 · Multiplayer");
+        assert_eq!(a["state"], "In Overworld", "a server's address never shows");
+        std::fs::write(dir.join(REPORT_FILE), r#"{"version":"26.3","state":"Multiplayer","server":"Minemen Club"}"#).unwrap();
+        assert_eq!(activity(&s, true)["state"], "Minemen Club");
+        for address in ["127.0.0.1", "play.example.org", "10.0.0.2:25565", "[::1]:25565", "25565"] {
+            assert!(looks_like_address(address), "{address}");
+        }
+        assert!(!looks_like_address("Hypixel"));
+        assert_eq!(activity(&s, false)["details"], "Playing Minecraft", "details off: the report isn't shown");
+        std::fs::write(dir.join(REPORT_FILE), r#"{"state":"In the menus"}"#).unwrap();
+        let a = activity(&s, true);
+        assert_eq!(a["details"], "In the menus");
+        assert!(a.get("state").is_none());
+        // A report from before this game started is an earlier run's.
+        s.started_at = now_secs_for_test() + 3600;
+        assert_eq!(activity(&s, true)["details"], "Minecraft 26.3");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(line(&["x".repeat(200)]).chars().count(), LINE_MAX);
+    }
+
+    #[test]
+    fn the_discord_mods_status_and_buttons_show() {
+        let report = json!({"version":"26.3","state":"Singleplayer","status":"In Overworld","biome":"Plains",
+            "buttons":[{"label":"Join us","url":"https://example.com"},{"label":"","url":"https://x"},{"label":"Bad","url":"ftp://x"}]});
+        let (_, state) = described(&report);
+        assert_eq!(state.as_deref(), Some("In Overworld · Plains"));
+        assert_eq!(buttons(&report).unwrap(), json!([{"label":"Join us","url":"https://example.com"}]));
+        assert!(buttons(&json!({})).is_none());
+        let many = json!({"buttons":[{"label":"a","url":"https://a"},{"label":"b","url":"https://b"},{"label":"c","url":"https://c"}]});
+        assert_eq!(buttons(&many).unwrap().as_array().unwrap().len(), 2, "Discord shows two at most");
+    }
+
+    fn now_secs_for_test() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
     }
 
     #[test]
@@ -653,6 +819,16 @@ mod tests {
         let private = activity(&session("p", "26.3", "fabric", 1), false);
         assert_eq!(private["details"], "Playing Minecraft");
         assert!(private.get("state").is_none(), "no version or loader when that's turned off");
+    }
+
+    #[test]
+    fn flint_idles_while_no_game_runs() {
+        let a = idle_activity(1_792_000_000, true);
+        assert_eq!(a["details"], "In the launcher");
+        assert_eq!(a["state"], "Idling");
+        assert_eq!(a["timestamps"]["start"], 1_792_000_000u64);
+        assert_eq!(a["assets"]["large_image"], "flint_logo");
+        assert_eq!(idle_activity(1, false)["details"], "Flint Client", "details off: only that Flint is open");
     }
 
     #[test]
@@ -766,5 +942,25 @@ mod tests {
     fn our_own_process_counts_as_alive() {
         assert!(process_alive(std::process::id()));
         assert!(!process_alive(999_999));
+    }
+
+    #[test]
+    fn a_pid_read_back_from_a_file_must_name_one_process() {
+        assert!(single_process(std::process::id()));
+        assert!(single_process(2) && single_process(i32::MAX as u32));
+        // 0 is Flint's own process group, 1 is init, and past i32::MAX the id turns negative: a group, or (-1)
+        // every process the user owns. None of them is ever a keeper or a game.
+        for bad in [0, 1, i32::MAX as u32 + 1, u32::MAX] {
+            assert!(!single_process(bad), "{bad}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_corrupt_keeper_file_signals_nothing() {
+        // `take_over_keeper` only signals a pid `process_alive` accepts; these would have reached many processes.
+        for bad in [0, 1, u32::MAX] {
+            assert!(!process_alive(bad), "{bad}");
+        }
     }
 }

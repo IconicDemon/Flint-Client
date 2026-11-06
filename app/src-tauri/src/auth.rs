@@ -433,7 +433,10 @@ async fn minecraft_session(
     })
 }
 
-fn remember(state: &AppState, session: &MinecraftSession) -> CmdResult<StoredAccount> {
+/// Keeps a fresh session: its token for this run and the account in the accounts file. `activate`: the account becomes Flint's
+/// active one (a sign-in from the app); a renewal or a sign-in started from a game leaves the active account as it is (but
+/// fills it in when there is none).
+fn remember(state: &AppState, session: &MinecraftSession, activate: bool) -> CmdResult<StoredAccount> {
     state.minecraft_tokens.lock().unwrap().insert(
         session.account.uuid.clone(),
         CachedToken {
@@ -443,7 +446,8 @@ fn remember(state: &AppState, session: &MinecraftSession) -> CmdResult<StoredAcc
     );
     let mut file = load_accounts(state);
     let mut account = session.account.clone();
-    let mut changed = file.active.as_deref() != Some(account.uuid.as_str());
+    let activate = activate || file.active.is_none();
+    let mut changed = activate && file.active.as_deref() != Some(account.uuid.as_str());
     if let Some(existing) = file.accounts.iter_mut().find(|a| a.uuid == account.uuid) {
         account.added_at = existing.added_at;
         changed |= serde_json::to_value(&*existing).ok() != serde_json::to_value(&account).ok();
@@ -452,7 +456,9 @@ fn remember(state: &AppState, session: &MinecraftSession) -> CmdResult<StoredAcc
         file.accounts.push(account.clone());
         changed = true;
     }
-    file.active = Some(account.uuid.clone());
+    if activate {
+        file.active = Some(account.uuid.clone());
+    }
     // A routine token refresh usually changes nothing on disk; skip the rewrite then.
     if changed {
         save_accounts(state, &file)?;
@@ -462,6 +468,39 @@ fn remember(state: &AppState, session: &MinecraftSession) -> CmdResult<StoredAcc
 
 #[tauri::command]
 pub async fn auth_sign_in(app: AppHandle, state: State<'_, AppState>) -> CmdResult<StoredAccount> {
+    sign_in(&app, &state, true).await
+}
+
+/// Flint's Microsoft sign-in in the browser, from the app's Add account: Flint opens the page itself. `activate`: the new
+/// account becomes Flint's active one.
+pub async fn sign_in(app: &AppHandle, state: &AppState, activate: bool) -> CmdResult<StoredAccount> {
+    let pending = begin_sign_in(state).await?;
+    emit_stage(app, "browser");
+    if let Err(e) = app.opener().open_url(pending.url.as_str(), None::<&str>) {
+        state.sign_in_cancel.lock().unwrap().take();
+        return Err(format!("Could not open your browser: {e}"));
+    }
+    finish_sign_in(app, state, pending, activate).await
+}
+
+/// A sign-in waiting for the browser: Microsoft's page to open ([`PendingSignIn::url`]) and the loopback listener its
+/// redirect comes back to. Whoever is in front opens the page: Flint for its own Add account, the game for a game's (a
+/// background process can't bring a window forward on Windows, so a page Flint opened while the game is in front stays behind
+/// it). Dropping it closes the listener.
+pub struct PendingSignIn {
+    /// Microsoft's sign-in page for this attempt (PKCE challenge and state included; no secret).
+    pub url: String,
+    v4: TcpListener,
+    v6: Option<TcpListener>,
+    redirect_uri: String,
+    verifier: String,
+    expected_state: String,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+}
+
+/// Starts a sign-in: the loopback listener, the PKCE pair and Microsoft's page for them. A sign-in already waiting is
+/// cancelled (one at a time).
+pub async fn begin_sign_in(state: &AppState) -> CmdResult<PendingSignIn> {
     let v4 = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(err("Could not start the sign-in listener"))?;
@@ -488,19 +527,19 @@ pub async fn auth_sign_in(app: AppHandle, state: State<'_, AppState>) -> CmdResu
     if let Some(previous) = state.sign_in_cancel.lock().unwrap().replace(cancel_tx) {
         let _ = previous.send(());
     }
+    Ok(PendingSignIn { url: authorize.into(), v4, v6, redirect_uri, verifier, expected_state, cancel: cancel_rx })
+}
 
-    emit_stage(&app, "browser");
-    app.opener()
-        .open_url(authorize.as_str(), None::<&str>)
-        .map_err(err("Could not open your browser"))?;
-
-    let code = wait_for_callback(v4, v6, expected_state, cancel_rx).await;
+/// Waits for Microsoft's redirect (up to five minutes), then exchanges the code and signs in to Minecraft.
+pub async fn finish_sign_in(app: &AppHandle, state: &AppState, pending: PendingSignIn, activate: bool) -> CmdResult<StoredAccount> {
+    let PendingSignIn { v4, v6, redirect_uri, verifier, expected_state, cancel, .. } = pending;
+    let code = wait_for_callback(v4, v6, expected_state, cancel).await;
     state.sign_in_cancel.lock().unwrap().take();
     let code = code?;
 
-    emit_stage(&app, "exchange");
+    emit_stage(app, "exchange");
     let token = token_request(
-        &state,
+        state,
         &[
             ("client_id", MICROSOFT_CLIENT_ID),
             ("grant_type", "authorization_code"),
@@ -514,17 +553,21 @@ pub async fn auth_sign_in(app: AppHandle, state: State<'_, AppState>) -> CmdResu
     let microsoft_access = token["access_token"]
         .as_str()
         .ok_or("Microsoft returned no access token")?;
-    let session = minecraft_session(&app, &state, microsoft_access).await?;
+    let session = minecraft_session(app, state, microsoft_access).await?;
     if let Some(refresh) = token["refresh_token"].as_str() {
-        store_refresh_token(&state, &session.account.uuid, refresh)?;
+        store_refresh_token(state, &session.account.uuid, refresh)?;
     }
-    let account = remember(&state, &session)?;
-    emit_stage(&app, "done");
+    let account = remember(state, &session, activate)?;
+    emit_stage(app, "done");
     Ok(account)
 }
 
 #[tauri::command]
 pub fn auth_cancel(state: State<'_, AppState>) {
+    cancel_sign_in(&state);
+}
+
+pub fn cancel_sign_in(state: &AppState) {
     if let Some(cancel) = state.sign_in_cancel.lock().unwrap().take() {
         let _ = cancel.send(());
     }
@@ -619,21 +662,70 @@ pub async fn minecraft_token_explicit(app: &AppHandle, state: &AppState, uuid: &
     token_for_account(app, state, uuid, true).await
 }
 
+/// A Minecraft token for a background task (Friends): renewed when the saved sign-in can be read without asking the player
+/// (Windows), otherwise only one Flint already has this run, so nothing asks for the keychain unprompted.
+pub async fn minecraft_token_quiet(app: &AppHandle, state: &AppState, uuid: &str) -> CmdResult<String> {
+    if SILENT_CREDENTIAL_STORE {
+        return minecraft_token(app, state, uuid).await;
+    }
+    cached_token(state, uuid).ok_or_else(|| "Flint hasn't read this account's saved sign-in yet.".into())
+}
+
+/// Whether reading the saved sign-in never asks the player anything: Windows' Credential Manager doesn't, while the macOS
+/// Keychain may ask for permission and a locked Linux keyring asks to be unlocked (there, Play stays the first to read it).
+const SILENT_CREDENTIAL_STORE: bool = cfg!(windows);
+
+/// The account `renew_ahead` signs in again: the active one, unless it is the offline QA identity or its saved sign-in
+/// can't be read without asking the player.
+fn renew_ahead_for(silent_store: bool, active: Option<StoredAccount>) -> Option<String> {
+    active.filter(|account| silent_store && !account.qa).map(|account| account.uuid)
+}
+
+/// Signs the active account in again in the background when Flint opens, so the first Play of the session finds a fresh
+/// Minecraft token instead of waiting for Microsoft, Xbox Live and Minecraft's services (six requests in a row, often one to
+/// three seconds; the token then lasts the day). A Play pressed meanwhile joins the same refresh. A failure is only logged:
+/// Play tries again and explains it.
+pub fn renew_ahead(app: &AppHandle) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let Some(uuid) = renew_ahead_for(SILENT_CREDENTIAL_STORE, active_account(&state)) else { return };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if let Err(error) = minecraft_token(&app, &state, &uuid).await {
+            eprintln!("[flint] the sign-in wasn't renewed ahead of Play: {error}");
+        }
+    });
+}
+
 async fn token_for_account(app: &AppHandle, state: &AppState, uuid: &str, explicit: bool) -> CmdResult<String> {
     state
         .token_refresh
         .run(uuid, || cached_token(state, uuid), || async {
             let session = refresh_session(app, state, uuid, explicit).await?;
-            remember(state, &session)?;
+            remember(state, &session, false)?;
             Ok(session.access_token)
         })
         .await
 }
 
-pub fn update_skin_model(state: &AppState, uuid: &str, model: &str) -> CmdResult<()> {
+/// After a skin change: the arm model and, from Minecraft's answer (`profile`), the new skin's link, which heads load
+/// straight from Mojang's texture server (data.rs `skin_texture`). Without a link in the answer the old one is kept.
+pub fn update_skin(state: &AppState, uuid: &str, model: &str, profile: Option<&Value>) -> CmdResult<()> {
+    let link = profile.and_then(|p| p["skins"].as_array()).and_then(|skins| {
+        skins
+            .iter()
+            .find(|s| s["state"].as_str().is_some_and(|v| v.eq_ignore_ascii_case("active")))
+            .or_else(|| skins.first())
+            .and_then(|s| s["url"].as_str())
+            .map(|u| u.replace("http://", "https://"))
+    });
     let mut file = load_accounts(state);
     if let Some(account) = file.accounts.iter_mut().find(|a| a.uuid == uuid) {
         account.skin_model = Some(model.to_owned());
+        if link.is_some() {
+            account.skin_url = link;
+        }
     }
     save_accounts(state, &file)
 }
@@ -662,12 +754,52 @@ pub fn accounts_list(state: State<'_, AppState>) -> AccountsView {
 
 #[tauri::command]
 pub fn accounts_set_active(state: State<'_, AppState>, uuid: String) -> CmdResult<()> {
-    let mut file = load_accounts(&state);
+    set_active(&state, &uuid)
+}
+
+/// Makes a signed-in account Flint's active one (the app's account menu, or a game that switched to it).
+pub fn set_active(state: &AppState, uuid: &str) -> CmdResult<()> {
+    let mut file = load_accounts(state);
     if !file.accounts.iter().any(|a| a.uuid == uuid) {
-        return Err("That account isn't signed in.".into());
+        return Err("That account isn't signed in to Flint any more.".into());
     }
-    file.active = Some(uuid);
-    save_accounts(&state, &file)
+    if file.active.as_deref() == Some(uuid) {
+        return Ok(());
+    }
+    file.active = Some(uuid.to_owned());
+    save_accounts(state, &file)
+}
+
+/// A Minecraft session for a game that asked through the game link: the account's token, renewed if it has expired (an
+/// action the player started, so macOS may ask for the keychain). A test identity gets an offline session. Flint's active
+/// account doesn't change here; the game says when it has switched.
+pub async fn game_session(app: &AppHandle, state: &AppState, uuid: &str) -> CmdResult<crate::gamelink::GameSession> {
+    let account = linked_account(state, uuid)?;
+    if let Some(offline) = offline_session(&account) {
+        return Ok(offline);
+    }
+    let access_token = minecraft_token_explicit(app, state, uuid).await?;
+    // A renewal may have brought a new name.
+    let username = load_accounts(state).accounts.into_iter().find(|a| a.uuid == uuid).map(|a| a.username).unwrap_or(account.username);
+    Ok(crate::gamelink::GameSession { uuid: account.uuid, username, access_token, offline: false })
+}
+
+fn linked_account(state: &AppState, uuid: &str) -> CmdResult<StoredAccount> {
+    load_accounts(state)
+        .accounts
+        .into_iter()
+        .find(|a| a.uuid == uuid)
+        .ok_or_else(|| "That account isn't signed in to Flint any more.".into())
+}
+
+/// A test identity's session: offline, with no token (as the QA identity launches).
+fn offline_session(account: &StoredAccount) -> Option<crate::gamelink::GameSession> {
+    account.qa.then(|| crate::gamelink::GameSession {
+        uuid: account.uuid.clone(),
+        username: account.username.clone(),
+        access_token: "0".into(),
+        offline: true,
+    })
 }
 
 #[tauri::command]
@@ -691,7 +823,7 @@ pub async fn accounts_refresh(
         .token_refresh
         .run(&uuid, || None, || async {
             let session = refresh_session(&app, &state, &uuid, true).await?;
-            remember(&state, &session)
+            remember(&state, &session, false)
         })
         .await?;
     let active = file.active.clone();
@@ -705,9 +837,17 @@ pub async fn accounts_refresh(
 
 #[tauri::command]
 pub fn accounts_remove(state: State<'_, AppState>, uuid: String) -> CmdResult<()> {
-    let mut file = load_accounts(&state);
+    remove_account(&state, &uuid).map(|_| ())
+}
+
+/// Signs an account out of Flint: its saved sign-in (keychain), its tokens for this run, its cached profile, its entry in the
+/// accounts file; Flint's active account moves to the first one left. From the app's account menu, or a game's account card
+/// through the game link. True when there was such an account.
+pub fn remove_account(state: &AppState, uuid: &str) -> CmdResult<bool> {
+    let uuid = uuid.to_owned();
+    let mut file = load_accounts(state);
     let Some(account) = file.accounts.iter().find(|a| a.uuid == uuid).cloned() else {
-        return Ok(());
+        return Ok(false);
     };
     if !account.qa {
         state
@@ -719,11 +859,16 @@ pub fn accounts_remove(state: State<'_, AppState>, uuid: String) -> CmdResult<()
     state.refresh_tokens.lock().unwrap().remove(&uuid);
     state.keychain_blocked.lock().unwrap().remove(&uuid);
     let _ = std::fs::remove_file(state.paths.cache().join("skins").join(format!("{uuid}-profile.json")));
+    // Its Flint Store session (revoked at the Store in the background) and its cached Store inventory.
+    crate::store::forget_account(state, &uuid);
+    // Its Friends session (ended at Flint's server in the background) and its kept friends list.
+    crate::social::forget_account(state, &uuid);
     file.accounts.retain(|a| a.uuid != uuid);
     if file.active.as_deref() == Some(uuid.as_str()) {
         file.active = file.accounts.first().map(|a| a.uuid.clone());
     }
-    save_accounts(&state, &file)
+    save_accounts(state, &file)?;
+    Ok(true)
 }
 
 /// QA builds only: adds a local test identity so the onboarding flow can be exercised end to end
@@ -760,6 +905,17 @@ mod tests {
         assert!(!refresh_failure_message(503).contains("expired"));
         assert!(refresh_failure_message(503).contains("503"));
         assert!(refresh_failure_message(429).contains("limiting"));
+    }
+
+    #[test]
+    fn only_a_real_account_is_signed_in_ahead_and_only_where_that_never_asks() {
+        let real = StoredAccount { uuid: "u1".into(), username: "Player".into(), ..Default::default() };
+        let qa = StoredAccount { uuid: "qa".into(), username: "FlintQA".into(), qa: true, ..Default::default() };
+        assert_eq!(renew_ahead_for(true, Some(real.clone())).as_deref(), Some("u1"));
+        assert_eq!(renew_ahead_for(false, Some(real)), None, "the macOS Keychain or a Linux keyring may ask the player");
+        assert_eq!(renew_ahead_for(true, Some(qa)), None, "the offline QA identity has nothing to renew");
+        assert_eq!(renew_ahead_for(true, None), None);
+        assert_eq!(SILENT_CREDENTIAL_STORE, cfg!(windows));
     }
 
     #[test]
@@ -979,17 +1135,82 @@ mod tests {
             access_token: "access".into(),
             expires_in: 86_400,
         };
-        remember(&state, &session).unwrap();
+        remember(&state, &session, true).unwrap();
         let path = dir.0.join("accounts.json");
         let old = std::time::SystemTime::now() - Duration::from_secs(3600);
         std::fs::File::options().write(true).open(&path).unwrap().set_modified(old).unwrap();
-        remember(&state, &session).unwrap();
+        remember(&state, &session, true).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), old, "no rewrite when nothing changed");
         assert_eq!(cached_token(&state, &session.account.uuid).as_deref(), Some("access"));
         let renamed = MinecraftSession { account: StoredAccount { username: "Alex".into(), ..session.account.clone() }, ..session };
-        remember(&state, &renamed).unwrap();
+        remember(&state, &renamed, true).unwrap();
         assert_ne!(std::fs::metadata(&path).unwrap().modified().unwrap(), old, "a real change is saved");
         assert_eq!(load_accounts(&state).accounts[0].username, "Alex");
+    }
+
+    #[test]
+    fn only_a_sign_in_from_the_app_changes_the_active_account() {
+        let (_dir, state, _store) = state_with_store();
+        let session = |uuid: &str, name: &str| MinecraftSession {
+            account: StoredAccount { uuid: uuid.into(), username: name.into(), ..Default::default() },
+            access_token: "access".into(),
+            expires_in: 86_400,
+        };
+        // The first account is active whatever asked for it.
+        remember(&state, &session("a", "Alpha"), false).unwrap();
+        assert_eq!(load_accounts(&state).active.as_deref(), Some("a"));
+        // A sign-in started from a game, and a renewal, leave it.
+        remember(&state, &session("b", "Beta"), false).unwrap();
+        assert_eq!(load_accounts(&state).active.as_deref(), Some("a"));
+        assert_eq!(load_accounts(&state).accounts.len(), 2);
+        // The app's Add account makes the new one active; a game's switch says so through set_active.
+        remember(&state, &session("c", "Gamma"), true).unwrap();
+        assert_eq!(load_accounts(&state).active.as_deref(), Some("c"));
+        set_active(&state, "b").unwrap();
+        assert_eq!(load_accounts(&state).active.as_deref(), Some("b"));
+        assert!(set_active(&state, "nobody").is_err());
+        assert_eq!(load_accounts(&state).active.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_test_identity_gets_an_offline_session_and_unknown_accounts_none() {
+        let (_dir, state, _store) = state_with_store();
+        let mut file = AccountsFile::default();
+        file.accounts.push(StoredAccount { uuid: "q".into(), username: "FlintQA".into(), qa: true, ..Default::default() });
+        file.accounts.push(StoredAccount { uuid: "m".into(), username: "Steve".into(), ..Default::default() });
+        save_accounts(&state, &file).unwrap();
+        // Outside QA builds a test identity isn't listed at all.
+        assert!(linked_account(&state, "q").is_err());
+        let mut qa = state;
+        qa.qa = true;
+        let session = offline_session(&linked_account(&qa, "q").unwrap()).unwrap();
+        assert!(session.offline);
+        assert_eq!(session.access_token, "0");
+        // A Microsoft account always goes through its real sign-in.
+        assert!(offline_session(&linked_account(&qa, "m").unwrap()).is_none());
+        assert!(linked_account(&qa, "nobody").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_hands_out_microsofts_page_and_listens_for_its_redirect() {
+        let (_dir, state, _store) = state_with_store();
+        let pending = begin_sign_in(&state).await.unwrap();
+        // The page the game opens: Microsoft's authorize endpoint, this attempt's PKCE challenge and state, and the loopback
+        // redirect Flint listens on (no secret in it: the verifier stays here).
+        assert!(pending.url.starts_with(AUTHORIZE_URL), "{}", pending.url);
+        let url = url::Url::parse(&pending.url).unwrap();
+        let query: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(query["client_id"], MICROSOFT_CLIENT_ID);
+        assert_eq!(query["code_challenge_method"], "S256");
+        assert_eq!(query["code_challenge"], URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes())));
+        assert_eq!(query["state"], pending.expected_state);
+        let port = pending.v4.local_addr().unwrap().port();
+        assert_eq!(query["redirect_uri"], format!("http://localhost:{port}"));
+        assert!(!pending.url.contains(&pending.verifier));
+        // Cancel (the card's Cancel, through the link) stops the one waiting.
+        assert!(state.sign_in_cancel.lock().unwrap().is_some());
+        cancel_sign_in(&state);
+        assert!(state.sign_in_cancel.lock().unwrap().is_none());
     }
 
     #[test]

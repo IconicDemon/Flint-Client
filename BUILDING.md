@@ -60,5 +60,5 @@ npm run release          # NSIS installer in src-tauri\target.noindex\release\bu
   with the `FLINT_AI_GATEWAY_URL` environment variable.
 - **Separate test data.** `FLINT_DATA_DIR=/absolute/path` runs the launcher with its own data folder, leaving your
   normal Flint profiles and accounts alone.
-- **Minecraft versions.** Beta 1 targets Minecraft 26.3. See docs/MULTI_VERSION_PLAN.md for how other versions are
+- **Minecraft versions.** Flint supports 26.3, 26.2, 26.1.x, 1.21.11, 1.21.10, 1.21.1 and 1.8.9 (game-runtime/legacy189). See docs/MULTI_VERSION_PLAN.md for how versions are
   added.

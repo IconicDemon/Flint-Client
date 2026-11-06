@@ -1,0 +1,28 @@
+{
+  "armor_breaking": {
+    "category": "player",
+    "subtitle": "flintclient.subtitle.armor_breaking",
+    "sounds": [
+      "flintclient:armor_breaking"
+    ]
+  },
+  "loot_beams.drop": {
+    "sounds": [
+      {
+        "name": "flintclient:lootbeams/drop_01",
+        "stream": true,
+        "weight": 1
+      },
+      {
+        "name": "flintclient:lootbeams/drop_02",
+        "stream": true,
+        "weight": 1
+      },
+      {
+        "name": "flintclient:lootbeams/drop_03",
+        "stream": true,
+        "weight": 1
+      }
+    ]
+  }
+}

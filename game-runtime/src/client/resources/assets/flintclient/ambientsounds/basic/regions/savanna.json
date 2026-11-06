@@ -1,0 +1,110 @@
+{
+	"name": "savanna",
+	"bad-regions": [
+		"rain"
+	],
+	"biomes": [
+		"#is_savanna",
+		"savanna",
+		"heathland",
+		"prairie",
+		"brushland",
+		"lush desert",
+		"outback",
+		"shrubland",
+		"spiny forest",
+		"ironwood_gour",
+		"chaparral"
+	],
+	"sounds": [
+		{
+			"name": "cricket",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_day",
+			"features": [
+				"grass",
+				"sand"
+			],
+			"overall-raining": false,
+			"volume": 0.25,
+			"pause": {
+				"min": 20,
+				"max": 100
+			}
+		},
+		{
+			"name": "cicadas",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cicadas",
+			"features": [
+				"grass",
+				"sand"
+			],
+			"overall-raining": false,
+			"day": 0.15,
+			"night": 0.01,
+			"pause": {
+				"min": 100,
+				"max": 600
+			},
+			"pitch": 1.4
+		},
+		{
+			"name": "cicadas-desert",
+			"files": [
+				"minecraft:block.deadbush.idle"
+			],
+			"category": "cicadas",
+			"overall-raining": false,
+			"special-biomes": {
+				"temperature": {
+					"min": 0.8
+				}
+			},
+			"day": 1,
+			"night": 0,
+			"pause": {
+				"min": 500,
+				"max": 1000
+			}
+		},
+		{
+			"name": "cricket-warm-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_night",
+			"features": [
+				"grass",
+				"sand"
+			],
+			"overall-raining": false,
+			"volume": 0.3,
+			"pause": {
+				"min": 10,
+				"max": 60
+			}
+		},
+		{
+			"name": "bird-warm",
+			"files": [
+				"minecraft:entity.parrot.ambient"
+			],
+			"category": "bird_day",
+			"features": [
+				"tree"
+			],
+			"overall-raining": false,
+			"pause": {
+				"min": 60,
+				"max": 300
+			},
+			"pitch": 1.1,
+			"volume": 0.3
+		}
+	]
+}

@@ -58,7 +58,7 @@ class LibraryQueryTest {
 
 	@Test
 	void noMatchMeansAnEmptyList() {
-		assertEquals(List.of(), search("minimap"));
+		assertEquals(List.of(), search("teleporter"));
 		assertEquals(List.of(), search("zzz"));
 	}
 
@@ -74,14 +74,14 @@ class LibraryQueryTest {
 
 	@Test
 	void favoritesFilterInStableOrder() {
-		Set<String> favorites = Set.of("direction", "fps", "effects", "minimap");
+		Set<String> favorites = Set.of("direction", "fps", "effects", "teleporter");
 		assertEquals(List.of("fps", "effects", "direction"), ids(LibraryQuery.filter("", LibraryQuery.Chip.FAVORITES, favorites, List.of())));
 		assertEquals(List.of("effects"), ids(LibraryQuery.filter("potion", LibraryQuery.Chip.FAVORITES, favorites, List.of())));
 	}
 
 	@Test
 	void recentsListTheNewestFirst() {
-		List<String> recents = List.of("armor", "fps", "minimap", "cps");
+		List<String> recents = List.of("armor", "fps", "teleporter", "cps");
 		assertEquals(List.of("armor", "fps", "cps"), ids(LibraryQuery.filter("", LibraryQuery.Chip.RECENT, Set.of(), recents)),
 			"unknown ids are skipped");
 		assertEquals(List.of("fps"), ids(LibraryQuery.filter("frames", LibraryQuery.Chip.RECENT, Set.of(), recents)));
@@ -101,7 +101,7 @@ class LibraryQueryTest {
 	@Test
 	void favoritesAndRecentChipsOnlyWhenTheyHaveSomething() {
 		assertEquals(List.of("All", "Performance", "Combat", "World"), labels(LibraryQuery.chips(Set.of(), List.of())));
-		assertEquals(List.of("All", "Performance", "Combat", "World"), labels(LibraryQuery.chips(Set.of("minimap"), List.of("gone"))),
+		assertEquals(List.of("All", "Performance", "Combat", "World"), labels(LibraryQuery.chips(Set.of("teleporter"), List.of("gone"))),
 			"ids of unknown modules don't count");
 		assertEquals(List.of("All", "Favorites", "Performance", "Combat", "World"), labels(LibraryQuery.chips(Set.of("fps"), List.of())));
 		assertEquals(List.of("All", "Favorites", "Recent", "Performance", "Combat", "World"),

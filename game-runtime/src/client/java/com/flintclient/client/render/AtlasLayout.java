@@ -1,6 +1,5 @@
 package com.flintclient.client.render;
 
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -54,7 +53,7 @@ final class AtlasLayout {
 		}
 	}
 
-	private final Long2ObjectOpenHashMap<Slot> slots = new Long2ObjectOpenHashMap<>();
+	private final LongMap<Slot> slots = new LongMap<>();
 	private int width;
 	private int height;
 	// The shelf being filled: the next free x, its top, and its height so far.

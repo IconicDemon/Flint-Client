@@ -1,0 +1,10 @@
+{
+	"providers": [
+		{"type": "bitmap", "file": "flintclient:font/tag_default.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_content_creator.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_staff.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_developer.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_co_owner.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_owner.png", "ascent": 8, "height": 9, "chars": [""]}
+	]
+}

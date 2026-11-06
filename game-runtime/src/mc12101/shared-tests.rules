@@ -1,0 +1,11 @@
+# The unit tests (src/test/java) as Minecraft 1.21.1 runs them, on top of 1.21.11's and 1.21.10's: shared-sources.rules'
+# renames, then these (same forms; paths relative to src/test/java's com/flintclient/client).
+
+# These two drive Minecraft's own classes the way 1.21.9 and later shape them (the font's glyph providers, a scissor
+# rectangle mapped through a 2D pose); 1.21.1 has neither, and the code they test is the same on every line.
+skip render/TextLineTest.java
+skip render/CanvasClipTest.java
+
+file control/rshift/CatalogTest.java
+# A module 1.21.1 can't have keeps its card (Unavailable, with the reason): it is still listed, once.
+s assertEquals\(module\.status\(\)\.usable\(\) \? 1 : 0, switches => assertEquals(module.status().usable() || com.flintclient.client.compat.McCompat.unavailable(module.id()) != null ? 1 : 0, switches

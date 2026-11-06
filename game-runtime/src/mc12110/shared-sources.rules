@@ -1,0 +1,126 @@
+# How Minecraft 1.21.10 builds the sources, on top of the 1.21.11 overlay (overlay.properties): these rules apply to the
+# shared sources as 1.21.11's rules left them and to 1.21.11's own files; files in java/ replace those of the same path.
+# Rule forms: legacy/buildSrc/src/main/java/SharedSources.java. Every rule must still match.
+
+# ---------- classes and members 1.21.11 renamed (the same intermediary names, so only the sources change) ----------
+word Identifier ResourceLocation
+replace net.minecraft.util.Util; net.minecraft.Util;
+replace net.minecraft.util.Util. net.minecraft.Util.
+replace net.minecraft.client.renderer.rendertype.RenderType; net.minecraft.client.renderer.RenderType;
+replace net.minecraft.client.renderer.rendertype.RenderTypes; net.minecraft.client.renderer.RenderType;
+word RenderTypes RenderType
+replace net.minecraft.client.model.player.PlayerModel net.minecraft.client.model.PlayerModel
+replace net.minecraft.client.model.player.PlayerCapeModel net.minecraft.client.model.PlayerCapeModel
+replace net.minecraft.client.model.object.skull. net.minecraft.client.model.
+replace net.minecraft.world.entity.projectile.arrow. net.minecraft.world.entity.projectile.
+replace net.minecraft.world.entity.animal.equine. net.minecraft.world.entity.animal.horse.
+replace net.minecraft.world.entity.npc.villager.VillagerType net.minecraft.world.entity.npc.VillagerType
+replace .identifier() .location()
+replace .getIdentifier() .getLocation()
+word hasControlDownWithQuirk hasControlDown
+word isOverlayVisible isF3Visible
+word setOverlayVisible setF3Visible
+word IN_OVERLAY IN_F3
+word toggleDebugOverlay toggleF3Visible
+
+# ---------- what 1.21.11 added ----------
+# Debug gizmos (world-space lines, boxes and labels): Flint's own drawing of the same calls (compat/gizmos). What the client
+# tick emits is kept until the next tick, as 1.21.11's per-tick gizmo collection is.
+replace net.minecraft.gizmos. com.flintclient.client.compat.gizmos.
+
+file control/platform/Mc263Features.java
+s -> Mc263World\.tick\(\); => -> com.flintclient.client.compat.gizmos.Gizmos.tickCollection(Mc263World::tick);
+
+# GPU samplers: 1.21.10 keeps filtering and edge mode on the texture itself.
+s-in {platform/Texture,control/platform/Mc263Overlay,control/platform/Mc263LookMods}.java this\.sampler = com\.flintclient\.client\.compat\.McCompat\.linear(Clamp|Repeat)Sampler\(\); => com.flintclient.client.compat.McCompat.linear$1(this);
+s-in control/fx/ColorGrade.java pass\.bindTexture\("InSampler", (\w+), RenderSystem\.getSamplerCache\(\)\.getClampToEdge\(FilterMode\.NEAREST\)\); => com.flintclient.client.compat.McCompat.bindNearestClamped(pass, "InSampler", $1);
+# Motion Blur binds every sampler through one helper: 1.21.10 sets the filter on the texture and binds it.
+s-in control/fx/MotionBlur.java pass\.bindTexture\(name, view, RenderSystem\.getSamplerCache\(\)\.getClampToEdge\(filter\)\); => view.texture().setTextureFilter(filter, false);\n\t\tview.texture().setAddressMode(com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE);\n\t\tpass.bindSampler(name, view);
+
+file compat/McCompat.java
+s MINECRAFT = "1\.21\.11" => MINECRAFT = "1.21.10"
+# 1.21.10 still builds item models with gaps: Model Gap Fix works (mixin.feature.ModelGapFixMixin, ModelGapSpriteMixin).
+s ITEM_MODEL_GAPS = false => ITEM_MODEL_GAPS = true
+# Custom F3 and the menu's Graphics tab: 1.21.10 calls the graphics option graphicsMode, and the moon phase comes from the
+# dimension and the day time.
+s options\.graphicsPreset\(\) => options.graphicsMode()
+# The menu's Graphics tab: 1.21.10 has no texture filtering options (mipmaps alone need a texture reload).
+s return options\.maxAnisotropyBit\(\)\.get\(\) \* 31 \+ options\.textureFiltering\(\)\.get\(\)\.ordinal\(\); => return 0;
+# Animations: 1.21.10 has no spear (its SPEAR use is the trident's).
+s return use == net\.minecraft\.world\.item\.ItemUseAnimation\.SPEAR; => return false;
+s return use == net\.minecraft\.world\.item\.ItemUseAnimation\.SPEAR \? net\.minecraft\.client\.model\.HumanoidModel\.ArmPose\.SPEAR : null; => return null;
+s return pose == net\.minecraft\.client\.model\.HumanoidModel\.ArmPose\.SPEAR; => return false;
+s (?s)net\.minecraft\.world\.level\.MoonPhase phase = .*?\[phase\.index\(\)\]; => return net.minecraft.world.level.dimension.DimensionType.MOON_BRIGHTNESS_PER_PHASE[level.dimensionType().moonPhase(level.getDayTime())];
+# 1.21.10's game rules are keyed values (1.21.11 made them a registry).
+s level\.getGameRules\(\)\.get\(net\.minecraft\.world\.level\.gamerules\.GameRules\.NATURAL_HEALTH_REGENERATION\) => level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_NATURAL_REGENERATION)
+s (?s)\t@SuppressWarnings\("unchecked"\)\n\tpublic static <T> T linearClampSampler\(\) \{.*?\n\t\}\n\n\t@SuppressWarnings\("unchecked"\)\n\tpublic static <T> T linearRepeatSampler\(\) \{.*?\n\t\}\n => \t/** A texture sampled with linear filtering, clamped at its edges (1.21.10 keeps sampling on the texture). */\n\tpublic static void linearClamp(net.minecraft.client.renderer.texture.AbstractTexture texture) {\n\t\ttexture.setFilter(true, false);\n\t\ttexture.getTexture().setAddressMode(com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE);\n\t}\n\n\t/** A texture sampled with linear filtering, repeating past its edges. */\n\tpublic static void linearRepeat(net.minecraft.client.renderer.texture.AbstractTexture texture) {\n\t\ttexture.setFilter(true, false);\n\t\ttexture.getTexture().setAddressMode(com.mojang.blaze3d.textures.AddressMode.REPEAT);\n\t}\n\n\t/** Binds {@code view} to a pass's sampler, read with nearest filtering and clamped at its edges. */\n\tpublic static void bindNearestClamped(com.mojang.blaze3d.systems.RenderPass pass, String name, com.mojang.blaze3d.textures.GpuTextureView view) {\n\t\tview.texture().setTextureFilter(FilterMode.NEAREST, false);\n\t\tview.texture().setAddressMode(com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE);\n\t\tpass.bindSampler(name, view);\n\t}\n\n
+
+# ---------- single files ----------
+file compat/GraphicsBridge.java
+s self\(\)\.renderOutline\( => self().submitOutline(
+
+file control/platform/Mc263ControlPlatform.java
+# 1.21.10's F3 combinations aren't key mappings.
+s (?s)mapping\.getCategory\(\) == KeyMapping\.Category\.DEBUG.*?options\.keyDebugOverlay => false
+
+file platform/Keys.java
+s InputConstants\.MOUSE_BUTTON_4 => 3
+
+file control/platform/Mc263Overlay.java
+# 1.21.10 has no spears.
+s held\.is\(net\.minecraft\.tags\.ItemTags\.SPEARS\) => false
+
+file ui/screen/FlintTitleScreen.java
+s public void resize\(int width, int height\) \{ => public void resize(net.minecraft.client.Minecraft minecraft, int width, int height) {
+s super\.resize\(width, height\); => super.resize(minecraft, width, height);
+
+file ui/widget/FlintButton.java
+# 1.21.10's buttons draw in renderWidget.
+s protected final void renderContents\( => protected final void renderWidget(
+
+file mixin/network/ConnectionMixin.java
+# 1.21.10 passes whether to use native transport, not an event loop group.
+s Lnet/minecraft/server/network/EventLoopGroupHolder; => Z
+s EventLoopGroupHolder group => boolean nativeTransport
+s import net\.minecraft\.server\.network\.EventLoopGroupHolder;\n =>
+
+file module/servers/ServerShortcuts.java
+s , EventLoopGroupHolder\.remote\(minecraft\.options\.useNativeTransport\(\)\)\) => )
+s import net\.minecraft\.server\.network\.EventLoopGroupHolder;\n =>
+
+file mixin/feature/FogRendererMixin.java
+s Camera camera, int renderDistance, DeltaTracker delta => Camera camera, int renderDistance, boolean thick, DeltaTracker delta
+
+file mixin/feature/AbstractContainerScreenMixin.java
+s flint\$slots\(GuiGraphics graphics, int mouseX, int mouseY, => flint\$slots(GuiGraphics graphics,
+
+file mixin/feature/CameraMixin.java
+# 1.21.10's camera keeps its level as a BlockGetter (enough to clip against).
+s private Level level; => private net.minecraft.world.level.BlockGetter level;
+
+file control/platform/Mc263Chat.java
+# 1.21.10's chat finds what's under the mouse apart from its drawing: the 1.21.10 ChatComponentMixin moves it too.
+s \n\tstatic float slide\(\) \{ => \n\tpublic static float slide() {
+
+file control/platform/Mc263Visuals.java
+# 1.21.10's filled-box type is a triangle strip; the tint's faces are quads (java/…/LevelRendererOutlineMixin likewise).
+s RenderType\.debugFilledBox\(\) => RenderType.debugQuads()
+
+file control/platform/ambient/AmbientCompat.java
+# 1.21.10 has no environment attributes: the sun angle from the time of day (0 at noon, as the attribute).
+s import net\.minecraft\.world\.attribute\.EnvironmentAttributes;\n =>
+s return level\.environmentAttributes\(\)\.getValue\(EnvironmentAttributes\.SUN_ANGLE, player\.position\(\)\); => return Math.toDegrees(level.getSunAngle(1.0F));
+
+file compat/MapQuads.java
+# 1.21.10's texture setups take no sampler: the texture keeps its own filtering and edge mode.
+s TextureSetup setup = TextureSetup\.singleTexture\(tex\.getTextureView\(\), RenderSystem\.getSamplerCache\(\)\.getClampToEdge\(FilterMode\.NEAREST\)\); => tex.getTexture().setTextureFilter(FilterMode.NEAREST, false);\n\t\ttex.getTexture().setAddressMode(com.mojang.blaze3d.textures.AddressMode.CLAMP_TO_EDGE);\n\t\tTextureSetup setup = TextureSetup.singleTexture(tex.getTextureView());
+
+file ui/widget/SpriteButton.java
+# 1.21.10's buttons draw in renderWidget (No Chat Reports' picture buttons).
+s public void renderContents\( => public void renderWidget(
+
+file control/platform/Mc263Animations.java
+# 1.21.10 names the trident's use and throw SPEAR (spears came in 1.21.11), and keeps boats in the vehicle package.
+s ItemUseAnimation\.TRIDENT => ItemUseAnimation.SPEAR
+s ArmPose\.THROW_TRIDENT => ArmPose.THROW_SPEAR
+s net\.minecraft\.world\.entity\.vehicle\.boat\.AbstractBoat => net.minecraft.world.entity.vehicle.AbstractBoat

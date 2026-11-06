@@ -234,6 +234,23 @@
   color: var(--warning, #d9a651);
 }
 
+/* The profile's game is running and the picks are packs: they go into it now (Home's running dot). */
+.fa-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+
+.fa-live::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
 /* Real stages, in order; nothing is marked done before it finished. */
 .fa-stages {
   display: flex;

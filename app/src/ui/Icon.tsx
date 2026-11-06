@@ -72,6 +72,15 @@ const PATHS = {
   sync: "M4.5 8.5h14m0 0L15 5m3.5 3.5L15 12m4.5 3.5h-14m0 0L9 12m-3.5 3.5L9 19",
   keyboard: "M5 6h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 18H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 6Zm2.5 4h.01m3 0h.01m3 0h.01m3 0h.01M8.5 14.5h7",
   history: "M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9m0-4.5V9H9M12 8.5V12l2.5 1.5",
+  pin: "M8 3.5h8M9.5 3.5V9l-3 3.5v2h11v-2l-3-3.5V3.5M12 14.5v6",
+  /** Bringing something in: an arrow into a tray (the downloads chip keeps "download"). */
+  import: "M12 3.5v10m0 0-4-4m4 4 4-4M4.5 14.5v3A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-3",
+  folderPlus: "M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-10ZM12 10.5v5m-2.5-2.5h5",
+  /** Friends: a gift box, a paper plane (send), a speech bubble (message) and a person with a plus (add a friend). */
+  gift: "M3.5 8h17v3.5h-17zM5 11.5h14V20H5zM12 8v12M12 8c-1.2-2.6-2.7-4-4.2-4a2 2 0 0 0 0 4M12 8c1.2-2.6 2.7-4 4.2-4a2 2 0 0 1 0 4",
+  send: "M20.5 3.5 10 14M20.5 3.5 14 20.5l-4-6.5-6.5-4 17-6.5Z",
+  chat: "M5 5h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 17h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 5Z",
+  userPlus: "M10 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 12.5-4.3M19 14v6m-3-3h6",
 } as const;
 
 export type IconName = keyof typeof PATHS | "discord" | "microsoft";

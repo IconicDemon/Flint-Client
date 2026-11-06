@@ -231,7 +231,7 @@ pub fn lithium_keys(profile_dir: &Path) -> Option<Vec<String>> {
     use std::io::Read;
     let mods = profile_dir.join("mods");
     let jar = crate::perfcore::scan_mods(&mods).into_iter().find(|m| m.id == "lithium")?;
-    let mut archive = zip::ZipArchive::new(std::fs::File::open(mods.join(&jar.file)).ok()?).ok()?;
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(std::fs::File::open(mods.join(&jar.file)).ok()?)).ok()?;
     let entry = archive.by_name("assets/lithium/lithium-mixin-config-default.properties").ok()?;
     let mut bytes = Vec::new();
     entry.take(1024 * 1024).read_to_end(&mut bytes).ok()?;
@@ -344,8 +344,10 @@ fn merge_json(adapter: &Adapter, m: &Merge, current: &[u8]) -> Result<Option<Vec
         if want == have || kind(want) != kind(have) || want.is_null() {
             continue;
         }
-        // Sodium's strings are enum constants; another minor version may not have them.
-        if adapter.mod_id == "sodium" && want.is_string() && !same_minor {
+        // Sodium's strings are enum constants; another minor version may not have them. Dynamic FPS's are too, and it
+        // adds constants within a minor version (3.11.4 has no `vanilla` idle condition, 3.11.10 has): an unknown one
+        // stops the game at start-up, so its strings only ever move with the same version (copied whole).
+        if want.is_string() && ((adapter.mod_id == "sodium" && !same_minor) || adapter.mod_id == "dynamic_fps") {
             continue;
         }
         changes.push((path.clone(), want.clone()));
@@ -433,6 +435,19 @@ mod tests {
         assert_eq!(major_minor("3.11.10"), Some("3.11".into()));
         assert_eq!(major_minor("9"), Some("9.0".into()));
         assert_eq!(major_minor("beta"), None);
+    }
+
+    #[test]
+    fn dynamic_fps_names_never_reach_another_version() {
+        // 26.3's Dynamic FPS (3.11.10) idles like vanilla; 1.21.1's (3.11.4) has no such condition and wouldn't start.
+        let stored = br#"{ "idle": { "timeout": 300, "condition": "vanilla" }, "states": { "unfocused": { "frame_rate_target": 30 } } }"#;
+        let current = br#"{ "idle": { "timeout": 0, "condition": "on_battery" }, "states": { "unfocused": { "frame_rate_target": 1 } } }"#;
+        let Outcome::Write(out) = merge("dynamic_fps.json", stored, "3.11.10+minecraft-26.3.0", Some(current), "3.11.4+minecraft-1.21.0") else { panic!("merged") };
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("\"condition\": \"on_battery\"") && !out.contains("vanilla"), "{out}");
+        assert!(out.contains("\"timeout\": 300") && out.contains("\"frame_rate_target\": 30"), "numbers still move: {out}");
+        // The same version is copied whole, names and all.
+        assert_eq!(merge("dynamic_fps.json", stored, "3.11.10", Some(current), "3.11.10"), Outcome::Write(stored.to_vec()));
     }
 
     #[test]

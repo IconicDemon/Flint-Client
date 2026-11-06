@@ -16,4 +16,12 @@ abstract class MinecraftMixin {
 			FlintQa.tick((Minecraft) (Object) this);
 		}
 	}
+
+	/** Each rendered frame, for the "frames" step (QaFrames). */
+	@Inject(method = "runTick", at = @At("HEAD"), require = 0)
+	private void flintqa$frame(CallbackInfo ci) {
+		if (FlintQa.ENABLED) {
+			com.flintclient.qa.QaFrames.frame((Minecraft) (Object) this);
+		}
+	}
 }

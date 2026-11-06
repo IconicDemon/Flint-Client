@@ -1,70 +1,117 @@
 package com.flintclient.client.control.feature;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.flintclient.client.control.feature.SkinVoxels.Face;
-import com.flintclient.client.control.feature.SkinVoxels.Voxel;
-import java.util.List;
+import com.flintclient.client.control.feature.SkinVoxels.Mesh;
 import org.junit.jupiter.api.Test;
 
 class SkinVoxelsTest {
+	private static final float S = 1.15F;
+
+	private static Mesh build(SkinVoxels.Layer layer, SkinVoxels.Alpha alpha) {
+		return SkinVoxels.build(layer, alpha, S);
+	}
+
 	@Test
 	void transparentLayerMakesNothing() {
-		assertEquals(0, SkinVoxels.build(SkinVoxels.JACKET, (x, y) -> false, 1, 1).size());
+		assertEquals(0, build(SkinVoxels.JACKET, (x, y) -> 0).quads());
 	}
 
 	@Test
-	void fullLayerHasOneVoxelPerTexel() {
-		List<Voxel> hat = SkinVoxels.build(SkinVoxels.HAT, (x, y) -> true, 1, 1);
-		assertEquals(6 * 64, hat.size());
-		List<Voxel> jacket = SkinVoxels.build(SkinVoxels.JACKET, (x, y) -> true, 1, 1);
-		assertEquals(2 * 8 * 12 + 2 * 4 * 12 + 2 * 8 * 4, jacket.size());
+	void fullLayerIsOneQuadPerFace() {
+		// Every cell filled: no side shows anywhere, and the six faces are a quad each (not one box per texel).
+		assertEquals(6, build(SkinVoxels.HAT, (x, y) -> 255).quads());
+		assertEquals(6, build(SkinVoxels.JACKET, (x, y) -> 255).quads());
+		assertEquals(6, build(SkinVoxels.RIGHT_SLEEVE_SLIM, (x, y) -> 255).quads());
 	}
 
 	@Test
-	void theFrontTexelSitsOnTheFrontFaceAndSticksOut() {
-		// Only the jacket's front-face texel at its top-left (u = 16 + 4, v = 32 + 4): x = -4..-3, y = 0..1, at z = -2.
-		List<Voxel> one = SkinVoxels.build(SkinVoxels.JACKET, (x, y) -> x == 20 && y == 36, 1, 1);
-		assertEquals(1, one.size());
-		Voxel v = one.get(0);
-		assertEquals(-4F, v.minX(), 1e-6);
-		assertEquals(-3F, v.maxX(), 1e-6);
-		assertEquals(0F, v.minY(), 1e-6);
-		assertEquals(-3F, v.minZ(), 1e-6, "one unit out in front (north)");
-		assertEquals(20.5F, v.u(), 1e-6);
-		assertEquals(36.5F, v.v(), 1e-6);
-		assertTrue(v.has(Face.NORTH));
-		assertFalse(v.has(Face.SOUTH), "the face into the body is left out");
+	void faintTexelsAreLeftOut() {
+		// Below a tenth of full alpha Minecraft's shader drops a texel: it makes no box.
+		assertEquals(0, build(SkinVoxels.HAT, (x, y) -> 20).quads());
 	}
 
 	@Test
-	void facesBetweenNeighboursAreLeftOut() {
-		// Two texels side by side on the jacket front.
-		List<Voxel> two = SkinVoxels.build(SkinVoxels.JACKET, (x, y) -> (x == 20 || x == 21) && y == 36, 1, 1);
-		assertEquals(2, two.size());
-		Voxel left = two.get(0).minX() < two.get(1).minX() ? two.get(0) : two.get(1);
-		Voxel right = left == two.get(0) ? two.get(1) : two.get(0);
-		assertFalse(left.has(Face.EAST));
-		assertFalse(right.has(Face.WEST));
-		assertTrue(left.has(Face.WEST));
-		assertTrue(left.has(Face.DOWN) && left.has(Face.UP));
+	void theFaceQuadIsTexturedAsMinecraftsBox() {
+		Mesh m = build(SkinVoxels.JACKET, (x, y) -> x == 20 && y == 36 ? 255 : 0);
+		int north = -1;
+		for (int q = 0; q < m.quads(); q++) {
+			if (m.face(q) == Face.NORTH.ordinal() && Math.abs(m.x(q, 0) - m.x(q, 1)) > 0.4F) {
+				north = q;
+			}
+		}
+		assertTrue(north >= 0, "the front face's quad");
+		// Corner 0 is the box's max x, min y: the net's (u + d + w, v + d) = (28, 36).
+		assertEquals(28 / 64F, m.u(north, 0), 1e-6);
+		assertEquals(36 / 64F, m.v(north, 0), 1e-6);
+		assertEquals(20 / 64F, m.u(north, 1), 1e-6);
+		// Scaled about the centre: the front stands 2 * 1.15 out from the middle (z = 0), in blocks.
+		assertEquals(-2 * S / 16, m.z(north, 0), 1e-5);
+		assertEquals(4 * S / 16, m.x(north, 0), 1e-5);
 	}
 
 	@Test
-	void sidesMapTheWayMinecraftDoes() {
-		// The head's top texel row nearest the front (u = 32 + 8.., v = 0 + 7: the last row) is at the front (z near -4).
-		Voxel top = SkinVoxels.build(SkinVoxels.HAT, (x, y) -> x == 40 && y == 7, 1, 1).get(0);
-		assertEquals(-8F, top.maxY(), 0.1F);
-		assertTrue(top.minZ() < -3.4F, "front row: " + top.minZ());
-		// The right side (WEST face) texel nearest the front: the face net's right end (u = 32 + 7) is at z near -4.
-		Voxel side = SkinVoxels.build(SkinVoxels.HAT, (x, y) -> x == 39 && y == 8, 1, 1).get(0);
-		assertTrue(side.minX() < -4.5F);
-		assertTrue(side.minZ() < -3.4F, "front edge: " + side.minZ());
-		// The left side (EAST face) texel at its net's left end (u = 32 + 16) is at the front too.
-		Voxel left = SkinVoxels.build(SkinVoxels.HAT, (x, y) -> x == 48 && y == 8, 1, 1).get(0);
-		assertTrue(left.maxX() > 4.5F);
-		assertTrue(left.minZ() < -3.4F, "front edge: " + left.minZ());
+	void aLoneTexelShowsItsSidesAndBack() {
+		// The jacket's front top-left texel: its face, four sides and (past the body's edge) its back.
+		Mesh m = build(SkinVoxels.JACKET, (x, y) -> x == 20 && y == 36 ? 255 : 0);
+		assertEquals(6, m.quads());
+		// The sides are read at the texel's middle, never on the line between two texels.
+		for (int q = 0; q < m.quads(); q++) {
+			for (int k = 0; k < 4; k++) {
+				assertTrue(m.u(q, k) >= 20 / 64F - 1e-6 && m.u(q, k) <= 28 / 64F + 1e-6);
+			}
+		}
+	}
+
+	@Test
+	void sidesAlongARowAreMerged() {
+		// A row of six texels on the jacket front, with nothing around: the top and bottom sides are one strip each.
+		Mesh row = build(SkinVoxels.JACKET, (x, y) -> y == 40 && x >= 21 && x <= 26 ? 255 : 0);
+		int downs = 0;
+		int ups = 0;
+		for (int q = 0; q < row.quads(); q++) {
+			downs += row.face(q) == Face.DOWN.ordinal() ? 1 : 0;
+			ups += row.face(q) == Face.UP.ordinal() ? 1 : 0;
+		}
+		assertEquals(1, downs);
+		assertEquals(1, ups);
+		// The face, the two strips and the two ends.
+		assertEquals(5, row.quads());
+	}
+
+	@Test
+	void anEdgeTexelSharedByTwoFacesIsSplitNotDoubled() {
+		// The hat's front-left column (NORTH texels at the left edge) and the right side's front column (WEST at its front
+		// edge) fill the same cells: their top and bottom sides are halved along the diagonal, one half each.
+		Mesh m = build(SkinVoxels.HAT, (x, y) -> x == 40 && y == 10 || x == 39 && y == 10 ? 255 : 0);
+		int triangles = 0;
+		for (int q = 0; q < m.quads(); q++) {
+			float[] p = SkinVoxels.quad(m, q);
+			boolean repeated = p[6] == p[9] && p[7] == p[10] && p[8] == p[11];
+			triangles += repeated ? 1 : 0;
+		}
+		assertEquals(4, triangles, "two sides, two halves each");
+	}
+
+	@Test
+	void sidesInsideTheBodyAreLeftOut() {
+		// A filled ring in the middle of the hat's front: the backs of those cells are inside the head.
+		Mesh m = build(SkinVoxels.HAT, (x, y) -> x >= 42 && x <= 45 && y >= 10 && y <= 13 ? 255 : 0);
+		for (int q = 0; q < m.quads(); q++) {
+			assertTrue(m.face(q) != Face.SOUTH.ordinal(), "no quad looks into the head");
+		}
+	}
+
+	@Test
+	void aShellNeverLiesOnTheBody() {
+		// Asked for no scale at all, the shell still stands a little out of the body.
+		Mesh m = SkinVoxels.build(SkinVoxels.HAT, (x, y) -> 255, 1.0F);
+		for (int q = 0; q < m.quads(); q++) {
+			if (m.face(q) == Face.NORTH.ordinal()) {
+				assertTrue(m.z(q, 0) < -4.05F / 16);
+			}
+		}
 	}
 }

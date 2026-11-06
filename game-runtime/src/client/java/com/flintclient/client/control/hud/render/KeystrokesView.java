@@ -1,6 +1,5 @@
 package com.flintclient.client.control.hud.render;
 
-import com.flintclient.client.control.ControlCenter;
 import com.flintclient.client.control.hud.CpsCounter;
 import com.flintclient.client.control.hud.render.dev.HudDev;
 import com.flintclient.client.control.model.HudColor;
@@ -11,14 +10,10 @@ import com.flintclient.client.control.model.ModuleId;
 import com.flintclient.client.control.model.ModuleSettings;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.PressedStyle;
-import com.flintclient.client.control.platform.Mc263ControlPlatform;
-import com.flintclient.client.control.platform.Mc263HudData;
+import com.flintclient.client.platform.HudData;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.kit.Kit;
 import com.flintclient.client.ui.kit.Tokens;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.locale.Language;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -47,7 +42,7 @@ final class KeystrokesView extends ModuleView {
 	private static final int[] TURNS = {0, 3, 2, 1};
 
 	private final HudText[] labels = new HudText[KEYS];
-	private final InputConstants.Key[] bound = new InputConstants.Key[KEYS];
+	private final Object[] bound = new Object[KEYS];
 	private final float[] press = new float[KEYS];
 	private final boolean[] down = new boolean[KEYS];
 	/** Key rectangles in pixels from the module's corner: x, y, w, h per key (hidden keys have w 0). */
@@ -55,17 +50,31 @@ final class KeystrokesView extends ModuleView {
 	private final HudField leftCps = new HudField(1, HudField.TEXT);
 	private final HudField rightCps = new HudField(1, HudField.TEXT);
 	private KeystrokesLayout layout = KeystrokesLayout.KEYS_MOUSE_JUMP;
+	/** Clicks per second on the mouse keys, or in a row of their own under the keys. */
 	private boolean showCps;
+	private boolean cpsRow;
+	private boolean cpsReversed;
+	private final HudText cpsText = new HudText("");
+	private int cpsShownLeft = -1;
+	private int cpsShownRight = -1;
+	private boolean cpsShownReversed;
+	private int cpsRowY;
+	private int cpsRowH;
+	private boolean fillSweep;
+	private int fillDirection;
+	private int mouseLabels;
+	private int jumpLabel;
+	private HudColor textActive = HudColor.DEFAULT;
 	private boolean arrows;
 	private PressedStyle pressedStyle = PressedStyle.FILL;
 	private HudColor pressedColor = HudColor.DEFAULT;
 	private float fadeTau;
-	private @Nullable Language language;
+	private @Nullable Object language;
 	/** The summary's movement-key letters ("WASD"), rebuilt only when a binding or the language changes. */
-	private final InputConstants.Key[] summaryBound = new InputConstants.Key[MOVEMENT];
+	private final Object[] summaryBound = new Object[MOVEMENT];
 	private final char[] summaryKeys = new char[MOVEMENT * 2];
 	private int summaryKeysLength;
-	private @Nullable Language summaryLanguage;
+	private @Nullable Object summaryLanguage;
 
 	KeystrokesView(int surface) {
 		super(ModuleId.KEYSTROKES, surface);
@@ -92,44 +101,53 @@ final class KeystrokesView extends ModuleView {
 	@Override
 	void update(ModuleState state, int mode, long nowNanos) {
 		layout = state.choice(ModuleSettings.Keystrokes.LAYOUT);
-		showCps = state.bool(ModuleSettings.Keystrokes.SHOW_CPS) && layout.mouse();
+		boolean cps = state.bool(ModuleSettings.Keystrokes.SHOW_CPS) && layout.mouse();
+		cpsRow = cps && state.option(ModuleSettings.Keystrokes.CPS_PLACE) == 1;
+		showCps = cps && !cpsRow;
+		cpsReversed = state.bool(ModuleSettings.Keystrokes.CPS_REVERSED);
+		fillSweep = state.option(ModuleSettings.Keystrokes.ANIMATION) == 1;
+		fillDirection = state.option(ModuleSettings.Keystrokes.FILL_DIRECTION);
+		mouseLabels = state.option(ModuleSettings.Keystrokes.MOUSE_LABELS);
+		jumpLabel = state.option(ModuleSettings.Keystrokes.JUMP_LABEL);
+		textActive = state.choice(ModuleSettings.Keystrokes.TEXT_ACTIVE);
 		arrows = state.choice(ModuleSettings.Keystrokes.LABELS) == KeyLabelStyle.ARROWS;
 		pressedStyle = state.choice(ModuleSettings.Keystrokes.PRESSED_STYLE);
 		pressedColor = state.choice(ModuleSettings.Keystrokes.PRESSED_COLOR);
 		// The approach settles in about three time constants: 60 ms of fade is a 20 ms constant.
 		fadeTau = state.integer(ModuleSettings.Keystrokes.FADE_MS) / 3000.0F;
 		// Key names are translated: a language change renames them even though no binding changed.
-		Language language = Language.getInstance();
+		Object language = HudData.language();
 		boolean renamed = language != this.language;
 		this.language = language;
 		for (int i = 0; i < KEYS; i++) {
-			KeyMapping mapping = Mc263HudData.keystroke(i);
-			InputConstants.Key key = Mc263ControlPlatform.boundKey(mapping);
+			Object key = HudData.keystrokeBinding(i);
 			if (key != bound[i] || renamed) {
 				bound[i] = key;
-				labels[i].set(label(mapping, key));
+				labels[i].set(HudData.keystrokeLabel(i));
 			}
-			down[i] = mode != PLACEHOLDER && (Mc263ControlPlatform.physicallyDown(mapping) || HudDev.held(i));
+			down[i] = mode != PLACEHOLDER && (HudData.keystrokeDown(i) || HudDev.held(i));
 		}
-		if (showCps && mode != PLACEHOLDER) {
-			long now = ControlCenter.nowMillis();
-			leftCps.set(ControlCenter.cps().countLastSecond(CpsCounter.LEFT, now));
-			rightCps.set(ControlCenter.cps().countLastSecond(CpsCounter.RIGHT, now));
+		if ((showCps || cpsRow) && mode != PLACEHOLDER) {
+			long now = HudData.nowMillis();
+			int left = HudData.cps().countLastSecond(CpsCounter.LEFT, now);
+			int right = HudData.cps().countLastSecond(CpsCounter.RIGHT, now);
+			leftCps.set(left);
+			rightCps.set(right);
+			if (cpsRow && (left != cpsShownLeft || right != cpsShownRight || cpsReversed != cpsShownReversed)) {
+				// The row's text is made only when a count changes.
+				cpsShownLeft = left;
+				cpsShownRight = right;
+				cpsShownReversed = cpsReversed;
+				cpsText.set(cpsReversed ? "CPS " + left + " | " + right : left + " | " + right + " CPS");
+			}
 		} else {
 			leftCps.clear();
 			rightCps.clear();
+			if (cpsRow) {
+				cpsText.set(cpsReversed ? "CPS – | –" : "– | – CPS");
+				cpsShownLeft = -1;
+			}
 		}
-	}
-
-	/** The key's short name (built when the binding changes, never per frame). */
-	private static String label(KeyMapping mapping, InputConstants.Key key) {
-		if (mapping.isUnbound()) {
-			return KeyLabels.UNBOUND;
-		}
-		if (key.getType() == InputConstants.Type.MOUSE) {
-			return KeyLabels.mouse(key.getValue());
-		}
-		return KeyLabels.keyboard(Mc263ControlPlatform.keyName(mapping).getString());
 	}
 
 	@Override
@@ -158,6 +176,12 @@ final class KeystrokesView extends ModuleView {
 			bottom += bar + gap;
 		} else {
 			place(JUMP, 0, 0, 0, 0);
+		}
+		cpsRowH = 0;
+		if (cpsRow) {
+			cpsRowY = bottom;
+			cpsRowH = Math.max(p.s.lineH, Math.round(key * 0.6F));
+			bottom += cpsRowH + gap;
 		}
 		width = full;
 		height = bottom - gap;
@@ -190,7 +214,11 @@ final class KeystrokesView extends ModuleView {
 			float pressed = press[i];
 			if (s.background) {
 				p.box(kx, ky, w, h, radius, s.panel);
-			} else {
+			}
+			if (s.borderAlone && s.outlinePx > 0) {
+				// A border chosen in the look outlines every key.
+				p.ring(kx, ky, w, h, radius, s.outlinePx, s.outline);
+			} else if (!s.background) {
 				// No panel: a faint outline keeps each key's shape readable over the world.
 				p.ring(kx, ky, w, h, radius, line, Palette.withAlpha(s.text, 0.3F));
 			}
@@ -198,25 +226,78 @@ final class KeystrokesView extends ModuleView {
 			if (pressed > 0.01F) {
 				switch (pressedStyle) {
 					case FILL -> {
-						p.box(kx, ky, w, h, radius, Palette.withAlpha(color, pressed));
-						ink = Palette.lerp(s.text, Tokens.ACCENT_INK, pressed);
+						if (fillSweep) {
+							// The colour sweeps across the key in the chosen direction, the key's corners kept.
+							int fw = fillDirection <= 1 ? Math.max(1, Math.round(w * pressed)) : w;
+							int fh = fillDirection >= 2 ? Math.max(1, Math.round(h * pressed)) : h;
+							int fx = fillDirection == 0 ? kx + w - fw : kx;
+							int fy = fillDirection == 3 ? ky + h - fh : ky;
+							p.box(fx, fy, fw, fh, Math.min(radius, Math.min(fw, fh) / 2), color);
+						} else {
+							p.box(kx, ky, w, h, radius, Palette.withAlpha(color, pressed));
+						}
+						ink = Palette.lerp(s.text, textActive.isDefault() ? Tokens.ACCENT_INK : textActive.argb(), pressed);
 					}
 					case OUTLINE -> {
 						p.ring(kx, ky, w, h, radius, outline, Palette.withAlpha(color, pressed));
-						ink = Palette.lerp(s.text, color, pressed);
+						ink = Palette.lerp(s.text, textActive.isDefault() ? color : textActive.argb(), pressed);
 					}
 					case INVERT -> {
 						p.box(kx, ky, w, h, radius, Palette.withAlpha(s.text, pressed));
-						ink = Palette.lerp(s.text, s.ink, pressed);
+						ink = Palette.lerp(s.text, textActive.isDefault() ? s.ink : textActive.argb(), pressed);
 					}
 				}
 			}
 			drawLabel(p, i, kx, ky, w, h, ink);
 		}
+		if (cpsRow && cpsRowH > 0) {
+			int ry = y + cpsRowY;
+			int radius = Math.min(corners, cpsRowH / 2);
+			if (s.background) {
+				p.box(x, ry, width, cpsRowH, radius, s.panel);
+			}
+			if (s.borderAlone && s.outlinePx > 0) {
+				p.ring(x, ry, width, cpsRowH, radius, s.outlinePx, s.outline);
+			} else if (!s.background) {
+				p.ring(x, ry, width, cpsRowH, radius, line, Palette.withAlpha(s.text, 0.3F));
+			}
+			p.textCentered(cpsText, HudFaces.LABEL, x + width / 2, ry + (cpsRowH + p.cap(HudFaces.LABEL)) / 2, s.text, width);
+		}
 	}
 
 	private void drawLabel(HudPen p, int key, int kx, int ky, int w, int h, int ink) {
 		HudStyle s = p.s;
+		if (key == JUMP && jumpLabel != 1) {
+			if (jumpLabel == 2) {
+				// A bar: the space bar's own shape, short and centred.
+				int barW = Math.max(4, w * 3 / 10);
+				int barH = Math.max(1, s.px(1.5F));
+				p.box(kx + (w - barW) / 2, ky + (h - barH) / 2, barW, barH, barH / 2, ink);
+			}
+			return;
+		}
+		boolean mouse = key == ATTACK || key == USE;
+		if (mouse && mouseLabels != 1) {
+			HudField count = key == ATTACK ? leftCps : rightCps;
+			int cap = p.cap(HudFaces.LABEL);
+			if (mouseLabels == 2) {
+				// An arrow to the button's side, the count under it when shown.
+				int gap = Math.max(1, s.px(2));
+				int arrowCap = p.cap(HudFaces.VALUE);
+				int top = ky + (h - (showCps ? arrowCap + gap + cap : arrowCap)) / 2;
+				if (s.classic()) {
+					p.textCentered(CLASSIC_ARROWS[key == ATTACK ? 1 : 3], HudFaces.VALUE, kx + w / 2, top + arrowCap, ink, w);
+				} else {
+					p.textTurned(ARROW, HudFaces.VALUE, kx + w / 2, top + arrowCap / 2, key == ATTACK ? 3 : 1, ink);
+				}
+				if (showCps) {
+					drawCount(p, count, kx, w, top + arrowCap + gap + cap, ink);
+				}
+			} else if (showCps) {
+				drawCount(p, count, kx, w, ky + (h + cap) / 2, ink);
+			}
+			return;
+		}
 		if (arrows && key < MOVEMENT) {
 			if (s.classic()) {
 				HudText arrow = CLASSIC_ARROWS[key];
@@ -241,22 +322,26 @@ final class KeystrokesView extends ModuleView {
 		int gap = Math.max(1, s.px(2));
 		int top = ky + (h - (2 * cap + gap)) / 2;
 		p.textCentered(label, HudFaces.LABEL, kx + w / 2, top + cap, ink, maxPx);
+		drawCount(p, count, kx, w, top + 2 * cap + gap, ink);
+	}
+
+	private static void drawCount(HudPen p, HudField count, int kx, int w, int baseline, int ink) {
 		int digitsWidth = count.known ? p.width(count.digits, count.length, HudFaces.LABEL) : p.width(HudField.DASH, HudFaces.LABEL);
 		int left = kx + (w - digitsWidth) / 2;
 		if (count.known) {
-			p.digits(count.digits, count.length, HudFaces.LABEL, left, top + 2 * cap + gap, ink);
+			p.digits(count.digits, count.length, HudFaces.LABEL, left, baseline, ink);
 		} else {
-			p.text(HudField.DASH, HudFaces.LABEL, left, top + 2 * cap + gap, ink);
+			p.text(HudField.DASH, HudFaces.LABEL, left, baseline, ink);
 		}
 	}
 
 	@Override
 	int summary(ModuleState state, char[] out, long nowNanos) {
-		Language language = Language.getInstance();
+		Object language = HudData.language();
 		boolean changed = language != summaryLanguage;
 		summaryLanguage = language;
 		for (int i = 0; i < MOVEMENT; i++) {
-			InputConstants.Key key = Mc263ControlPlatform.boundKey(Mc263HudData.keystroke(i));
+			Object key = HudData.keystrokeBinding(i);
 			changed |= key != summaryBound[i];
 			summaryBound[i] = key;
 		}
@@ -264,8 +349,7 @@ final class KeystrokesView extends ModuleView {
 			// "WASD" when every movement key has a one-letter name; otherwise the summary just says "Keys".
 			summaryKeysLength = 0;
 			for (int i = 0; i < MOVEMENT; i++) {
-				KeyMapping mapping = Mc263HudData.keystroke(i);
-				String name = label(mapping, summaryBound[i]);
+				String name = HudData.keystrokeLabel(i);
 				if (name.length() != 1 || name.equals(KeyLabels.UNBOUND)) {
 					summaryKeysLength = 0;
 					break;

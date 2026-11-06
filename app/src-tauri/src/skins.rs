@@ -1,4 +1,4 @@
-use crate::auth::{load_accounts, minecraft_token, minecraft_token_explicit, session_ready, update_skin_model};
+use crate::auth::{load_accounts, minecraft_token, minecraft_token_explicit, session_ready};
 use crate::core::*;
 use crate::data::forget_skin;
 use base64::engine::general_purpose::STANDARD;
@@ -128,7 +128,7 @@ pub async fn skin_upload(app: AppHandle, state: State<'_, AppState>, uuid: Strin
         .map_err(|e| friendly_network(&e))?;
     let profile = response_json(response, "Minecraft didn't accept the skin").await?;
     forget_skin(&state, &uuid);
-    update_skin_model(&state, &uuid, variant)?;
+    crate::auth::update_skin(&state, &uuid, variant, Some(&profile))?;
     let described = describe(&state, &profile).await;
     remember_profile(&state, &uuid, &described);
     Ok(described)
@@ -140,7 +140,7 @@ pub async fn skin_reset(app: AppHandle, state: State<'_, AppState>, uuid: String
     let response = state.http.delete(format!("{PROFILE}/skins/active")).bearer_auth(&token).send().await.map_err(|e| friendly_network(&e))?;
     let profile = response_json(response, "Couldn't reset the skin").await?;
     forget_skin(&state, &uuid);
-    update_skin_model(&state, &uuid, "classic")?;
+    crate::auth::update_skin(&state, &uuid, "classic", Some(&profile))?;
     let described = describe(&state, &profile).await;
     remember_profile(&state, &uuid, &described);
     Ok(described)

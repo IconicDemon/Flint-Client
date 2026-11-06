@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import type { Profile, ProfileState } from "../../lib/api";
 import { CARD_RATIO, computeLayout, dotWindow, HoverIntent, MOVE_MS, RepeatThrottle, swipeSteps, WheelStepper } from "../../lib/carousel";
+import { useT } from "../../lib/i18n";
 import { sound } from "../../lib/sound";
 import { isBusy, stateOf, useStoreSelect } from "../../lib/store";
 import { loaderLabel, platformBlock, versionMeta } from "../../lib/versions";
@@ -43,6 +44,7 @@ export function ProfileCarousel({
   /** A click or Enter/Space. `focused` is false when the click landed on a neighbour, which also moves focus to it. */
   onActivate: (profile: Profile, focused: boolean) => void;
 }) {
+  const t = useT();
   // Cards show only each profile's state name, so progress events during a download (same state,
   // new numbers) don't re-render the carousel; it re-renders when a state actually changes.
   const store = useStoreSelect((s) => ({ info: s.info, stateNames: profiles.map((p) => stateOf(s.states, p).state).join(" ") }));
@@ -180,7 +182,7 @@ export function ProfileCarousel({
         ref={stageRef}
         className="pc-stage"
         role="listbox"
-        aria-label="Profiles"
+        aria-label={t("profiles.list.label")}
         aria-orientation="horizontal"
         aria-activedescendant={active && ready ? `${baseId}-${active.id}` : undefined}
         tabIndex={0}
@@ -204,7 +206,7 @@ export function ProfileCarousel({
             const s = { profileId: p.id, state: stateNames[slot.index] as ProfileState["state"] };
             const blocked = platformBlock(p.gameVersion, store.info);
             const meta = versionMeta(p.gameVersion);
-            const status = blocked ? "Not supported" : STATE_LABEL[s.state];
+            const status = blocked ? t("profiles.state.notSupported") : STATE_LABEL[s.state];
             const loader = `${loaderLabel(p.loader)}${p.loaderVersion ? ` ${p.loaderVersion}` : ""}`;
             return (
               <div
@@ -213,7 +215,7 @@ export function ProfileCarousel({
                 role="option"
                 aria-selected={isSelected}
                 aria-hidden={slot.visible ? undefined : true}
-                aria-label={`${p.name}, Minecraft ${p.gameVersion}, ${loader}, ${status}${isSelected ? ", selected for Play" : ""}`}
+                aria-label={t(isSelected ? "profiles.card.labelSelected" : "profiles.card.label", { name: p.name, version: p.gameVersion, loader, status })}
                 className={`pc-card ${isFocus ? "is-focus" : ""} ${isSelected ? "is-selected" : ""} ${slot.visible ? "" : "is-hidden"}`}
                 style={
                   {
@@ -256,8 +258,8 @@ export function ProfileCarousel({
                   <span className="pc-shade" aria-hidden />
                   <span className="pc-dim" aria-hidden />
                   <span className="pc-top">
-                    {isSelected ? <span className="pc-flag is-play">Selected for Play</span> : isFocus ? <span className="pc-flag">Previewing</span> : null}
-                    {p.modpack && <Badge>Modpack</Badge>}
+                    {isSelected ? <span className="pc-flag is-play">{t("profiles.card.selectedFlag")}</span> : isFocus ? <span className="pc-flag">{t("profiles.card.previewing")}</span> : null}
+                    {p.modpack && <Badge>{t("profiles.card.modpack")}</Badge>}
                   </span>
                   <span className="pc-info">
                     <strong className="pc-name" title={p.name}>
@@ -274,7 +276,7 @@ export function ProfileCarousel({
                   {/* What a click on the centred card does: select it, or open it once it's selected. */}
                   {isFocus && !blocked && (
                     <span className={`pc-cta ${isSelected ? "is-open" : ""}`} aria-hidden>
-                      {isSelected ? "Open" : "Select"}
+                      {t(isSelected ? "profiles.action.open" : "profiles.action.select")}
                       <Icon name={isSelected ? "chevronRight" : "check"} size={13} />
                     </span>
                   )}
@@ -285,7 +287,7 @@ export function ProfileCarousel({
       </div>
       {count > 1 && (
         <div className="pc-nav">
-          <IconButton icon="chevronLeft" label="Previous profile" onClick={() => go(focus - 1)} disabled={focus === 0} />
+          <IconButton icon="chevronLeft" label={t("profiles.deck.previous")} onClick={() => go(focus - 1)} disabled={focus === 0} />
           <div className={`pc-dots ${dots.compact ? "is-compact" : ""}`}>
             {profiles.slice(dots.start, dots.end).map((p, k) => {
               const i = dots.start + k;
@@ -296,7 +298,7 @@ export function ProfileCarousel({
                   key={p.id}
                   type="button"
                   className={`pc-dot ${i === focus ? "is-focus" : ""} ${p.id === selectedId ? "is-selected" : ""} ${edge ? "is-edge" : ""}`}
-                  aria-label={`Show ${p.name}${p.id === selectedId ? " (selected for Play)" : ""}`}
+                  aria-label={t(p.id === selectedId ? "profiles.deck.showSelected" : "profiles.deck.show", { name: p.name })}
                   aria-current={i === focus ? "true" : undefined}
                   onClick={() => go(i)}
                 />
@@ -308,7 +310,7 @@ export function ProfileCarousel({
               {focus + 1} / {count}
             </span>
           )}
-          <IconButton icon="chevronRight" label="Next profile" onClick={() => go(focus + 1)} disabled={focus === count - 1} />
+          <IconButton icon="chevronRight" label={t("profiles.deck.next")} onClick={() => go(focus + 1)} disabled={focus === count - 1} />
         </div>
       )}
     </div>

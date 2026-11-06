@@ -28,7 +28,8 @@ class ModuleRegistryTest {
 		ModuleId.DIRECTION, new float[] {64, 11},
 		ModuleId.KEYSTROKES, new float[] {52, 52},
 		ModuleId.ARMOR, new float[] {40, 72},
-		ModuleId.EFFECTS, new float[] {92, 40});
+		// Three tiles with their times, beneficial and harmful lines: (3 × 24 + 2) × (2 × 33 + 2).
+		ModuleId.EFFECTS, new float[] {74, 68});
 	/** GUI-scaled screen sizes from Minecraft's smallest to a large monitor. */
 	static final float[][] SCREENS = {{320, 240}, {427, 240}, {480, 270}, {640, 360}, {683, 384}, {960, 540}, {1920, 1080}};
 
@@ -41,7 +42,9 @@ class ModuleRegistryTest {
 		assertEquals(List.of("fps", "ping", "cps", "keystrokes", "coordinates", "direction", "armor", "effects"), ids.subList(0, 8));
 		assertEquals(ModuleId.CORE, ids.subList(0, 8));
 		assertEquals(ModuleId.ALL, ids);
-		assertEquals(64, ModuleRegistry.size(), "one module per card of the menu");
+		assertEquals(119, ModuleRegistry.size(), "the 63 modules (Flint Music left), 14 added for the Right Shift menu (Time to Toast Control, Hotbar), 10 more (Auto Text to Discord), 7 HUD ones (Block Indicator to Item Info), 8 looks (Shield Status to Dark Mode), 6 tools (Animations to Sound Filters), Wavy Capes, Minimap, World Map, Clumps, No Chat Reports, Sound Physics, Ambient Sounds, Health Indicators, Model Gap Fix, Falling Leaves and Music Player");
+		assertEquals(List.of("wavy_capes", "minimap", "world_map", "clumps", "no_chat_reports", "sound_physics", "ambient_sounds", "health_indicators",
+			"model_gap_fix", "falling_leaves", "music_player"), ids.subList(ids.size() - 11, ids.size()), "new modules are only ever appended");
 		assertEquals(ModuleRegistry.core(), ModuleRegistry.all().subList(0, 8));
 		assertThrows(UnsupportedOperationException.class, () -> ModuleRegistry.all().add(ModuleRegistry.all().get(0)));
 	}
@@ -50,9 +53,9 @@ class ModuleRegistryTest {
 	void lookupById() {
 		assertSame(ModuleRegistry.all().get(4), ModuleRegistry.get("coordinates"));
 		assertEquals(4, ModuleRegistry.indexOf("coordinates"));
-		assertNull(ModuleRegistry.find("minimap"));
-		assertEquals(-1, ModuleRegistry.indexOf("minimap"));
-		assertThrows(IllegalArgumentException.class, () -> ModuleRegistry.get("minimap"));
+		assertNull(ModuleRegistry.find("teleporter"));
+		assertEquals(-1, ModuleRegistry.indexOf("teleporter"));
+		assertThrows(IllegalArgumentException.class, () -> ModuleRegistry.get("teleporter"));
 	}
 
 	@Test
@@ -82,30 +85,47 @@ class ModuleRegistryTest {
 
 	@Test
 	void everyModuleHasExactlyItsSettings() {
-		assertSettings(ModuleId.FPS, "displayMode", "background", "backgroundType", "width", "height", "border", "textColor", "textShadow",
+		assertSettings(ModuleId.FPS, "displayMode", "background", "backgroundType", "width", "height", "horizontalPadding", "verticalPadding", "border", "textColor", "textShadow",
 			"reversed", "align", "backgroundColor", "backgroundOpacity", "borderColor", "borderThickness", "cornerRadius", "showLabel",
 			"showFrameTime", "showLow", "interval", "window", "decimals");
-		assertSettings(ModuleId.PING, "labelPosition", "showBars", "colorByLatency");
-		assertSettings(ModuleId.CPS, "buttons", "format", "labelPosition");
-		assertSettings(ModuleId.KEYSTROKES, "layout", "showCps", "labels", "keySize", "spacing", "corners", "pressedStyle", "pressedColor",
-			"fadeMs");
-		assertSettings(ModuleId.COORDINATES, "layout", "decimals", "labels", "showDirection", "otherDimension");
-		assertSettings(ModuleId.DIRECTION, "format", "showAxis", "showDegrees");
-		assertSettings(ModuleId.ARMOR, "layout", "durability", "showHands", "hideEmpty", "lowWarning", "lowThreshold");
-		assertSettings(ModuleId.EFFECTS, "layout", "showIcons", "showNames", "showLevel", "showDuration", "durationFormat", "spacing", "sort",
-			"blinkEnding", "hideVanillaEffects");
+		assertSettings(ModuleId.PING, "displayMode", "background", "backgroundType", "width", "height", "horizontalPadding", "verticalPadding", "border", "textColor", "textShadow",
+			"labelPosition", "showBars", "align", "backgroundColor", "backgroundOpacity", "borderColor", "borderThickness", "cornerRadius", "colorByLatency");
+		assertSettings(ModuleId.CPS, "displayMode", "background", "backgroundType", "width", "height", "horizontalPadding", "verticalPadding", "border", "textColor", "textShadow",
+			"buttons", "format", "labelPosition", "align", "backgroundColor", "backgroundOpacity", "borderColor", "borderThickness", "cornerRadius");
+		assertSettings(ModuleId.KEYSTROKES, "layout", "showCps", "cpsDisplayMode", "cpsReversed", "labels", "clicksDisplayMode", "jumpDisplayMode",
+			"keySize", "spacing", "corners", "pressedStyle", "animType", "direction", "pressedColor", "textActiveColor", "fadeMs");
+		assertSettings(ModuleId.COORDINATES, "layout", "alignment", "decimals", "labels", "showDirection", "showAngle", "formatColor",
+			"showCoordinates", "showXZCoordinates", "showYCoordinate", "showMovementDirection", "showBlockCoordinates", "showChunkCoordinates",
+			"formattedChunk", "showBiome", "showChunkCounter", "streamlineOther", "showKeyChunk", "showKeyBiome", "showKeyCounter", "otherDimension",
+			"copyCoordinates");
+		assertSettings(ModuleId.DIRECTION, "type", "format", "width", "visibleDegrees", "markerSize", "markerColor", "shadow", "displayWaypointDots",
+			"showAxis", "showDegrees");
+		assertSettings(ModuleId.ARMOR, "displayStyle", "widgetShown", "offhandSlotBehavior", "durabilityDisplay", "reversed", "iconsShown",
+			"showSword", "showPickaxe", "showAxe", "showMace", "showTrident", "showBow", "showShield", "mainHandDurability", "offHandDurability",
+			"textPosition", "textScale", "textBold", "textShadow", "textColorMode", "textColor", "anchor", "side", "layout", "pushBossbars",
+			"pushStatusEffectIcons", "pushSubtitles", "offsetX", "offsetY", "playBreakSound", "warningShown", "warningBobIntensity",
+			"minDurabilityValue", "minDurabilityPercentage");
+		assertSettings(ModuleId.EFFECTS, "view", "showDuration", "showNames", "showLevel", "useCustomEffectNameColor", "durationColor", "tileDirection",
+			"tileSplit", "tileTime", "tileLevel", "tileShadow", "tileGap", "tileBackground", "tileColor", "tileOpacity", "tileBorderColor", "tileHarmfulBorderColor", "displayStyle",
+			"layout", "textAlignment", "twoLines", "showIcons", "spacing", "blinkEnding", "durationBlinkSeconds", "effectLossSound", "effectLossSoundVolume",
+			"durationFormat", "durationShorthand", "sort", "hideVanillaEffects", "hideInventoryStatus", "barColorMode", "barBackgroundColor", "barBackgroundOpacity",
+			"barBeneficialColor", "barBeneficialOpacity", "barHarmfulColor", "barHarmfulOpacity", "barNeutralColor", "barNeutralOpacity",
+			"barMaxRemainingDuration", "barMinAmbientAge", "hudBarsEnabled", "hudBarsDirection", "hudBarsRelativeToEnd", "hudBarsThickness",
+			"hudBarsCollinearPadding", "hudBarsCollinearOffset", "hudBarsOrthogonalOffset", "inventoryBarsEnabled", "inventoryBarsDirection",
+			"inventoryBarsRelativeToEnd", "inventoryBarsThickness", "inventoryBarsCollinearPadding", "inventoryBarsCollinearOffset",
+			"inventoryBarsOrthogonalOffset");
 	}
 
 	@Test
 	void sectionsStartWithDisplayAndTuckDetailsUnderAdvanced() {
-		assertSections(ModuleId.FPS, "Style", "Background and border+", "Advanced+");
-		assertSections(ModuleId.PING, "Display", "Advanced+");
-		assertSections(ModuleId.CPS, "Display");
-		assertSections(ModuleId.KEYSTROKES, "Display", "Style", "Advanced+");
-		assertSections(ModuleId.COORDINATES, "Display", "Advanced+");
-		assertSections(ModuleId.DIRECTION, "Display", "Advanced+");
-		assertSections(ModuleId.ARMOR, "Display", "Advanced+");
-		assertSections(ModuleId.EFFECTS, "Display", "Advanced+");
+		assertSections(ModuleId.FPS, "Style", "Background and border+", "Advanced+", "Mod");
+		assertSections(ModuleId.PING, "Style", "Display", "Background and border+", "Advanced+", "Mod");
+		assertSections(ModuleId.CPS, "Style", "Display", "Background and border+", "Mod");
+		assertSections(ModuleId.KEYSTROKES, "Display", "Style", "Advanced+", "Mod");
+		assertSections(ModuleId.COORDINATES, "Display", "Coordinates", "Extras", "Advanced+", "Mod");
+		assertSections(ModuleId.DIRECTION, "Display", "Compass", "Advanced+", "Mod");
+		assertSections(ModuleId.ARMOR, "Style", "Items", "Text", "Position", "Warning", "Mod");
+		assertSections(ModuleId.EFFECTS, "Display", "Tiles", "List", "Ending", "Advanced+", "Status Effect Bars", "HUD Bars", "Inventory Bars", "Mod");
 		assertTrue(SettingSection.advanced("A", ModuleSettings.Fps.SHOW_LOW).advanced());
 		assertFalse(SettingSection.of("A", ModuleSettings.Fps.SHOW_LOW).advanced());
 	}
@@ -119,8 +139,12 @@ class ModuleRegistryTest {
 		assertEquals(List.of(titles), actual, id);
 	}
 
-	private static void assertSettings(String id, String... settingIds) {
+	private static void assertSettings(String id, String... ownIds) {
 		ModuleDescriptor module = ModuleRegistry.get(id);
+		// Every usable module ends with its toggle key and notification.
+		String[] settingIds = java.util.Arrays.copyOf(ownIds, ownIds.length + 2);
+		settingIds[ownIds.length] = "modKey";
+		settingIds[ownIds.length + 1] = "modKeyNotify";
 		List<String> actual = new ArrayList<>();
 		int flattened = 0;
 		for (SettingSection section : module.sections()) {
@@ -174,14 +198,36 @@ class ModuleRegistryTest {
 		assertEquals(DirectionFormat.NAME, ModuleSettings.Direction.FORMAT.defaultValue());
 		assertEquals(true, ModuleSettings.Direction.SHOW_AXIS.defaultValue());
 		assertEquals(true, ModuleSettings.Direction.SHOW_DEGREES.defaultValue());
-		assertEquals(Orientation.VERTICAL, ModuleSettings.Armor.LAYOUT.defaultValue());
-		assertEquals(DurabilityFormat.PERCENT, ModuleSettings.Armor.DURABILITY.defaultValue());
+		// Armor: uku's Armor HUD's defaults.
+		assertEquals(Orientation.HORIZONTAL, ModuleSettings.Armor.LAYOUT.defaultValue());
+		assertEquals(List.of("Hotbar", "Rounded Corners", "Rounded", "None"), ModuleSettings.Armor.STYLE.labels());
+		assertEquals(0, ModuleSettings.Armor.STYLE.defaultValue());
+		assertEquals("not_empty", ModuleSettings.Armor.WIDGET_SHOWN.keys().get(ModuleSettings.Armor.WIDGET_SHOWN.defaultValue()));
+		assertEquals("adhere", ModuleSettings.Armor.OFFHAND_SLOT.keys().get(ModuleSettings.Armor.OFFHAND_SLOT.defaultValue()));
+		assertEquals("bar", ModuleSettings.Armor.DURABILITY.keys().get(ModuleSettings.Armor.DURABILITY.defaultValue()));
+		assertEquals("hotbar", ModuleSettings.Armor.ANCHOR.keys().get(ModuleSettings.Armor.ANCHOR.defaultValue()));
+		assertEquals("left", ModuleSettings.Armor.SIDE.keys().get(ModuleSettings.Armor.SIDE.defaultValue()));
+		assertEquals(false, ModuleSettings.Armor.REVERSED.defaultValue());
+		assertEquals(true, ModuleSettings.Armor.ICONS.defaultValue());
+		assertEquals(true, ModuleSettings.Armor.OFFHAND_DURABILITY.defaultValue());
+		assertEquals(false, ModuleSettings.Armor.MAINHAND_DURABILITY.defaultValue());
+		assertEquals(true, ModuleSettings.Armor.PUSH_BOSSBARS.defaultValue());
+		assertEquals(true, ModuleSettings.Armor.BREAK_SOUND.defaultValue());
+		assertEquals(true, ModuleSettings.Armor.WARNING.defaultValue());
+		assertEquals(3, ModuleSettings.Armor.BOB.defaultValue());
+		assertEquals(20, ModuleSettings.Armor.MIN_VALUE.defaultValue());
+		assertRange(ModuleSettings.Armor.MIN_PERCENT, 10, 0, 100, 1);
+		assertEquals("%", ModuleSettings.Armor.MIN_PERCENT.unit());
+		// Flint's additions: the text's own size and weight, and the item slots, all as Armor looked before them.
+		assertRange(ModuleSettings.Armor.TEXT_SCALE, 100, 50, 200, 5);
+		assertEquals("%", ModuleSettings.Armor.TEXT_SCALE.unit());
+		assertEquals(false, ModuleSettings.Armor.TEXT_BOLD.defaultValue());
+		for (BoolSetting item : ModuleSettings.Armor.ITEMS) {
+			assertEquals(false, item.defaultValue(), item.id());
+		}
+		assertEquals(List.of("top_center", "top", "vertical_center", "bottom", "hotbar", "free"), ModuleSettings.Armor.ANCHOR.keys(),
+			"the saved keys of uku's anchors never change; Free is added last");
 		assertEquals(List.of("Percent", "Number", "Bar", "Hidden"), labels(DurabilityFormat.values()));
-		assertEquals(false, ModuleSettings.Armor.SHOW_HANDS.defaultValue());
-		assertEquals(true, ModuleSettings.Armor.HIDE_EMPTY.defaultValue());
-		assertEquals(true, ModuleSettings.Armor.LOW_WARNING.defaultValue());
-		assertRange(ModuleSettings.Armor.LOW_THRESHOLD, 10, 5, 50, 5);
-		assertEquals("%", ModuleSettings.Armor.LOW_THRESHOLD.unit());
 		assertEquals(Orientation.VERTICAL, ModuleSettings.Effects.LAYOUT.defaultValue());
 		assertEquals(true, ModuleSettings.Effects.SHOW_ICONS.defaultValue());
 		assertEquals(true, ModuleSettings.Effects.SHOW_NAMES.defaultValue());
@@ -257,6 +303,29 @@ class ModuleRegistryTest {
 	}
 
 	@Test
+	void effectsTilesAndListEachGreyTheOthersRows() {
+		Layout layout = new Layout("x", "X");
+		ModuleState effects = layout.module(ModuleId.EFFECTS);
+		assertEquals(ModuleSettings.Effects.TILES, effects.option(ModuleSettings.Effects.VIEW), "tiles by default");
+		assertNull(ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.TILE_DIRECTION));
+		assertEquals("Only in the List layout", ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.TEXT_SIDE));
+		assertEquals("With tiles, only in the Column direction", ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.SHOW_NAMES));
+		assertEquals("Only with the Custom tile background", ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.TILE_COLOR));
+		assertEquals("The tiles take the place of Minecraft's icons",
+			ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.HIDE_VANILLA_EFFECTS));
+		effects.set(ModuleSettings.Effects.TILE_DIRECTION, 1);
+		assertNull(ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.SHOW_NAMES));
+		effects.set(ModuleSettings.Effects.VIEW, ModuleSettings.Effects.LIST);
+		assertEquals("Only in the Tiles layout", ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.TILE_DIRECTION));
+		assertNull(ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.TEXT_SIDE));
+		assertNull(ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.HIDE_VANILLA_EFFECTS));
+		ModuleState inventory = layout.module(com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID);
+		assertFalse(inventory.bool(com.flintclient.client.control.model.mods.UtilityMods.Inventory.SEARCH), "the search bar starts off");
+		assertEquals("Turn on Inventory search bar first",
+			ModuleSettings.inactiveReason(inventory, com.flintclient.client.control.model.mods.UtilityMods.Inventory.SEARCH_KEY));
+	}
+
+	@Test
 	void settingsThatAnotherSettingMakesMootSayWhy() {
 		Layout layout = new Layout("x", "X");
 		ModuleState cps = layout.module(ModuleId.CPS);
@@ -275,9 +344,15 @@ class ModuleRegistryTest {
 		keys.set(ModuleSettings.Keystrokes.PRESSED_STYLE, PressedStyle.INVERT);
 		assertEquals("Invert uses the text color", ModuleSettings.inactiveReason(keys, ModuleSettings.Keystrokes.PRESSED_COLOR));
 		ModuleState armor = layout.module(ModuleId.ARMOR);
-		assertNull(ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.LOW_THRESHOLD));
-		armor.set(ModuleSettings.Armor.LOW_WARNING, false);
-		assertEquals("Turn on the low durability warning first", ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.LOW_THRESHOLD));
+		assertNull(ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.BOB));
+		armor.set(ModuleSettings.Armor.WARNING, false);
+		assertEquals("Turn on Show Warning first", ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.BOB));
+		assertNull(ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.OFFHAND_SLOT));
+		armor.set(ModuleSettings.Armor.ANCHOR, 1);
+		assertEquals("Only with the Hotbar anchor", ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.OFFHAND_SLOT));
+		assertEquals("Only with the Top anchor on the right", ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.PUSH_EFFECTS));
+		armor.set(ModuleSettings.Armor.SIDE, 1);
+		assertNull(ModuleSettings.inactiveReason(armor, ModuleSettings.Armor.PUSH_EFFECTS));
 		ModuleState effects = layout.module(ModuleId.EFFECTS);
 		effects.set(ModuleSettings.Effects.SHOW_DURATION, false);
 		assertEquals("Only when Time left is on", ModuleSettings.inactiveReason(effects, ModuleSettings.Effects.DURATION_FORMAT));
@@ -345,19 +420,31 @@ class ModuleRegistryTest {
 	void defaultPlacementsNeverOverlapAtDefaultSizes() {
 		for (float[] screen : SCREENS) {
 			List<HudRect> rects = new ArrayList<>();
+			HudRect ping = null;
 			for (ModuleDescriptor module : ModuleRegistry.core()) {
 				float[] size = SIZES.get(module.id());
 				HudRect rect = module.defaultPlacement().toAbsolute(screen[0], screen[1], size[0], size[1]);
 				assertTrue(rect.within(screen[0], screen[1]), module.id() + " on " + screen[0] + "x" + screen[1]);
-				rects.add(rect);
+				if (module.id().equals(ModuleId.PING)) {
+					ping = rect;
+				}
+				rects.add(module.id().equals(ModuleId.EFFECTS) ? underPing(rect, ping) : rect);
 			}
 			assertNoOverlap(rects, screen);
 		}
-		// The Quick Hub layout: FPS top-left, Ping top-right, Effects on the left, Armor bottom-right.
+		// The Quick Hub layout: FPS top-left, Ping top-right, Effects as tiles in Minecraft's top-right corner, Armor bottom-right.
 		assertEquals(HudPlacement.of(Anchor.TOP_LEFT, 4, 4), ModuleRegistry.get(ModuleId.FPS).defaultPlacement());
 		assertEquals(HudPlacement.of(Anchor.TOP_RIGHT, 4, 4), ModuleRegistry.get(ModuleId.PING).defaultPlacement());
-		assertEquals(HudPlacement.of(Anchor.LEFT, 4, 0), ModuleRegistry.get(ModuleId.EFFECTS).defaultPlacement());
+		assertEquals(HudPlacement.of(Anchor.TOP_RIGHT, 1, 1), ModuleRegistry.get(ModuleId.EFFECTS).defaultPlacement());
 		assertEquals(HudPlacement.of(Anchor.BOTTOM_RIGHT, 4, 4), ModuleRegistry.get(ModuleId.ARMOR).defaultPlacement());
+	}
+
+	/**
+	 * Effects at its default spot as the HUD draws it: Minecraft's top-right corner is Ping's default spot too, so the tiles step
+	 * 2 units under Ping's readout when it shows there (HudRenderer.effectsTop). {@code ping} is null when Ping is off.
+	 */
+	static HudRect underPing(HudRect effects, HudRect ping) {
+		return ping != null && effects.overlaps(ping) ? new HudRect(effects.x(), ping.bottom() + 2, effects.width(), effects.height()) : effects;
 	}
 
 	static void assertNoOverlap(List<HudRect> rects, float[] screen) {
@@ -372,7 +459,7 @@ class ModuleRegistryTest {
 	void onlyAModulesOwnSettingConstantsWork() {
 		Layout layout = new Layout("x", "X");
 		ModuleState armor = layout.module(ModuleId.ARMOR);
-		assertEquals(Orientation.VERTICAL, armor.choice(ModuleSettings.Armor.LAYOUT));
+		assertEquals(Orientation.HORIZONTAL, armor.choice(ModuleSettings.Armor.LAYOUT));
 		assertEquals(-1, armor.descriptor().indexOf(ModuleSettings.Effects.LAYOUT), "same id and type, another module");
 		assertEquals(-1, armor.descriptor().indexOf(ModuleSettings.Coordinates.LAYOUT), "same id, another module");
 		assertThrows(IllegalArgumentException.class, () -> armor.choice(ModuleSettings.Coordinates.LAYOUT));
@@ -390,5 +477,80 @@ class ModuleRegistryTest {
 		assertThrows(IllegalArgumentException.class, () -> new ModuleDescriptor("x", "X", "x", List.of(), IconId.GAUGE, Category.WORLD,
 			List.of(SettingSection.of("A", ModuleSettings.Fps.SHOW_LOW), SettingSection.of("B", ModuleSettings.Fps.SHOW_LOW)),
 			HudPlacement.of(Anchor.TOP_LEFT, 0, 0), ModuleDescriptor.Requirement.NONE, null));
+	}
+
+	@Test
+	void musicPlayerIsAnOffByDefaultHudCardInTheTopLeftClearOfTheOriginalModules() {
+		ModuleDescriptor music = ModuleRegistry.get(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID);
+		assertEquals("Music Player", music.name());
+		assertTrue(music.hud());
+		assertTrue(music.status().usable());
+		assertEquals(ModuleDescriptor.Requirement.NONE, music.requirement(), "music plays on the title screen too");
+		assertTrue(music.keywords().size() >= 3 && music.keywords().size() <= 6);
+		assertFalse(new Layout("x", "X").module(music).enabled(), "every mod starts off");
+		assertSettings(music.id(), "hideWhenIdle", "hideWhenPaused", "musicAppsOnly", "albumArt", "albumArtSize", "artist", "appName",
+			"progressBar", "progressBarThickness", "times", "buttons", "scrollTitle", "width", "colors", "songNameColor", "artistNameColor",
+			"durationColor", "progressBarColor", "playPauseKey", "skipKey", "previousKey", "forwardKey", "backKey", "seekStep", "motion",
+			"dimWhenPaused");
+		assertSections(music.id(), "General", "Display", "Colors", "Controls", "Motion", "Mod");
+		for (KeySetting key : com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.KEYS) {
+			assertEquals(KeySetting.NONE, key.defaultValue(), key.id() + " starts unbound");
+		}
+		assertEquals(Anchor.TOP_LEFT, music.defaultPlacement().anchor());
+		// The card at its widest default size (150 × 36 units) never covers an original module at its default spot.
+		for (float[] screen : SCREENS) {
+			HudRect card = music.defaultPlacement().toAbsolute(screen[0], screen[1], 150, 36);
+			assertTrue(card.within(screen[0], screen[1]));
+			for (ModuleDescriptor module : ModuleRegistry.core()) {
+				float[] size = SIZES.get(module.id());
+				HudRect rect = module.defaultPlacement().toAbsolute(screen[0], screen[1], size[0], size[1]);
+				assertFalse(card.overlaps(rect), module.id() + " on " + screen[0] + "x" + screen[1]);
+			}
+		}
+	}
+
+	@Test
+	void musicPlayersColorsAndJumpWaitForTheirSwitches() {
+		ModuleState music = new Layout("x", "X").module(ModuleRegistry.get(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID));
+		assertEquals("Only with Custom colors", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.TITLE_COLOR));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.COLORS,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ART_COLORS);
+		assertEquals("Only with Custom colors", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.PROGRESS_COLOR), "Album art picks the bar's colour itself");
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.COLORS,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.CUSTOM_COLORS);
+		assertNull(ModuleSettings.inactiveReason(music, com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.TITLE_COLOR));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.TIMES, false);
+		assertEquals("Turn on Times first", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.TIME_COLOR));
+		assertEquals("Set Forward or Rewind first", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.SEEK_STEP));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.FORWARD_KEY, "key.keyboard.right.bracket");
+		assertNull(ModuleSettings.inactiveReason(music, com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.SEEK_STEP));
+	}
+
+	@Test
+	void musicPlayersLookAndMotionSettingsStartCalmAndWaitForTheirSwitches() {
+		ModuleState music = new Layout("x", "X").module(ModuleRegistry.get(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID));
+		assertEquals(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.MOTION_CALM,
+			music.option(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.MOTION), "Calm is the default");
+		assertEquals(100, music.integer(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ART_SIZE), "the art as before");
+		assertEquals(2, music.integer(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.BAR_THICKNESS), "the bar as before");
+		assertTrue(music.bool(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.DIM_PAUSED));
+		assertNull(ModuleSettings.inactiveReason(music, com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.SCROLL));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.MOTION,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.MOTION_OFF);
+		assertEquals("Motion is Off: long titles end in …", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.SCROLL));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ALBUM_ART, false);
+		assertEquals("Turn on Album art first", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ART_SIZE));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.PROGRESS, false);
+		assertEquals("Turn on Progress bar first", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.BAR_THICKNESS));
+		music.set(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.HIDE_PAUSED, true);
+		assertEquals("Hidden while paused", ModuleSettings.inactiveReason(music,
+			com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.DIM_PAUSED));
 	}
 }

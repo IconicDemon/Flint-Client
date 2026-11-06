@@ -22,8 +22,8 @@ public final class ControlKeys {
 	public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, "main"));
 	static final ControlKeys INSTANCE = new ControlKeys();
 
-	private final KeyMapping controlCenter = new KeyMapping("key.flintclient.control_center", InputConstants.Type.KEYBOARD, InputConstants.KEY_RSHIFT, CATEGORY);
-	private final KeyMapping hudEditor = new KeyMapping("key.flintclient.hud_editor", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), CATEGORY);
+	private final KeyMapping controlCenter = new KeyMapping("key.flintclient.control_center", com.flintclient.client.compat.McCompat.KEYBOARD, InputConstants.KEY_RSHIFT, CATEGORY);
+	private final KeyMapping hudEditor = new KeyMapping("key.flintclient.hud_editor", com.flintclient.client.compat.McCompat.KEYBOARD, InputConstants.UNKNOWN.getValue(), CATEGORY);
 	private final KeyMapping[] all = {controlCenter, hudEditor};
 
 	private ControlKeys() {

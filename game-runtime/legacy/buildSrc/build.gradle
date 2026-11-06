@@ -1,0 +1,6 @@
+// The build logic the 1.21.x build shares with the 1.8.9 one (../../build-logic: SharedSources, the shared-sources step).
+plugins {
+	id "java"
+}
+
+sourceSets.main.java.srcDirs = [file("../../build-logic/src/main/java")]

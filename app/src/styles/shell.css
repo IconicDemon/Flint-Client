@@ -127,10 +127,282 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  align-self: stretch;
   gap: clamp(4px, 0.9vh, 8px);
+  min-height: 0;
   margin: 0;
   padding: 0;
   list-style: none;
+  /* With the profile list open in a short window, the rail's items scroll (no bar shown). */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.rail ul::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- Profiles in the rail: one tile (the page on top, the arrow in its lower edge) and the list it opens ---------- */
+
+.rail-profiles {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* The tile carries the hover and active looks for both of its parts, so they read as one button. */
+.rail-combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 44px;
+  border-radius: 14px;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    box-shadow 260ms var(--ease);
+}
+
+/* With its arrow, the tile shows its edge even at rest, so the arrow reads as part of it. */
+.rail-combo.has-toggle {
+  background: rgba(var(--ink-rgb), 0.025);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.06);
+}
+
+/* Open: the tile holds the profiles, so it reads as one bar from the icon down to the last of them. */
+.rail-combo.is-open {
+  background: rgba(var(--ink-rgb), 0.04);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+}
+
+/* Closed, the whole tile lights under the pointer; open, only its head (the icon and the arrow), not the profiles. */
+.rail-combo:not(.is-open):hover {
+  background: rgba(var(--ink-rgb), 0.07);
+}
+
+.rail-combo.is-active,
+.rail-combo.is-active:hover {
+  background: rgba(var(--ink-rgb), 0.1);
+}
+
+/* The Profiles button and its arrow. */
+.rail-combo-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
+  border-radius: 14px;
+  transition: background-color var(--t-micro) var(--ease);
+}
+
+.rail-combo.is-open .rail-combo-head {
+  border-radius: 14px 14px 10px 10px;
+}
+
+.rail-combo.is-open .rail-combo-head:hover {
+  background: rgba(var(--ink-rgb), 0.06);
+}
+
+/* The active marker on the rail's edge, beside the icon. */
+.rail-combo.is-active::before {
+  content: "";
+  position: absolute;
+  left: calc((44px - var(--rail-w)) / 2);
+  top: 14px;
+  width: 3px;
+  height: 16px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.rail-combo.has-toggle.is-active::before {
+  top: 12px;
+}
+
+.rail-combo .rail-item,
+.rail-combo .rail-item:hover,
+.rail-combo .rail-item:active,
+.rail-combo .rail-item.is-active {
+  background: transparent;
+}
+
+.rail-combo .rail-item.is-active::before {
+  display: none;
+}
+
+.rail-combo.has-toggle .rail-item {
+  height: 40px;
+}
+
+.rail-combo-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 16px;
+  margin: -2px 0 4px;
+  border-radius: 8px;
+  color: var(--text-4);
+  transition:
+    color var(--t-micro) var(--ease),
+    background-color var(--t-micro) var(--ease);
+}
+
+.rail-combo-head:hover .rail-combo-toggle,
+.rail-combo.is-active .rail-combo-toggle,
+.rail-combo.is-open .rail-combo-toggle {
+  color: var(--text-3);
+}
+
+.rail-combo .rail-combo-toggle:hover {
+  color: var(--fg);
+  background: rgba(var(--ink-rgb), 0.1);
+}
+
+.rail-combo-toggle:active {
+  transform: scale(var(--press-scale-icon));
+}
+
+.rail-combo-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.rail-combo-toggle svg {
+  transition: transform 320ms var(--ease);
+}
+
+.rail-combo.is-open .rail-combo-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* Inside the tile, under its arrow. Opens by its height (0fr to 1fr), so the tile grows down around the profiles and
+   Store and Settings glide down with it. */
+.rail-profile-list {
+  display: grid;
+  grid-template-rows: 0fr;
+  align-self: stretch;
+  opacity: 0;
+  transition:
+    grid-template-rows 380ms var(--ease),
+    opacity 260ms var(--ease);
+}
+
+.rail-profile-list.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.rail-profile-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 0 6px;
+}
+
+/* A fine line between the arrow and the profiles. */
+.rail-profile-inner::before {
+  content: "";
+  flex: none;
+  width: 22px;
+  height: 1px;
+  margin: 1px 0 2px;
+  border-radius: 1px;
+  background: rgba(var(--ink-rgb), 0.1);
+}
+
+/* 38px inside the 44px tile, so each profile sits within it with an even margin. */
+.rail-profile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.86);
+  transition:
+    opacity 260ms var(--ease),
+    transform 340ms var(--ease),
+    background-color var(--t-micro) var(--ease),
+    box-shadow var(--t-micro) var(--ease);
+}
+
+.rail-profile-list.is-open .rail-profile,
+.rail-profile-list.is-open .rail-more {
+  opacity: 1;
+  transform: none;
+  transition-delay:
+    calc(var(--i, 0) * 45ms + 60ms), calc(var(--i, 0) * 45ms + 60ms), 0ms, 0ms;
+}
+
+.rail-profile:hover {
+  background: rgba(var(--ink-rgb), 0.08);
+}
+
+.rail-profile .picon {
+  transition: transform 220ms var(--ease);
+}
+
+.rail-profile:hover .picon {
+  transform: scale(1.06);
+}
+
+.rail-profile:active .picon {
+  transform: scale(0.94);
+}
+
+.rail-profile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The profile open on the Profiles page: an ember ring. */
+.rail-profile.is-open-profile {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Pinned: a small ember dot at the corner. */
+.rail-pin {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--rail);
+}
+
+/* More profiles than fit: three quiet dots in the rail's own colours, lit only on hover. */
+.rail-more {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  color: var(--text-4);
+  opacity: 0;
+  transform: translateY(-8px) scale(0.86);
+  transition:
+    opacity 260ms var(--ease),
+    transform 340ms var(--ease),
+    color var(--t-micro) var(--ease),
+    background-color var(--t-micro) var(--ease);
+}
+
+.rail-more:hover {
+  color: var(--fg);
+  background: rgba(var(--ink-rgb), 0.07);
+}
+
+.rail-more:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .rail-item {
@@ -192,6 +464,10 @@
   .rail-item {
     width: 42px;
     height: 40px;
+  }
+  .rail-combo.has-toggle .rail-item {
+    width: 44px;
+    height: 36px;
   }
   .rail-logo {
     margin-bottom: 10px;
@@ -356,7 +632,8 @@
   align-items: center;
   gap: 9px;
   height: 38px;
-  padding: 0 12px 0 6px;
+  /* The head sits clear of the pill's rounded end, not in its curve. */
+  padding: 0 12px 0 10px;
   border-radius: var(--r-pill);
   background: rgba(var(--bg-rgb), 0.5);
   box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
@@ -480,10 +757,15 @@
 }
 
 .page-body {
+  /* The widest a page's content grows. A wider window (a large or ultrawide screen) spreads the rest evenly on both
+     sides of the page, next to the rail, instead of leaving it all on the right; windowfit.rs zooms the interface up
+     to the window's height first. */
+  --page-max: 1560px;
+  --page-room: calc((100% - var(--content-left) - var(--page-max)) / 2);
   height: 100%;
   overflow: auto;
   overflow-x: hidden;
-  padding: 72px calc(var(--gutter) * 1.4) 40px calc(var(--content-left) + var(--gutter));
+  padding: 72px max(calc(var(--gutter) * 1.4), var(--page-room)) 40px calc(var(--content-left) + max(var(--gutter), var(--page-room)));
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--ink-rgb), 0.14) transparent;
   /* Content that grows past the fold doesn't shift sideways when a classic scrollbar appears. */

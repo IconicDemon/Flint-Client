@@ -13,8 +13,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The Quick Play button in Minecraft's Multiplayer screen (see {@code JoinMultiplayerScreenMixin}): where it goes, what
- * it says for the selected entry, and what pressing it does. Each change is saved at once and confirmed with a short
- * notice; a full list (five) or a server already pinned is said plainly, and nothing is ever replaced.
+ * it says for the selected entry, and what pressing it does. Each change is saved at once and shows only in the button's
+ * label and on the main menu (no toast); only a pin that can't be made (a full list, a server without an address) says
+ * why in a short notice, and nothing is ever replaced.
  */
 public final class QuickPlayMultiplayer {
 	public static final int WIDTH = 124;
@@ -25,7 +26,7 @@ public final class QuickPlayMultiplayer {
 	public static final int HEIGHT = 20;
 	public static final int Y = 6;
 	private static final int MARGIN = 6;
-	/** Flint's own notice id, so Quick Play notices replace each other rather than pile up. */
+	/** Flint's own notice id, so a second notice replaces the first rather than piling up. */
 	private static final SystemToast.SystemToastId NOTICE = new SystemToast.SystemToastId(3000L);
 
 	private QuickPlayMultiplayer() {
@@ -64,7 +65,10 @@ public final class QuickPlayMultiplayer {
 			: Component.translatable("flintclient.quickplay.button.tooltip", QuickPlay.MAX)));
 	}
 
-	/** Pins the selected saved server, or unpins it when it is pinned, and says what happened. */
+	/**
+	 * Pins the selected saved server, or unpins it when it is pinned. Done quietly (the button's label changes); only a pin
+	 * that can't be made says why.
+	 */
 	public static void toggle(ServerSelectionList.@Nullable Entry entry) {
 		ServerData server = saved(entry);
 		if (server == null) {
@@ -72,16 +76,16 @@ public final class QuickPlayMultiplayer {
 		}
 		if (ServerShortcuts.pinned(server.ip)) {
 			ServerShortcuts.unpin(server.ip);
-			notice(Component.translatable("flintclient.quickplay.removed", server.name));
 			return;
 		}
-		Component message = switch (ServerShortcuts.pin(server.name, server.ip)) {
-			case ADDED -> Component.translatable("flintclient.quickplay.added", server.name);
-			case ALREADY_PINNED -> Component.translatable("flintclient.quickplay.already", server.name);
+		Component problem = switch (ServerShortcuts.pin(server.name, server.ip)) {
+			case ADDED, ALREADY_PINNED -> null;
 			case FULL -> Component.translatable("flintclient.quickplay.full", QuickPlay.MAX);
 			case INVALID -> Component.translatable("flintclient.quickplay.invalid");
 		};
-		notice(message);
+		if (problem != null) {
+			notice(problem);
+		}
 	}
 
 	/** A saved server was edited: its pin follows it. */

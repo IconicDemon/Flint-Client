@@ -1,6 +1,6 @@
 [package]
 name = "flint-app"
-version = "0.5.2"
+version = "1.0.1"
 description = "The Flint Client desktop application"
 authors = ["Flint Client"]
 license = "GPL-3.0-only"
@@ -12,14 +12,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# build.rs packs the game runtime jars into one brotli stream, listed with each jar's SHA-256 (src/runtime.rs), after
+# storing each jar's entries uncompressed (the app's own zip, for the build script).
+brotli = { version = "9", default-features = false, features = ["std"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tauri-plugin-autostart = "2"
 sha1 = "0.10"
@@ -33,6 +38,15 @@ url = "2"
 rsa = { version = "0.9", features = ["sha2"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+# The system's application data folders, before the app exists (datadir.rs moves the data folder to its new name first).
+dirs = "6"
+# Unpacks the game runtime jar a launch needs (runtime.rs). Already in the app: Tauri decompresses its own assets with it.
+brotli = { version = "9", default-features = false, features = ["std"] }
+# The Modrinth App keeps its profile list in SQLite: Flint copies the database to a temporary folder and reads the copy,
+# read-only (import/adapters/modrinth.rs). Bundled, so no system SQLite is needed.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 
 [profile.release]
 codegen-units = 1
@@ -41,8 +55,49 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+# Build scripts are built unoptimized, so build.rs would take minutes to pack the runtime jars and check them: brotli,
+# the SHA-256 and the jars' unpacking and re-storing (zip's inflate and CRC-32) are optimized there too (seconds), in
+# every profile, and so in tests.
+[profile.release.package.brotli]
+opt-level = 3
+[profile.release.package.brotli-decompressor]
+opt-level = 3
+[profile.release.package.sha2]
+opt-level = 3
+[profile.release.package.zip]
+opt-level = 3
+[profile.release.package.miniz_oxide]
+opt-level = 3
+[profile.release.package.crc32fast]
+opt-level = 3
+[profile.dev.package.brotli]
+opt-level = 3
+[profile.dev.package.brotli-decompressor]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.zip]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+
 [target."cfg(unix)".dependencies]
 libc = "0.2"
+
+# Physical memory (GlobalMemoryStatusEx) and the game window (found by process, opened maximized); whether a Flint is
+# already running (its single-instance mutex) or a game runs from the old data folder (datadir.rs).
+# The game's Music Player (media.rs): Windows' media sessions (what its own media controls show) and its image decoder for
+# album art. The `windows` crate is already in the build (WebView2's), so this only adds those bindings.
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging", "Wdk_System_Threading"] }
+windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Media_Control", "Storage_Streams", "Graphics_Imaging"] }
+
+# Tests only (never in the app): a silent, muted media session made in the test itself, read back through media.rs by an
+# ignored test run by hand.
+[target."cfg(windows)".dev-dependencies]
+windows = { version = "0.62", features = ["Media_Playback", "Media_Core", "Security_Cryptography"] }
 
 [features]
 # Measurement builds only (`npm run perf-build`): the QA identity in isolated data, the scenario

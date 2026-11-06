@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.platform.Frame;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import org.joml.Matrix3x2f;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class CanvasClipTest {
 			Matrix3x2f enclosing = new Matrix3x2f().translate(7, -3);
 			Matrix3x2f pixelPose = new Matrix3x2f(enclosing).scale(1.0F / g, 1.0F / g);
 			Matrix3x2f scissor = new Matrix3x2f();
-			Canvas.scissorPose(scissor, pixelPose, g);
+			Frame.scissorPose(scissor, pixelPose, g);
 			assertTrue(scissor.equals(enclosing), "GUI scale " + g + ": " + scissor);
 		}
 	}
@@ -49,7 +50,7 @@ class CanvasClipTest {
 		int offset = 4;
 		int[] gui = clip(0, 10 + offset, 30, 40 + offset, g);
 		Matrix3x2f scissor = new Matrix3x2f();
-		Canvas.scissorPose(scissor, new Matrix3x2f().scale(1.0F / g, 1.0F / g), g);
+		Frame.scissorPose(scissor, new Matrix3x2f().scale(1.0F / g, 1.0F / g), g);
 		ScreenRectangle landed = new ScreenRectangle(gui[0], gui[1], gui[2] - gui[0], gui[3] - gui[1]).transformAxisAligned(scissor);
 		// GuiRenderer multiplies by the GUI scale: the scissor in pixels must sit inside 14..44.
 		assertTrue(landed.top() * g >= 10 + offset, "top " + landed.top() * g);

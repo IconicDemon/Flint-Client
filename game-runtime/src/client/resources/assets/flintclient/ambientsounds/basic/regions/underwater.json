@@ -1,0 +1,56 @@
+{
+	"name": "underwater",
+	"mute": 0.95,
+	"mute-priority": 10,
+	"fade-volume": 0.1,
+	"fade-pitch": 0.1,
+	"pitch": 2,
+	"underwater": {
+		"min": 0.01
+	},
+	"underwater-pitch": {
+		"min": 0,
+		"max": 1,
+		"distance-factor": -0.1
+	},
+	"sounds": [
+		{
+			"name": "underwater",
+			"files": [
+				"minecraft:ambient.underwater.loop.additions"
+			],
+			"pause": {
+				"min": 20,
+				"max": 100
+			},
+			"pitch": 1,
+			"underwater-pitch": {
+				"min": 0,
+				"max": 1,
+				"distance-factor": 0
+			}
+		},
+		{
+			"name": "underwater-deep",
+			"files": [
+				"minecraft:ambient.underwater.loop.additions.ultra_rare"
+			],
+			"fade-volume": 0.05,
+			"mute": 1,
+			"underwater": {
+				"min": 7
+			},
+			"pause": {
+				"min": 100,
+				"max": 600
+			},
+			"pitch": 1,
+			"volume": 0.8,
+			"underwater-pitch": {
+				"min": 0,
+				"max": 1,
+				"distance-factor": 0
+			}
+		}
+	]
+}

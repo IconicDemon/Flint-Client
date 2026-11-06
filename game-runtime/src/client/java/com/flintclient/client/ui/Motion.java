@@ -1,7 +1,7 @@
 package com.flintclient.client.ui;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.util.Util;
+import com.flintclient.client.platform.Clock;
+import com.flintclient.client.platform.Services;
 
 /**
  * Frame-time-aware easing for Flint's UI. Values approach their target exponentially using the real
@@ -22,7 +22,7 @@ public final class Motion {
 
 	/** Called once at the start of each Flint frame (by {@link FlintFrame#begin}). */
 	public static void tickFrame() {
-		long now = Util.getNanos();
+		long now = Clock.nanos();
 		frameSeconds = lastFrameNanos == 0 ? 0 : Math.min((now - lastFrameNanos) / 1.0E9F, 0.1F);
 		lastFrameNanos = now;
 	}
@@ -50,12 +50,30 @@ public final class Motion {
 	}
 
 	/**
-	 * Minecraft has no "reduce motion" setting; a panorama speed of 0 (Accessibility settings) is the
-	 * closest signal, so Flint then switches transitions off and shows everything immediately.
+	 * The game's reduced-motion signal ({@link Services#reducedMotion}): on 26.x a panorama speed of 0 (Minecraft has no "reduce
+	 * motion" setting), so Flint then switches transitions off and shows everything immediately.
 	 */
 	public static boolean reduced() {
-		Minecraft minecraft = Minecraft.getInstance();
-		return minecraft.options != null && minecraft.options.panoramaSpeed().get() <= 0.0;
+		return Services.reducedMotion();
+	}
+
+	/**
+	 * Moves {@code current} towards {@code target} at a constant rate: 0 to 1 in {@code millis} of real frame time (the same at
+	 * 30 or 360 FPS; a change of target mid-way turns back from where it is). Draw the result through an ease
+	 * ({@link #smooth}, {@link #easeOut}) for a fade that starts and ends softly.
+	 */
+	public static float toward(float current, float target, float millis) {
+		if (reduced() || millis <= 0) {
+			return target;
+		}
+		float delta = frameSeconds * 1000.0F / millis;
+		return current < target ? Math.min(target, current + delta) : Math.max(target, current - delta);
+	}
+
+	/** Smoothstep: eases in and out (hover fades). */
+	public static float smooth(float t) {
+		float u = Math.clamp(t, 0.0F, 1.0F);
+		return u * u * (3.0F - 2.0F * u);
 	}
 
 	/** Ease-out cubic for one-shot entrances. */

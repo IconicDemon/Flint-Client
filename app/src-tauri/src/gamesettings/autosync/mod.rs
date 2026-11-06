@@ -1,5 +1,7 @@
-//! Auto Sync: one switch (Settings → General) that keeps Flint profiles' compatible game settings, resource
-//! packs, shaders and mod settings consistent, automatically and safely.
+//! Auto Sync: keeps Flint profiles' compatible game settings, key bindings, resource packs, shaders, mod
+//! settings and, when turned on, server lists, saved hotbars and command history consistent, automatically and
+//! safely, between the profiles on this computer. Settings → Syncing has its switch, one switch per kind of
+//! thing it shares (`switches`), and the profiles left out of it. Nothing is ever uploaded.
 //!
 //! It is event-driven, with no polling, watchers or background service:
 //! - `before_launch` (while the profile is held, before the game starts) first records what the player
@@ -9,29 +11,42 @@
 //! - `after_exit` records what the player changed in the game that just ended (after a crash, only files
 //!   that read back whole). Other profiles pick the changes up at their own next launch, so a running game
 //!   is never written to.
-//! - `set_enabled` turns it on (taking every existing profile as it is) or off (nothing removed).
+//! - `set_enabled` turns it on (taking every existing profile as it is) or off (nothing removed);
+//!   `set_switch` turns one kind on or off, and `set_excluded` leaves a profile out or puts it back.
 //!
 //! Source of truth: the store keeps each entry's newest value with a revision number. A profile changed an
 //! entry when its current value differs from its last-seen value (`store::ProfileSync`), never by file
 //! times; changes become new revisions, and the last change of an entry wins. Writes into a profile are one
 //! transaction (`apply::commit`): backup, stage, fingerprint check, move into place, read back, roll back.
 //!
-//! Turning Auto Sync on seeds the store from the most recently played eligible profile; every profile that
-//! exists then is taken as it is at its first launch or exit (last-seen = its own values), so nothing is
-//! overwritten until a genuine change happens. Profiles created later get the whole store at their first
-//! launch. Turning it off stops both hooks and keeps everything; turning it back on takes every profile as
-//! it is again.
+//! Across versions, Minecraft's own settings are matched key by key: a value goes only where that version
+//! has the key and accepts the value (`plan`), each profile keeps its own `version:` line, and 1.8.9's
+//! different options.txt is translated both ways (`legacy189`). Resource packs are selected only where they
+//! fit the version and never cross into or out of 1.8.9; Flint's own files follow between 26.x profiles only.
+//! Servers go to every version (hidden ones never to 1.8.9), hotbars only to the same or a newer version
+//! from 1.20.5 on, command history between 1.21 and newer (`gamefiles`).
+//!
+//! Turning Auto Sync on seeds the store from one profile (the most recently played eligible one, or the one
+//! the player picked); every profile that exists then is taken as it is at its first launch or exit
+//! (last-seen = its own values), so nothing is overwritten until a genuine change happens. Profiles created
+//! later get the whole store at their first launch. Turning it off stops both hooks and keeps everything;
+//! turning it back on starts the store again from one profile and takes every profile as it is again.
+//! Turning one switch on does the same for its entries alone (`Gate`).
 
+pub(super) mod gamefiles;
 pub(super) mod jsonedit;
 pub(super) mod mods;
+pub(super) mod nbt;
 pub(super) mod packs;
 pub(super) mod props;
 pub(super) mod store;
+pub(crate) mod switches;
 #[cfg(test)]
 mod tests;
 
 use super::apply::{self, Content, FileWrite, Hooks, TxnError};
 use super::flintfiles::{self, FlintDocs, JsonFile, JsonFileOrMissing, Schema};
+use super::legacy189;
 use super::options_txt::OptionsDoc;
 use super::plan::{self, OptionsFile, ProfileDocs};
 use super::registry::{self, check_key, Bind, KeyCheck, Repr, Setting, SyncCategory, KEY_PREFIX};
@@ -39,6 +54,7 @@ use super::tables::{FamilyData, FAMILIES};
 use super::versions::{self, SupportLevel, VersionSupport};
 use crate::core::{now_secs, profile_running, started_elsewhere, AppState, CmdResult, ProcessScan};
 use crate::data::{blocking, Profile, ProfilesFile};
+use gamefiles::{COMMANDS_FILE, HOTBAR_FILE, SERVERS_FILE};
 use packs::{Fit, Folder, Library, Pack};
 use props::PropsDoc;
 use serde::Serialize;
@@ -46,12 +62,19 @@ use serde_json::{json, Value as Json};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use store::{Entry, Loaded, ProfileSync, State};
+use store::{Entry, LastSync, Loaded, Mark, ProfileSync, State, SwitchStart};
+use switches::{Choices, Switch};
 use tauri::AppHandle;
 
 /// One Auto Sync operation at a time in this Flint (captures, applies, turning it on or off): revisions
 /// are handed out in a fixed order and no two operations interleave.
 static SYNC: Mutex<()> = Mutex::new(());
+
+/// Holds off Auto Sync while a profile's folder moves (profilefolder.rs), after the pass running now. Passes never wait
+/// for the profiles lock, so holding that one while waiting here is safe.
+pub fn hold() -> std::sync::MutexGuard<'static, ()> {
+    SYNC.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 const MAX_OPTIONS: u64 = 4 * 1024 * 1024;
 const OPTIONS: &str = "options/";
@@ -63,6 +86,10 @@ const MODS: &str = "mods/";
 const SELECTION: &str = "selection";
 const RESOURCE_PACKS_KEY: &str = "resourcePacks";
 const INCOMPATIBLE_KEY: &str = "incompatibleResourcePacks";
+const SERVERS: &str = "servers/";
+const SERVER_ORDER: &str = "servers/order";
+const HOTBARS_KEY: &str = "hotbars/hotbar.nbt";
+const COMMANDS_KEY: &str = "commands/command_history.txt";
 /// Control Center sections synced whole, key by key.
 const CC_SECTIONS: &[&str] = &["sounds", "motion", "accessibility", "hud"];
 const ALL_MINECRAFT: [SyncCategory; 8] = [
@@ -76,7 +103,7 @@ const ALL_MINECRAFT: [SyncCategory; 8] = [
     SyncCategory::Language,
 ];
 
-/// Settings → General → "Auto Sync" (on unless turned off).
+/// Settings → Syncing → "Auto Sync" (on unless turned off).
 pub fn setting_enabled(state: &AppState) -> bool {
     crate::data::load_settings(state)["autoSync"].as_bool().unwrap_or(true)
 }
@@ -148,6 +175,8 @@ struct View {
     mods: BTreeMap<String, String>,
     /// Flint's in-game runtime is there (or has run there), so Flint's own files and keys are used.
     runtime: bool,
+    /// Minecraft 1.8.9: its options.txt is translated (`legacy189`), and resource packs don't cross over.
+    legacy: bool,
 }
 
 impl View {
@@ -155,6 +184,7 @@ impl View {
         let dir = state.paths.profile_dir(&profile.id);
         let support = versions::resolve(&state.paths.game(), &profile.game_version);
         View {
+            legacy: support.legacy(),
             family: support.family(),
             resource_format: versions::resource_format(&state.paths.game(), &profile.game_version),
             mods: mods::installed(&dir),
@@ -167,8 +197,25 @@ impl View {
         }
     }
 
+    /// A version Flint has checked, so values are brought in: a verified family, or 1.8.9.
     fn eligible(&self) -> bool {
-        self.family.is_some()
+        self.family.is_some() || self.legacy
+    }
+
+    /// The family it is met as, for its record: "" when it isn't eligible.
+    fn met_as(&self) -> &'static str {
+        match self.family {
+            Some(family) => family.id,
+            None if self.legacy => legacy189::FAMILY,
+            None => "",
+        }
+    }
+
+    /// Flint's own files (HUD layouts, Control Center preferences, server shortcuts) are brought into 26.x
+    /// profiles, as they always were; Auto Sync carries Minecraft's own settings to 1.21.x and 1.8.9, not the
+    /// Flint menu's.
+    fn takes_flint_files(&self) -> bool {
+        self.family.is_some_and(|f| !f.id.starts_with("1."))
     }
 
     fn has_iris(&self) -> bool {
@@ -209,6 +256,80 @@ struct Snap {
     too_large: Vec<Folder>,
     /// iris.properties when Iris is installed: its text and SHA-256.
     iris: Option<(PropsDoc, String)>,
+    lists: Lists,
+}
+
+/// The game's own lists in a profile (`gamefiles`), as read.
+#[derive(Default)]
+struct Lists {
+    /// servers.dat, when there is one and it reads whole.
+    servers: Option<gamefiles::ServerList>,
+    /// servers.dat is there but can't be read whole: none of its servers are taken or written.
+    servers_problem: bool,
+    /// Each list file that is there, with its SHA-256 when it could be read.
+    shas: BTreeMap<&'static str, Option<String>>,
+    /// command_history.txt as read, and the SHA-256 of what of it is shared (no login commands).
+    commands: Option<(Vec<u8>, String)>,
+}
+
+/// Reads the game's own lists into `items`: every server (by address) and their order, the saved hotbars and
+/// the command history. 1.8.9 keeps neither of the last two. After a crash (`strict`), a command history that
+/// doesn't end its last line isn't taken (NBT files only read at all when whole).
+fn read_lists(view: &View, strict: bool, items: &mut BTreeMap<String, Item>) -> Lists {
+    let mut lists = Lists::default();
+    let mut read = |rel: &'static str| -> Option<Vec<u8>> {
+        let path = view.dir.join(rel);
+        path.symlink_metadata().ok()?;
+        let bytes = read_capped(&path, gamefiles::MAX_FILE);
+        lists.shas.insert(rel, bytes.as_deref().map(sha));
+        bytes
+    };
+    let servers = read(SERVERS_FILE);
+    let (hotbar, commands) = if view.legacy { (None, None) } else { (read(HOTBAR_FILE), read(COMMANDS_FILE)) };
+    if let Some(bytes) = servers {
+        match gamefiles::read_servers(&bytes) {
+            Ok(list) => {
+                for server in &list.servers {
+                    let bytes = gamefiles::server_bytes(&server.tag);
+                    let mut item = Item::plain(sha(&bytes), gamefiles::server_fp(&server.tag));
+                    item.content = Some(ItemContent::Blob(bytes));
+                    items.insert(format!("{SERVERS}{}", server.id), item);
+                }
+                let order = serde_json::to_string(&list.servers.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()).unwrap_or_default();
+                items.insert(SERVER_ORDER.into(), Item::plain(order.clone(), order));
+                lists.servers = Some(list);
+            }
+            Err(_) => lists.servers_problem = true,
+        }
+    } else if lists.shas.contains_key(SERVERS_FILE) {
+        lists.servers_problem = true;
+    } else {
+        // No list yet is an empty one, so the first list made here joins the shared order.
+        items.insert(SERVER_ORDER.into(), Item::plain("[]".into(), "[]".into()));
+    }
+    // A list Flint can't make sense of counts as unreadable, so it is never written over.
+    if hotbar.as_deref().is_some_and(|b| gamefiles::hotbar_version(b).is_none()) {
+        lists.shas.insert(HOTBAR_FILE, None);
+    }
+    if commands.as_deref().is_some_and(|b| std::str::from_utf8(b).is_err()) {
+        lists.shas.insert(COMMANDS_FILE, None);
+    }
+    if let Some(bytes) = hotbar.filter(|b| gamefiles::hotbar_version(b).is_some()) {
+        let mut item = Item::plain(sha(&bytes), sha(&bytes));
+        item.content = Some(ItemContent::Blob(bytes));
+        items.insert(HOTBARS_KEY.into(), item);
+    }
+    if let Some(bytes) = commands.filter(|b| std::str::from_utf8(b).is_ok()) {
+        // Login commands carry passwords: only the rest is ever stored or compared.
+        let shared = gamefiles::shared_commands(&bytes);
+        if !strict || bytes.is_empty() || bytes.ends_with(b"\n") {
+            let mut item = Item::plain(sha(&shared), gamefiles::commands_fp(&shared));
+            item.content = Some(ItemContent::Blob(shared.clone()));
+            items.insert(COMMANDS_KEY.into(), item);
+        }
+        lists.commands = Some((bytes, sha(&shared)));
+    }
+    lists
 }
 
 fn read_capped(path: &Path, limit: u64) -> Option<Vec<u8>> {
@@ -350,17 +471,26 @@ fn snapshot(view: &View, cache: &mut BTreeMap<String, store::CachedPack>, strict
         None if !exists => (OptionsFile::Missing, false),
         None => (OptionsFile::Unreadable("options.txt can't be read.".into()), true),
         Some(bytes) => match OptionsDoc::parse(bytes) {
-            Ok(doc) if doc.data_version().is_some() && (!strict || bytes.ends_with(b"\n")) => (OptionsFile::Ok(doc), false),
+            // 1.8.9's files never have a version line.
+            Ok(doc) if (view.legacy || doc.data_version().is_some()) && (!strict || bytes.ends_with(b"\n")) => (OptionsFile::Ok(doc), false),
             Ok(_) => (OptionsFile::Damaged("options.txt has no version line or was cut short.".into()), true),
             Err(reason) => (OptionsFile::Damaged(reason), true),
         },
     };
-    if let OptionsFile::Ok(doc) = &options {
-        option_items(doc, view.family, &mut items);
+    match &options {
+        // 1.8.9's values as the newer versions write them, so every profile compares and stores them alike.
+        OptionsFile::Ok(doc) if view.legacy => option_items(&legacy189::to_modern(doc), Some(legacy189::reference_family()), &mut items),
+        OptionsFile::Ok(doc) => option_items(doc, view.family, &mut items),
+        _ => {}
     }
     let mut packs = BTreeMap::new();
     let mut too_large = Vec::new();
     for folder in [Folder::Resource, Folder::Shader] {
+        // 1.8.9's packs (format 1) and the newer versions' never fit each other's game: none cross over.
+        if view.legacy {
+            packs.insert(folder, Vec::new());
+            continue;
+        }
         let (found, large) = packs::scan(&view.dir, folder, cache);
         if !large.is_empty() {
             too_large.push(folder);
@@ -377,7 +507,7 @@ fn snapshot(view: &View, cache: &mut BTreeMap<String, store::CachedPack>, strict
         packs.insert(folder, found);
     }
     // The resource pack selection, by content.
-    if let OptionsFile::Ok(doc) = &options {
+    if let (OptionsFile::Ok(doc), false) = (&options, view.legacy) {
         let names: BTreeMap<String, String> = packs[&Folder::Resource].iter().map(|p| (p.name.clone(), p.sha.clone())).collect();
         if let Some(list) = pack_list(doc, RESOURCE_PACKS_KEY) {
             let hashes: Vec<String> = list.iter().filter_map(|e| file_name(e, &names)).filter_map(|n| names.get(n).cloned()).collect();
@@ -405,6 +535,7 @@ fn snapshot(view: &View, cache: &mut BTreeMap<String, store::CachedPack>, strict
         }
     }
     flint_items(&view.dir, &mut items);
+    let lists = read_lists(view, strict, &mut items);
     for (rel, (mod_id, _class)) in mods::files(&view.dir, &view.mods) {
         let Some(bytes) = read_capped(&view.dir.join("config").join(&rel), mods::MAX_CONFIG) else { continue };
         let format = mods::format_of(&rel);
@@ -420,12 +551,25 @@ fn snapshot(view: &View, cache: &mut BTreeMap<String, store::CachedPack>, strict
         item.content = Some(ItemContent::Blob(bytes));
         items.insert(format!("{MODS}{mod_id}/{rel}"), item);
     }
-    Snap { items, options_sha: bytes.as_deref().map(sha), options, options_problem, packs, too_large, iris }
+    Snap { items, options_sha: bytes.as_deref().map(sha), options, options_problem, packs, too_large, iris, lists }
 }
 
 // ---------- the store's content (library and mod settings) ----------
 
+/// Where the store keeps an entry's content, by its SHA-256: mod settings under `mods/<modid>/`, the game's
+/// own lists under `files/` (each server on its own).
 fn blob_path(store_root: &Path, key: &str, value: &str) -> Option<PathBuf> {
+    let list = match key {
+        HOTBARS_KEY => Some("hotbars"),
+        COMMANDS_KEY => Some("commands"),
+        SERVER_ORDER => None,
+        _ if key.starts_with(SERVERS) => Some("servers"),
+        _ => None,
+    };
+    if let Some(folder) = list {
+        let hex = value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
+        return hex.then(|| store_root.join("files").join(folder).join(value));
+    }
     let rest = key.strip_prefix(MODS)?;
     let mod_id = rest.split('/').next()?;
     if mod_id.is_empty() || !mod_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.') || mod_id.starts_with('.') {
@@ -437,7 +581,8 @@ fn blob_path(store_root: &Path, key: &str, value: &str) -> Option<PathBuf> {
     Some(store_root.join("mods").join(mod_id).join(value))
 }
 
-/// Keeps a captured item's content in the store (packs in the library, mod settings in `mods/`).
+/// Keeps a captured item's content in the store (packs in the library, mod settings in `mods/`, the game's
+/// lists in `files/`).
 fn keep_content(store_root: &Path, library: &mut Library, key: &str, item: &Item, copier: packs::Copier, dir: &Path) -> Result<(), String> {
     match &item.content {
         Some(ItemContent::Pack(folder, pack)) => packs::add_to_library(store_root, library, *folder, pack, &dir.join(folder.dir()).join(&pack.name), copier),
@@ -502,17 +647,24 @@ struct Ctx<'a> {
 
 /// Records what changed in a profile since Flint last looked: each changed entry becomes a new revision
 /// with this profile as its origin. Returns the captured keys.
+#[cfg(test)]
 fn capture(ctx: &Ctx, st: &mut State, library: &mut Library, view: &View, snap: &Snap, sync: &ProfileSync) -> Vec<String> {
+    capture_with(ctx, st, library, view, snap, sync, &|_| true)
+}
+
+/// `capture` of the entries `takes` lets through (the switches that are on and that this profile has been met
+/// under, see `Gate`).
+fn capture_with(ctx: &Ctx, st: &mut State, library: &mut Library, view: &View, snap: &Snap, sync: &ProfileSync, takes: &dyn Fn(&str) -> bool) -> Vec<String> {
     let now = now_secs();
     let mut captured = Vec::new();
-    for (key, item) in &snap.items {
+    for (key, item) in snap.items.iter().filter(|(key, _)| takes(key)) {
         let mut item = item.clone();
         let introduced = match sync.seen.get(key) {
             Some(seen) if *seen == item.fp => continue,
             Some(_) => false,
             // New here: if the store already has a value for it, that one is brought in instead (unless the
-            // store only says the pack was deleted elsewhere: then it was added back here).
-            None if st.entries.get(key).is_some_and(|e| !(key.starts_with("packs/") && e.value.is_empty())) => continue,
+            // store only says the pack or server was deleted elsewhere: then it was added back here).
+            None if st.entries.get(key).is_some_and(|e| !((key.starts_with("packs/") || key.starts_with(SERVERS)) && e.value.is_empty())) => continue,
             None => true,
         };
         if key == "packs/resourcepacks/selection" {
@@ -524,6 +676,12 @@ fn capture(ctx: &Ctx, st: &mut State, library: &mut Library, view: &View, snap: 
                 // Never here (as opposed to deleted here).
                 None => !sync.seen.contains_key(&format!("packs/resourcepacks/{hash}")),
             });
+            item.value = serde_json::to_string(&merged).unwrap_or_default();
+        }
+        if key == SERVER_ORDER {
+            // Servers this profile never had keep their places in the shared order.
+            let mine: Vec<String> = serde_json::from_str(&item.value).unwrap_or_default();
+            let merged = merged_selection(st.entries.get(key).map(|e| e.value.as_str()), &mine, |id| !sync.seen.contains_key(&format!("{SERVERS}{id}")));
             item.value = serde_json::to_string(&merged).unwrap_or_default();
         }
         // Changed here, but to what the store already has (by meaning): nothing new.
@@ -552,9 +710,13 @@ fn capture(ctx: &Ctx, st: &mut State, library: &mut Library, view: &View, snap: 
         detail(|| format!("{key}: captured as revision {rev}"));
         captured.push(key.clone());
     }
-    // A pack deleted here leaves the selection elsewhere; its files elsewhere are never deleted.
-    for (key, _) in sync.seen_with("packs/") {
-        if key.ends_with(SELECTION) || snap.items.contains_key(key) {
+    // A pack deleted here leaves the selection elsewhere; its files elsewhere are never deleted. 1.8.9 doesn't
+    // take part in packs, so packs it saw before are never taken for deleted.
+    // A server removed here (from a list that reads whole) leaves the other profiles' lists too.
+    let packs_gone = sync.seen_with("packs/").filter(|_| !view.legacy).filter(|(key, _)| !key.ends_with(SELECTION));
+    let servers_gone = sync.seen_with(SERVERS).filter(|_| snap.lists.servers.is_some()).filter(|(key, _)| key.as_str() != SERVER_ORDER);
+    for (key, _) in packs_gone.chain(servers_gone) {
+        if snap.items.contains_key(key) || !takes(key) {
             continue;
         }
         if st.entries.get(key).is_some_and(|e| !e.value.is_empty()) {
@@ -651,6 +813,38 @@ fn apply_options(view: &View, options: &OptionsFile, entries: &[(&String, &Entry
             work.applied.insert((*key).clone());
         } else {
             work.deferred.insert((*key).clone(), "doesn't fit this profile's version yet".into());
+        }
+    }
+    Some(doc)
+}
+
+/// Brings options.txt entries into a 1.8.9 profile, each translated by `legacy189` (its key codes, number and
+/// language spellings); what 1.8.9 doesn't have waits. Every other line of its file stays as it is, and a
+/// profile without a file yet gets one holding only these values (1.8.9 fills in the rest when it starts).
+fn apply_legacy_options(options: &OptionsFile, entries: &[(&String, &Entry)], work: &mut Work) -> Option<OptionsDoc> {
+    let mut doc = match options {
+        OptionsFile::Ok(doc) => doc.clone(),
+        OptionsFile::Missing => OptionsDoc::parse(b"").ok()?,
+        _ => return None,
+    };
+    let catalogue = registry::catalogue(Some(legacy189::reference_family()));
+    for (key, entry) in entries {
+        let option = &key[OPTIONS.len()..];
+        let raw = legacy189::covers(option)
+            .then(|| setting_for(option, &catalogue))
+            .flatten()
+            .and_then(|setting| setting.decode(&entry.value))
+            .and_then(|value| legacy189::from_modern(option, &value, &doc));
+        match raw {
+            Some(raw) => {
+                if doc.get(option) != Some(raw.as_str()) {
+                    doc.set(option, &raw);
+                }
+                work.applied.insert((*key).clone());
+            }
+            None => {
+                work.deferred.insert((*key).clone(), "Minecraft 1.8.9 doesn't have this setting or value".into());
+            }
         }
     }
     Some(doc)
@@ -983,17 +1177,175 @@ fn candidates<'a>(st: &'a State, sync: &ProfileSync, snap: &Snap, captured: &BTr
         .collect()
 }
 
-/// Works out and writes everything the store has for this profile. Returns the report of what fit.
-/// The profile being brought in line: what it is, what it holds now and its record.
+/// Brings the store's servers into this profile's list, one by one: a changed server is replaced where it is
+/// (keeping the tags only this profile writes, `gamefiles::merged`), a new one added, a removed one taken out,
+/// and the list put in the store's order with this profile's own servers kept where they were. Hidden servers
+/// never go to 1.8.9; a list 1.8.9 couldn't read whole waits.
+fn apply_servers(ctx: &Ctx, st: &State, view: &View, snap: &Snap, entries: &[(&String, &Entry)], work: &mut Work) {
+    if entries.is_empty() {
+        return;
+    }
+    let wait = |work: &mut Work, reason: &str| {
+        for (key, _) in entries {
+            work.deferred.insert((*key).clone(), reason.to_owned());
+        }
+    };
+    if snap.lists.servers_problem {
+        return wait(work, "this profile's server list can't be read");
+    }
+    let current = snap.lists.servers.as_ref();
+    let mut have: Vec<(String, nbt::Compound)> = current.map(|l| l.servers.iter().map(|s| (s.id.clone(), s.tag.clone())).collect()).unwrap_or_default();
+    let before = have.clone();
+    let mut missing = Vec::new();
+    for (key, entry) in entries.iter().filter(|(k, _)| k.as_str() != SERVER_ORDER) {
+        let id = &key[SERVERS.len()..];
+        let at = have.iter().position(|(h, _)| h == id);
+        if entry.value.is_empty() {
+            if let Some(i) = at {
+                have.remove(i);
+            }
+            continue;
+        }
+        let Some(stored) = read_blob(&ctx.store_root, key, &entry.value).and_then(|b| gamefiles::server_from(&b)) else {
+            missing.push((*key).clone());
+            continue;
+        };
+        match at {
+            Some(i) => have[i].1 = gamefiles::merged(&stored, Some(&have[i].1)),
+            None if view.legacy && gamefiles::hidden(&stored) => {}
+            None => have.push((id.to_owned(), stored)),
+        }
+    }
+    if let Some(order) = st.entries.get(SERVER_ORDER).and_then(|e| serde_json::from_str::<Vec<String>>(&e.value).ok()) {
+        let ids: Vec<String> = have.iter().map(|(id, _)| id.clone()).collect();
+        let wanted: Vec<String> = order.iter().filter(|id| ids.contains(id)).cloned().collect();
+        let arranged = merged_selection(serde_json::to_string(&ids).ok().as_deref(), &wanted, |id| !wanted.iter().any(|w| w == id));
+        have.sort_by_key(|(id, _)| arranged.iter().position(|a| a == id).unwrap_or(usize::MAX));
+    }
+    for key in missing {
+        work.deferred.insert(key, "the stored copy is missing".into());
+    }
+    if have == before {
+        return;
+    }
+    let tags: Vec<nbt::Compound> = have.into_iter().map(|(_, tag)| tag).collect();
+    let bytes = gamefiles::write_servers(current.map(|l| &l.root), &tags);
+    if view.legacy && bytes.len() > gamefiles::MAX_LEGACY_SERVERS {
+        return wait(work, "too large for Minecraft 1.8.9 to read");
+    }
+    work.writes.push(FileWrite::bytes(SERVERS_FILE, bytes, snap.lists.shas.get(SERVERS_FILE).cloned().flatten()));
+}
+
+/// Brings the saved hotbars or the command history in whole: the hotbars only where Minecraft can read them
+/// (`gamefiles::hotbar_fits`). A file that is there but couldn't be read isn't written over.
+fn apply_list_file(ctx: &Ctx, view: &View, snap: &Snap, key: &str, rel: &'static str, entry: &Entry, work: &mut Work) {
+    let current = snap.lists.shas.get(rel);
+    // What this profile shares of its file is the stored copy already (a command history's login commands aside).
+    let shared_now = if rel == COMMANDS_FILE { snap.lists.commands.as_ref().map(|(_, shared)| shared.clone()) } else { current.cloned().flatten() };
+    if entry.value.is_empty() || shared_now.as_deref() == Some(entry.value.as_str()) {
+        return;
+    }
+    let mut wait = |reason: &str| {
+        work.deferred.insert(key.to_owned(), reason.to_owned());
+    };
+    if current.is_some_and(Option::is_none) {
+        return wait("this profile's file can't be read");
+    }
+    let Some(bytes) = read_blob(&ctx.store_root, key, &entry.value) else { return wait("the stored copy is missing") };
+    if rel == HOTBAR_FILE {
+        let fits = gamefiles::hotbar_version(&bytes).ok_or("the stored copy is damaged").and_then(|saved| gamefiles::hotbar_fits(saved, view.support.data_version));
+        if let Err(reason) = fits {
+            return wait(reason);
+        }
+    }
+    let bytes = if rel == COMMANDS_FILE { gamefiles::commands_for(&bytes, snap.lists.commands.as_ref().map(|(raw, _)| raw.as_slice())) } else { bytes };
+    work.writes.push(FileWrite::bytes(rel, bytes, current.cloned().flatten()));
+}
+
+/// What a profile takes part in this time, switch by switch (Settings → Syncing). A switch that is off is left
+/// out entirely. A switch turned on since the profile was last met is "fresh" for it: its values for that
+/// switch are taken as they are (not captured, nothing overwritten), and of the store's entries for it only
+/// changes made after the switch was turned on come in, never the values it started from.
+struct Gate {
+    choices: Choices,
+    starts: BTreeMap<String, SwitchStart>,
+    marks: BTreeMap<String, Mark>,
+}
+
+impl Gate {
+    fn new(choices: &Choices, st: &State, sync: &ProfileSync) -> Gate {
+        Gate { choices: choices.clone(), starts: st.switches.clone(), marks: sync.marks.clone() }
+    }
+
+    fn start(&self, switch: Switch) -> SwitchStart {
+        self.starts.get(switch.id()).cloned().unwrap_or_default()
+    }
+
+    fn mark(&self, switch: Switch) -> Mark {
+        self.marks.get(switch.id()).copied().unwrap_or_default()
+    }
+
+    fn fresh(&self, switch: Switch) -> bool {
+        self.start(switch).epoch != self.mark(switch).epoch
+    }
+
+    /// The switch's entries at or below this revision are what it started from.
+    fn floor(&self, switch: Switch) -> u64 {
+        if self.fresh(switch) {
+            self.start(switch).since
+        } else {
+            self.mark(switch).floor
+        }
+    }
+
+    /// A change this profile made to `key` is recorded.
+    fn captures(&self, key: &str) -> bool {
+        let switch = Switch::of(key);
+        self.choices.on(switch) && !self.fresh(switch)
+    }
+
+    /// The store's `entry` for `key` is offered to this profile (a profile met for the first time gets
+    /// everything that is on).
+    fn offers(&self, key: &str, entry: &Entry, first_contact: bool) -> bool {
+        let switch = Switch::of(key);
+        self.choices.on(switch) && (first_contact || entry.rev > self.floor(switch))
+    }
+
+    /// The profile's marks once it has been taken in under every switch's latest start.
+    fn met(&self) -> BTreeMap<String, Mark> {
+        self.starts.iter().filter_map(|(id, start)| Switch::from_id(id).map(|s| (id.clone(), Mark { epoch: start.epoch, floor: self.floor(s) }))).collect()
+    }
+}
+
+/// Takes the profile as it is for the switches turned on since it was last met (see `Gate`).
+fn align(gate: &Gate, sync: &mut ProfileSync, snap: &Snap) {
+    let fresh = |key: &str| gate.fresh(Switch::of(key));
+    sync.seen.retain(|key, _| !fresh(key) || snap.items.contains_key(key));
+    for (key, item) in snap.items.iter().filter(|(key, _)| fresh(key)) {
+        sync.seen.insert(key.clone(), item.fp.clone());
+    }
+    sync.marks = gate.met();
+}
+
+/// The profile being brought in line: what it is, what it holds now, its record and what it takes part in.
 struct Here<'a> {
     view: &'a View,
     snap: &'a Snap,
     sync: &'a ProfileSync,
+    gate: &'a Gate,
 }
 
+/// Works out and writes everything the store has for this profile. Returns the report of what fit.
 fn apply(ctx: &Ctx, st: &State, library: &Library, here: &Here, captured: &BTreeSet<String>, first_contact: bool) -> Result<Work, TxnError> {
-    let Here { view, snap, sync } = *here;
-    let list = candidates(st, sync, snap, captured, first_contact);
+    let Here { view, snap, sync, gate } = *here;
+    let list: Vec<(&String, &Entry)> = candidates(st, sync, snap, captured, first_contact)
+        .into_iter()
+        // What this profile doesn't take part in isn't offered to it at all (see `View`; 1.8.9 keeps no hotbars
+        // or command history), nor what its switches leave out (`Gate`).
+        .filter(|(key, _)| !(view.legacy && (key.starts_with("packs/") || key.starts_with("hotbars/") || key.starts_with("commands/"))))
+        .filter(|(key, _)| view.takes_flint_files() || !key.starts_with(FLINT))
+        .filter(|(key, entry)| gate.offers(key, entry, first_contact))
+        .collect();
     let mut work = Work::default();
     if list.is_empty() {
         return Ok(work);
@@ -1011,6 +1363,8 @@ fn apply(ctx: &Ctx, st: &State, library: &Library, here: &Here, captured: &BTree
             OptionsFile::Ok(doc) => Some(doc.clone()),
             _ => None,
         }
+    } else if view.legacy {
+        apply_legacy_options(&snap.options, &options, &mut work)
     } else {
         apply_options(view, &snap.options, &options, &mut work)
     };
@@ -1028,8 +1382,9 @@ fn apply(ctx: &Ctx, st: &State, library: &Library, here: &Here, captured: &BTree
             work.writes.push(FileWrite { rel: "options.txt".into(), content: Content::Bytes(doc.to_string().into_bytes()), expect: snap.options_sha.clone(), checks });
         }
     } else if let (Some(doc), OptionsFile::Missing) = (&doc, &snap.options) {
-        // A profile that hasn't been played yet: a new options.txt with its version line and these values.
-        if doc.line_count() > 1 {
+        // A profile that hasn't been played yet: a new options.txt with its version line (none for 1.8.9) and
+        // these values.
+        if doc.line_count() > usize::from(!view.legacy) {
             work.writes.push(FileWrite::bytes("options.txt", doc.to_string().into_bytes(), None));
         }
     }
@@ -1039,6 +1394,12 @@ fn apply(ctx: &Ctx, st: &State, library: &Library, here: &Here, captured: &BTree
         apply_shader_selection(st, view, snap, &mut work, &mut pending, &shader_key);
     }
     apply_flint(view, &of(FLINT), &mut work);
+    apply_servers(ctx, st, view, snap, &of(SERVERS), &mut work);
+    for (key, rel) in [(HOTBARS_KEY, HOTBAR_FILE), (COMMANDS_KEY, COMMANDS_FILE)] {
+        if let Some((_, entry)) = list.iter().find(|(k, _)| k.as_str() == key) {
+            apply_list_file(ctx, view, snap, key, rel, entry, &mut work);
+        }
+    }
     for (rel, (bytes, expect)) in pending {
         work.writes.push(FileWrite::bytes(rel, bytes, expect));
     }
@@ -1063,71 +1424,126 @@ fn profiles(state: &AppState) -> Vec<Profile> {
     crate::core::read_json::<ProfilesFile>(&state.paths.profiles()).profiles
 }
 
-/// A new store, seeded from the most recently played eligible profile with an options.txt that isn't
-/// running; every existing profile is taken as it is at its first contact.
-fn seed(ctx: &Ctx, scan: &ProcessScan) -> State {
-    let mut st = State::new();
-    let all = profiles(ctx.state);
-    let mut library = packs::load_library(&ctx.store_root);
+/// A profile Auto Sync can start from now, read whole, or why it can't be.
+fn readable_source(ctx: &Ctx, scan: &ProcessScan, choices: &Choices, profile: &Profile) -> Result<(View, Snap), String> {
+    if choices.excludes(&profile.id) {
+        return Err("it's left out of Auto Sync".into());
+    }
+    // A game running in it (here or elsewhere) may be saving its files; a profile Flint is preparing to launch is
+    // held and safe to read.
+    if ctx.state.running.lock().unwrap().contains_key(&profile.id) || started_elsewhere(ctx.state, &profile.id, scan).is_some() {
+        return Err("its game is running".into());
+    }
+    let view = View::load(ctx.state, profile);
+    if !view.eligible() {
+        return Err(if crate::data::SUPPORTED_VERSIONS.contains(&view.game_version.as_str()) { "it isn't installed yet".into() } else { format!("Auto Sync doesn't change Minecraft {} files", view.game_version) });
+    }
+    let snap = snapshot(&view, &mut BTreeMap::new(), false);
+    match snap.options {
+        OptionsFile::Ok(_) => Ok((view, snap)),
+        OptionsFile::Missing => Err("it hasn't been played yet".into()),
+        _ => Err("its settings file can't be read".into()),
+    }
+}
+
+/// The profile the store (or a switch) starts from: `chosen`, which must be readable now, or else the most
+/// recently played eligible profile that is; None when no profile has been played yet.
+fn pick_source(ctx: &Ctx, scan: &ProcessScan, choices: &Choices, all: &[Profile], chosen: Option<&str>) -> Result<Option<(View, Snap)>, String> {
+    if let Some(id) = chosen {
+        let profile = all.iter().find(|p| p.id == id).ok_or("That profile no longer exists.")?;
+        return readable_source(ctx, scan, choices, profile).map(Some).map_err(|why| format!("Auto Sync can't start from ‘{}’: {why}.", profile.name));
+    }
     let mut played: Vec<&Profile> = all.iter().filter(|p| p.last_played.is_some()).collect();
     played.sort_by_key(|p| std::cmp::Reverse(p.last_played));
-    for profile in played {
-        // A game running in it (here or elsewhere) may be saving its files; a profile Flint is preparing to
-        // launch is held and safe to read.
-        if ctx.state.running.lock().unwrap().contains_key(&profile.id) || started_elsewhere(ctx.state, &profile.id, scan).is_some() {
+    Ok(played.into_iter().find_map(|p| readable_source(ctx, scan, choices, p).ok()))
+}
+
+/// Puts the source's values for the switches `which` into the store, all as one new revision. Returns how many.
+fn fill(ctx: &Ctx, st: &mut State, library: &mut Library, (view, snap): &(View, Snap), which: impl Fn(Switch) -> bool) -> usize {
+    let rev = st.next_rev();
+    let now = now_secs();
+    let mut filled = 0;
+    for (key, item) in snap.items.iter().filter(|(key, _)| which(Switch::of(key))) {
+        if keep_content(&ctx.store_root, library, key, item, ctx.hooks.copier, &view.dir).is_err() {
             continue;
         }
-        let view = View::load(ctx.state, profile);
-        if !view.eligible() {
-            continue;
-        }
-        let snap = snapshot(&view, &mut BTreeMap::new(), false);
-        if !matches!(snap.options, OptionsFile::Ok(_)) {
-            continue;
-        }
-        let rev = st.next_rev();
-        let now = now_secs();
-        for (key, item) in &snap.items {
-            if keep_content(&ctx.store_root, &mut library, key, item, ctx.hooks.copier, &view.dir).is_err() {
-                continue;
-            }
-            st.entries.insert(
-                key.clone(),
-                Entry {
-                    value: item.value.clone(),
-                    rev,
-                    origin_profile: view.id.clone(),
-                    origin_family: item.family.clone(),
-                    updated_at: now,
-                    fp: item.fp.clone(),
-                    mod_version: item.mod_version.clone(),
-                    introduced: false,
-                },
-            );
-            record_mod_meta(&ctx.store_root, key, &st.entries[key]);
-        }
-        st.seeded_from = Some(view.id.clone());
-        log(&format!("turned on: seeded {} entries ({}) from the most recently played profile", st.entries.len(), counts(st.entries.keys())));
-        break;
+        st.entries.insert(
+            key.clone(),
+            Entry {
+                value: item.value.clone(),
+                rev,
+                origin_profile: view.id.clone(),
+                origin_family: item.family.clone(),
+                updated_at: now,
+                fp: item.fp.clone(),
+                mod_version: item.mod_version.clone(),
+                introduced: false,
+            },
+        );
+        record_mod_meta(&ctx.store_root, key, &st.entries[key]);
+        filled += 1;
     }
-    if st.seeded_from.is_none() {
-        log("turned on: no profile has been played yet, so the store starts empty");
+    filled
+}
+
+/// A new store, seeded from one profile (`pick_source`) with what its switches share; every existing profile is
+/// taken as it is at its first contact.
+fn seed(ctx: &Ctx, scan: &ProcessScan, choices: &Choices, chosen: Option<&str>) -> Result<State, String> {
+    let all = profiles(ctx.state);
+    let source = pick_source(ctx, scan, choices, &all, chosen)?;
+    let mut st = State::new();
+    let mut library = packs::load_library(&ctx.store_root);
+    match &source {
+        Some(found) => {
+            fill(ctx, &mut st, &mut library, found, |s| choices.on(s));
+            st.seeded_from = Some(found.0.id.clone());
+            log(&format!("turned on: seeded {} entries ({}) from {}", st.entries.len(), counts(st.entries.keys()), if chosen.is_some() { "the profile picked" } else { "the most recently played profile" }));
+        }
+        None => log("turned on: no profile has been played yet, so the store starts empty"),
     }
     st.baseline_rev = st.head();
     st.baseline_ids = all.iter().map(|p| p.id.clone()).collect();
     if let Err(e) = packs::save_library(&ctx.store_root, &library) {
         log(&format!("couldn't save the pack library ({e})"));
     }
-    st
+    Ok(st)
 }
 
-/// Turning Auto Sync back on: every existing profile is taken as it is again.
-fn rebaseline(ctx: &Ctx, st: &mut State) {
+/// Turning Auto Sync back on: the store starts again from one profile (what it held is from before it was turned
+/// off), and every existing profile is taken as it is again.
+fn rebaseline(ctx: &Ctx, st: &mut State, scan: &ProcessScan, choices: &Choices, chosen: Option<&str>) -> Result<(), String> {
+    let all = profiles(ctx.state);
+    let source = pick_source(ctx, scan, choices, &all, chosen)?;
+    let mut library = packs::load_library(&ctx.store_root);
+    st.entries.clear();
+    st.seeded_from = None;
+    if let Some(found) = &source {
+        fill(ctx, st, &mut library, found, |s| choices.on(s));
+        st.seeded_from = Some(found.0.id.clone());
+    }
     st.enabled = true;
     st.epoch += 1;
     st.baseline_rev = st.head();
-    st.baseline_ids = profiles(ctx.state).into_iter().map(|p| p.id).collect();
-    log("turned back on: every profile is taken as it is now");
+    st.baseline_ids = all.into_iter().map(|p| p.id).collect();
+    if let Err(e) = packs::save_library(&ctx.store_root, &library) {
+        log(&format!("couldn't save the pack library ({e})"));
+    }
+    log(&format!("turned back on: started again from {} entries; every profile is taken as it is now", st.entries.len()));
+    Ok(())
+}
+
+/// A switch turned on while Auto Sync is on: its entries start again from one profile, and every profile is
+/// taken as it is for them when next met (see `Gate`).
+fn restart(ctx: &Ctx, st: &mut State, switch: Switch, source: Option<&(View, Snap)>) {
+    let mut library = packs::load_library(&ctx.store_root);
+    st.entries.retain(|key, _| Switch::of(key) != switch);
+    let filled = source.map(|found| fill(ctx, st, &mut library, found, |s| s == switch)).unwrap_or(0);
+    let epoch = st.switch_start(switch.id()).epoch + 1;
+    st.switches.insert(switch.id().to_owned(), SwitchStart { epoch, since: st.head(), source: source.map(|(view, _)| view.id.clone()), at: now_secs() });
+    if let Err(e) = packs::save_library(&ctx.store_root, &library) {
+        log(&format!("couldn't save the pack library ({e})"));
+    }
+    log(&format!("{} turned on: started from {filled} entries", switch.id()));
 }
 
 fn save_state(ctx: &Ctx, st: &mut State, generation: u64) -> Result<(), String> {
@@ -1136,17 +1552,23 @@ fn save_state(ctx: &Ctx, st: &mut State, generation: u64) -> Result<(), String> 
 
 /// The store, made or re-baselined as the setting asks (holding `SYNC`).
 fn ensure(ctx: &Ctx, scan: &ProcessScan) -> Result<State, String> {
+    ensure_from(ctx, scan, None)
+}
+
+/// `ensure`, starting a new or re-enabled store from `chosen` when given.
+fn ensure_from(ctx: &Ctx, scan: &ProcessScan, chosen: Option<&str>) -> Result<State, String> {
+    let choices = switches::load(&ctx.store_root);
     let mut st = match store::load(&ctx.state.paths.root) {
         Loaded::Ok(st) if st.enabled => return Ok(st),
         Loaded::Ok(mut st) => {
-            rebaseline(ctx, &mut st);
+            rebaseline(ctx, &mut st, scan, &choices, chosen)?;
             st
         }
-        Loaded::Missing => seed(ctx, scan),
+        Loaded::Missing => seed(ctx, scan, &choices, chosen)?,
         Loaded::Damaged => {
             log("the store couldn't be read; it was set aside and a new one started");
             store::set_aside(&ctx.state.paths.root);
-            seed(ctx, scan)
+            seed(ctx, scan, &choices, chosen)?
         }
     };
     let generation = st.generation + 1;
@@ -1169,18 +1591,22 @@ fn mirror_off(ctx: &Ctx) {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Start {
-    /// A profile Auto Sync hasn't met that was created after it was turned on: it gets the whole store.
+    /// A profile Auto Sync hasn't met that was created after it was turned on, or one that couldn't take
+    /// values when it was last met and now can (a version Flint has since checked, a version installed since):
+    /// it gets the whole store. Its own changes until then were already taken at its launches and exits.
     FirstContact,
     /// Taken as it is (turned on while it existed, or its record can't be trusted).
     Baseline,
     Normal,
 }
 
-fn start(st: &State, id: &str, sync: &Option<ProfileSync>) -> Start {
+/// `met_as` is the family the profile is met as now (`View::met_as`).
+fn start(st: &State, id: &str, met_as: &str, sync: &Option<ProfileSync>) -> Start {
     match sync {
         None if st.baseline_ids.contains(id) => Start::Baseline,
         None => Start::FirstContact,
         Some(s) if s.pending_baseline || s.store != st.tag() || s.generation > st.generation => Start::Baseline,
+        Some(s) if !met_as.is_empty() && !s.could_take(met_as) => Start::FirstContact,
         Some(_) => Start::Normal,
     }
 }
@@ -1190,14 +1616,15 @@ fn seen_of(snap: &Snap) -> BTreeMap<String, String> {
 }
 
 /// Saves a profile's record and then the store (always last), as one generation.
-fn finish(ctx: &Ctx, st: &mut State, library: &Library, profile_dir: &Path, sync: Option<&mut ProfileSync>) {
+fn finish(ctx: &Ctx, st: &mut State, library: &Library, view: &View, sync: Option<&mut ProfileSync>) {
     let generation = st.generation + 1;
     if let Err(e) = packs::save_library(&ctx.store_root, library) {
         log(&format!("couldn't save the pack library ({e})"));
     }
     if let Some(sync) = sync {
         sync.store = st.tag();
-        if let Err(e) = store::save_profile(profile_dir, sync, generation) {
+        sync.met_as = Some(view.met_as().to_owned());
+        if let Err(e) = store::save_profile(&view.dir, sync, generation) {
             log(&format!("couldn't save a profile's sync record ({e})"));
         }
     }
@@ -1231,10 +1658,16 @@ pub fn before_launch(state: &AppState, profile: &Profile) -> Report {
 
 pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &ProcessScan, hooks: &Hooks) -> Report {
     let _one = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    let steps = crate::timing::Steps::new();
     let ctx = Ctx { state, store_root: store::root(&state.paths.root), hooks };
     if !setting_enabled(state) {
         mirror_off(&ctx);
         return Report::skip("off");
+    }
+    let choices = switches::load(&ctx.store_root);
+    if choices.excludes(&profile.id) {
+        log("before launch: this profile is left out of Auto Sync, so nothing was read or written");
+        return Report::skip("left out");
     }
     let mut st = match ensure(&ctx, scan) {
         Ok(st) => st,
@@ -1249,25 +1682,31 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
         log("before launch: this profile's game is already running, so nothing was synced");
         return Report::skip("running");
     }
+    steps.step("store");
     let view = View::load(state, profile);
+    steps.step("profile");
     let mut library = packs::load_library(&ctx.store_root);
     let previous = store::load_profile(&view.dir);
-    let begin = start(&st, &view.id, &previous);
+    steps.step("records");
+    let begin = start(&st, &view.id, view.met_as(), &previous);
+    let from = baseline_from(&st, &previous);
     let mut sync = previous.unwrap_or_else(|| ProfileSync::new(0));
     let mut report = Report::default();
     let snap = snapshot(&view, &mut sync.packs, false);
     too_large(&mut st, &mut report, &snap);
+    steps.step("read");
     let mut captured = BTreeSet::new();
     match begin {
         Start::Baseline => {
-            sync = ProfileSync { packs: std::mem::take(&mut sync.packs), seen: seen_of(&snap), ..ProfileSync::new(st.baseline_rev) };
+            sync = ProfileSync { packs: std::mem::take(&mut sync.packs), seen: seen_of(&snap), ..ProfileSync::new(from) };
         }
         Start::FirstContact if !view.eligible() => {
             sync = ProfileSync { packs: std::mem::take(&mut sync.packs), seen: seen_of(&snap), ..ProfileSync::new(st.head()) };
         }
         Start::FirstContact => {}
         Start::Normal => {
-            captured = capture(&ctx, &mut st, &mut library, &view, &snap, &sync).into_iter().collect();
+            let gate = Gate::new(&choices, &st, &sync);
+            captured = capture_with(&ctx, &mut st, &mut library, &view, &snap, &sync, &|key| gate.captures(key)).into_iter().collect();
             report.captured = captured.iter().cloned().collect();
             // What was just captured is what this profile has now.
             for key in &captured {
@@ -1278,10 +1717,12 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
             }
         }
     }
+    let gate = Gate::new(&choices, &st, &sync);
     if !view.eligible() {
+        align(&gate, &mut sync, &snap);
         report.skipped = Some("not verified");
         log(&format!("before launch: captured {} ({}); this version isn't verified, so nothing is brought in", captured.len(), counts(&captured)));
-        finish(&ctx, &mut st, &library, &view.dir, Some(&mut sync));
+        finish(&ctx, &mut st, &library, &view, Some(&mut sync));
         return report;
     }
     if snap.options_problem {
@@ -1294,11 +1735,13 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
         log("before launch: options.txt couldn't be read, so this profile was left alone");
         // A profile met for the first time is taken as it is only once its options can be read; until then
         // it has no record, so nothing in it is ever mistaken for new.
-        finish(&ctx, &mut st, &library, &view.dir, (begin == Start::Normal).then_some(&mut sync));
+        finish(&ctx, &mut st, &library, &view, (begin == Start::Normal).then_some(&mut sync));
         report.skipped = Some("unreadable");
         return report;
     }
-    let result = apply(&ctx, &st, &library, &Here { view: &view, snap: &snap, sync: &sync }, &captured, begin == Start::FirstContact);
+    steps.step("capture");
+    let result = apply(&ctx, &st, &library, &Here { view: &view, snap: &snap, sync: &sync, gate: &gate }, &captured, begin == Start::FirstContact);
+    steps.step("apply");
     match result {
         Ok(work) => {
             // Re-read the profile as it is now: that is its new last-seen.
@@ -1308,9 +1751,15 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
                 }
             }
             let after = if work.writes.is_empty() { snap } else { snapshot(&view, &mut sync.packs, false) };
-            sync.seen = seen_of(&after);
+            let mut seen = seen_of(&after);
+            if after.lists.servers_problem {
+                // A server list that can't be read now keeps what Flint last saw in it.
+                seen.extend(sync.seen_with(SERVERS).map(|(k, v)| (k.clone(), v.clone())));
+            }
+            sync.seen = seen;
             sync.applied_rev = st.head();
             sync.pending_baseline = false;
+            sync.marks = gate.met();
             let newly: Vec<&String> = work.deferred.keys().filter(|k| !sync.deferred.contains(*k)).collect();
             for key in &newly {
                 detail(|| format!("{key}: waits ({})", work.deferred[*key]));
@@ -1319,6 +1768,7 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
             report.applied = work.applied.iter().cloned().collect();
             report.backup = work.backup.clone();
             report.deferred = work.deferred.clone();
+            st.last = Some(Box::new(LastSync { at: now_secs(), profile: view.id.clone() }));
             log(&format!(
                 "before launch: captured {} ({}), brought in {} ({}) with {} file(s) written, {} waiting",
                 captured.len(),
@@ -1350,8 +1800,17 @@ pub(crate) fn before_launch_with(state: &AppState, profile: &Profile, scan: &Pro
     if library.total_size() > packs::LIBRARY_WARN {
         notice_for(&mut st, &mut report, "library-large".into(), "Auto Sync's pack library is over 10 GB.".into());
     }
-    finish(&ctx, &mut st, &library, &view.dir, Some(&mut sync));
+    finish(&ctx, &mut st, &library, &view, Some(&mut sync));
+    steps.step("save");
+    log(&format!("before launch took {}", steps.summary()));
     report
+}
+
+/// The revision a profile taken as it is starts from: the store's baseline, or for a profile put back into Auto
+/// Sync (`set_excluded`), the newest revision when it was, so what changed while it was left out isn't brought in.
+fn baseline_from(st: &State, record: &Option<ProfileSync>) -> u64 {
+    let rejoined = record.as_ref().filter(|r| r.pending_baseline && r.store == st.tag()).and_then(|r| r.rejoined);
+    rejoined.map_or(st.baseline_rev, |r| r.max(st.baseline_rev))
 }
 
 /// After a game ended: capture what the player changed. Nothing is written into any profile.
@@ -1366,6 +1825,10 @@ pub(crate) fn after_exit_with(state: &AppState, id: &str, exit: Exit, scan: &Pro
         mirror_off(&ctx);
         return Report::skip("off");
     }
+    let choices = switches::load(&ctx.store_root);
+    if choices.excludes(id) {
+        return Report::skip("left out");
+    }
     // Launched again already (that launch captures first), or another copy of its game is still running.
     if profile_running(state, id, scan).is_some() {
         return Report::skip("busy");
@@ -1378,11 +1841,12 @@ pub(crate) fn after_exit_with(state: &AppState, id: &str, exit: Exit, scan: &Pro
     let view = View::load(state, &profile);
     let mut library = packs::load_library(&ctx.store_root);
     let previous = store::load_profile(&view.dir);
-    let begin = start(&st, &view.id, &previous);
+    let begin = start(&st, &view.id, view.met_as(), &previous);
     if begin == Start::FirstContact && view.eligible() {
         // Its first launch brings the store in; until then its values aren't taken.
         return Report::skip("first contact");
     }
+    let from = baseline_from(&st, &previous);
     let mut sync = previous.unwrap_or_else(|| ProfileSync::new(st.head()));
     let mut report = Report::default();
     let snap = snapshot(&view, &mut sync.packs, exit == Exit::Unclean);
@@ -1393,12 +1857,14 @@ pub(crate) fn after_exit_with(state: &AppState, id: &str, exit: Exit, scan: &Pro
         if exit == Exit::Unclean || snap.options_problem {
             return Report::skip("baseline later");
         }
-        sync = ProfileSync { packs: std::mem::take(&mut sync.packs), seen: seen_of(&snap), ..ProfileSync::new(if begin == Start::Baseline { st.baseline_rev } else { st.head() }) };
-        finish(&ctx, &mut st, &library, &view.dir, Some(&mut sync));
+        sync = ProfileSync { packs: std::mem::take(&mut sync.packs), seen: seen_of(&snap), ..ProfileSync::new(if begin == Start::Baseline { from } else { st.head() }) };
+        st.last = Some(Box::new(LastSync { at: now_secs(), profile: view.id.clone() }));
+        finish(&ctx, &mut st, &library, &view, Some(&mut sync));
         report.skipped = Some("baseline");
         return report;
     }
-    let captured = capture(&ctx, &mut st, &mut library, &view, &snap, &sync);
+    let gate = Gate::new(&choices, &st, &sync);
+    let captured = capture_with(&ctx, &mut st, &mut library, &view, &snap, &sync, &|key| gate.captures(key));
     for (key, item) in &snap.items {
         // Files that didn't read back whole after a crash keep their last-seen value (no item for them);
         // values new here that the store already has stay unseen, so the store's comes in at next launch.
@@ -1411,9 +1877,14 @@ pub(crate) fn after_exit_with(state: &AppState, id: &str, exit: Exit, scan: &Pro
             sync.seen.remove(key);
         }
     }
+    // Switches turned on since this profile was last met take it as it is now (after a crash, at its next launch).
+    if exit == Exit::Clean {
+        align(&gate, &mut sync, &snap);
+    }
     log(&format!("after exit{}: captured {} ({})", if exit == Exit::Unclean { " (unclean)" } else { "" }, captured.len(), counts(&captured)));
     report.captured = captured;
-    finish(&ctx, &mut st, &library, &view.dir, Some(&mut sync));
+    st.last = Some(Box::new(LastSync { at: now_secs(), profile: view.id.clone() }));
+    finish(&ctx, &mut st, &library, &view, Some(&mut sync));
     report
 }
 
@@ -1444,7 +1915,13 @@ fn status_of(enabled: bool, st: Option<&State>) -> Status {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn set_enabled(state: &AppState, enabled: bool, scan: &ProcessScan, hooks: &Hooks) -> CmdResult<Status> {
+    set_enabled_from(state, enabled, None, scan, hooks)
+}
+
+/// Turns Auto Sync on (starting from `source`, or the most recently played eligible profile) or off.
+pub(crate) fn set_enabled_from(state: &AppState, enabled: bool, source: Option<&str>, scan: &ProcessScan, hooks: &Hooks) -> CmdResult<Status> {
     let _one = SYNC.lock().unwrap_or_else(|e| e.into_inner());
     let ctx = Ctx { state, store_root: store::root(&state.paths.root), hooks };
     if !enabled {
@@ -1455,8 +1932,83 @@ pub(crate) fn set_enabled(state: &AppState, enabled: bool, scan: &ProcessScan, h
         };
         return Ok(status_of(false, st.as_ref()));
     }
-    let st = ensure(&ctx, scan).map_err(|e| format!("Auto Sync couldn't save its data: {e}"))?;
+    let st = ensure_from(&ctx, scan, source).map_err(|e| if source.is_some() { e } else { format!("Auto Sync couldn't save its data: {e}") })?;
     Ok(status_of(true, Some(&st)))
+}
+
+/// Settings → Syncing: turns one kind of thing on or off. Turned on while Auto Sync is on, its entries start
+/// from `source` (or the most recently played eligible profile), and every profile keeps its own values for
+/// it until one of them is changed.
+pub(crate) fn set_switch(state: &AppState, switch: Switch, on: bool, source: Option<&str>, scan: &ProcessScan, hooks: &Hooks) -> CmdResult<()> {
+    let _one = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    let ctx = Ctx { state, store_root: store::root(&state.paths.root), hooks };
+    let mut choices = switches::load(&ctx.store_root);
+    if choices.on(switch) == on {
+        return Ok(());
+    }
+    choices.set(switch, on);
+    if on && setting_enabled(state) {
+        if let Loaded::Ok(mut st) = store::load(&state.paths.root) {
+            if st.enabled {
+                let all = profiles(state);
+                let found = pick_source(&ctx, scan, &choices, &all, source)?;
+                restart(&ctx, &mut st, switch, found.as_ref());
+                let generation = st.generation + 1;
+                save_state(&ctx, &mut st, generation).map_err(|e| format!("Auto Sync couldn't save its data: {e}"))?;
+            }
+        }
+    }
+    switches::save(&ctx.store_root, &choices).map_err(|e| format!("Auto Sync couldn't save its settings: {e}"))
+}
+
+/// A profile that arrives with settings of its own (imported from another launcher) is taken as it is when Auto Sync
+/// first meets it, as a profile put back into Auto Sync is: its options, keybinds, packs and mod settings stay its own
+/// instead of being replaced by the other profiles', and only what changes in it (or in them) afterwards is synced.
+/// Nothing to do while Auto Sync has no store yet: turning it on takes every existing profile as it is anyway.
+pub(crate) fn take_as_is(state: &AppState, id: &str) {
+    let _one = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    let Loaded::Ok(st) = store::load(&state.paths.root) else { return };
+    let dir = state.paths.profile_dir(id);
+    let mut record = store::load_profile(&dir).unwrap_or_default();
+    if record.store != st.tag() {
+        record = ProfileSync { packs: record.packs, store: st.tag(), ..ProfileSync::new(0) };
+    }
+    record.pending_baseline = true;
+    record.rejoined = Some(st.head());
+    let generation = record.generation.min(st.generation);
+    if let Err(e) = store::save_profile(&dir, &mut record, generation) {
+        eprintln!("[flint] auto sync: couldn't record an imported profile to be taken as it is: {e}");
+    }
+}
+
+/// Settings → Syncing: leaves a profile out of Auto Sync (its files are never read or written) or puts it back.
+/// Put back, it is taken as it is when next met: what changed in it while it was out isn't pushed to the other
+/// profiles, and what changed in them meanwhile doesn't overwrite it.
+pub(crate) fn set_excluded(state: &AppState, id: &str, excluded: bool) -> CmdResult<()> {
+    let _one = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    let profile = crate::data::find_profile(state, id)?;
+    let root = store::root(&state.paths.root);
+    let mut choices = switches::load(&root);
+    if choices.excludes(id) == excluded {
+        return Ok(());
+    }
+    if excluded {
+        choices.excluded.insert(id.to_owned());
+    } else {
+        choices.excluded.remove(id);
+        if let Loaded::Ok(st) = store::load(&state.paths.root) {
+            let dir = state.paths.profile_dir(&profile.id);
+            let mut record = store::load_profile(&dir).unwrap_or_default();
+            if record.store != st.tag() {
+                record = ProfileSync { packs: record.packs, store: st.tag(), ..ProfileSync::new(0) };
+            }
+            record.pending_baseline = true;
+            record.rejoined = Some(st.head());
+            let generation = record.generation.min(st.generation);
+            store::save_profile(&dir, &mut record, generation).map_err(|e| format!("Auto Sync couldn't save this profile's record: {e}"))?;
+        }
+    }
+    switches::save(&root, &choices).map_err(|e| format!("Auto Sync couldn't save its settings: {e}"))
 }
 
 pub(crate) fn status(state: &AppState) -> Status {
@@ -1478,9 +2030,128 @@ pub(crate) fn dismiss(state: &AppState, id: &str) -> Status {
     status(state)
 }
 
+// ---------- Settings → Syncing ----------
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchView {
+    pub id: &'static str,
+    pub on: bool,
+    /// The profile its entries last started from, when it was turned on while Auto Sync was on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileView {
+    pub id: String,
+    pub name: String,
+    pub game_version: String,
+    pub excluded: bool,
+    /// Auto Sync can start from it now (an eligible version, played, readable, not running, not left out).
+    pub can_start: bool,
+    /// Why it only gives (an unknown version) or joins later (not installed yet).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Auto Sync's backups of its files.
+    pub backups: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_backup: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_played: Option<u64>,
+}
+
+/// Everything Settings → Syncing shows, read without changing anything.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    pub enabled: bool,
+    pub waiting: bool,
+    pub notices: Vec<NoticeView>,
+    pub switches: Vec<SwitchView>,
+    /// Most recently played first.
+    pub profiles: Vec<ProfileView>,
+    /// The profile the store started from when Auto Sync was turned on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_from: Option<String>,
+    /// The profile Auto Sync would start from now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_source: Option<String>,
+    /// When Auto Sync last looked at a profile, and which.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync: Option<LastSync>,
+}
+
+/// Why Auto Sync doesn't bring values into a profile, if it doesn't: its version isn't installed yet (it joins at
+/// its first launch) or isn't one Flint has checked (its changes are still taken).
+fn profile_note(game_version: &str, support: &VersionSupport) -> Option<String> {
+    if support.family().is_some() || support.legacy() {
+        return None;
+    }
+    Some(if crate::data::SUPPORTED_VERSIONS.contains(&game_version) && support.level == SupportLevel::Unknown {
+        "Joins at its first launch".into()
+    } else {
+        format!("Shares its changes; Flint doesn't change Minecraft {game_version} files")
+    })
+}
+
+pub(crate) fn overview(state: &AppState) -> Overview {
+    let root = store::root(&state.paths.root);
+    let choices = switches::load(&root);
+    let enabled = setting_enabled(state);
+    let st = match store::load(&state.paths.root) {
+        Loaded::Ok(st) => Some(st),
+        _ => None,
+    };
+    let running: HashSet<String> = state.running.lock().unwrap().keys().cloned().collect();
+    let mut all = profiles(state);
+    all.sort_by_key(|p| std::cmp::Reverse(p.last_played));
+    let profiles: Vec<ProfileView> = all
+        .iter()
+        .map(|p| {
+            let dir = state.paths.profile_dir(&p.id);
+            let support = versions::resolve(&state.paths.game(), &p.game_version);
+            let note = profile_note(&p.game_version, &support);
+            let readable = read_capped(&dir.join("options.txt"), MAX_OPTIONS).is_some_and(|b| OptionsDoc::parse(&b).is_ok());
+            let backups: Vec<_> = super::backup::list(&dir).into_iter().filter(|b| b.valid && b.reason.starts_with(super::backup::REASON_PREFIX)).collect();
+            ProfileView {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                game_version: p.game_version.clone(),
+                excluded: choices.excludes(&p.id),
+                can_start: note.is_none() && p.last_played.is_some() && readable && !running.contains(&p.id) && !choices.excludes(&p.id),
+                note,
+                backups: backups.len(),
+                last_backup: backups.iter().map(|b| b.created_at).max(),
+                last_played: p.last_played,
+            }
+        })
+        .collect();
+    let existing = |id: &Option<String>| id.clone().filter(|id| all.iter().any(|p| &p.id == id));
+    Overview {
+        enabled,
+        waiting: status_of(enabled, st.as_ref()).waiting,
+        notices: if enabled { st.iter().flat_map(|s| s.notices.iter()).map(|n| NoticeView { id: n.id.clone(), text: n.text.clone() }).collect() } else { Vec::new() },
+        switches: Switch::ALL
+            .into_iter()
+            .map(|s| {
+                let start = st.as_ref().and_then(|st| st.switches.get(s.id()));
+                SwitchView { id: s.id(), on: choices.on(s), started_from: existing(&start.and_then(|s| s.source.clone())), started_at: start.map(|s| s.at) }
+            })
+            .collect(),
+        default_source: profiles.iter().find(|p| p.can_start).map(|p| p.id.clone()),
+        profiles,
+        started_from: existing(&st.as_ref().and_then(|s| s.seeded_from.clone())),
+        last_sync: st.and_then(|s| s.last).map(|l| *l).filter(|l| all.iter().any(|p| p.id == l.profile)),
+    }
+}
+
 #[tauri::command]
-pub async fn auto_sync_set_enabled(app: AppHandle, enabled: bool) -> CmdResult<Status> {
-    blocking(&app, move |state| set_enabled(state, enabled, &ProcessScan::take(), &Hooks::default())).await?
+pub async fn auto_sync_set_enabled(app: AppHandle, enabled: bool, source: Option<String>) -> CmdResult<Status> {
+    blocking(&app, move |state| set_enabled_from(state, enabled, source.as_deref(), &ProcessScan::take(), &Hooks::default())).await?
 }
 
 #[tauri::command]
@@ -1491,4 +2162,34 @@ pub async fn auto_sync_status(app: AppHandle) -> CmdResult<Status> {
 #[tauri::command]
 pub async fn auto_sync_dismiss(app: AppHandle, id: String) -> CmdResult<Status> {
     blocking(&app, move |state| dismiss(state, &id)).await
+}
+
+#[tauri::command]
+pub async fn auto_sync_overview(app: AppHandle) -> CmdResult<Overview> {
+    blocking(&app, overview).await
+}
+
+#[tauri::command]
+pub async fn auto_sync_set_switch(app: AppHandle, id: String, on: bool, source: Option<String>) -> CmdResult<Overview> {
+    let switch = Switch::from_id(&id).ok_or("Unknown sync switch")?;
+    blocking(&app, move |state| set_switch(state, switch, on, source.as_deref(), &ProcessScan::take(), &Hooks::default()).map(|()| overview(state))).await?
+}
+
+#[tauri::command]
+pub async fn auto_sync_set_excluded(app: AppHandle, profile_id: String, excluded: bool) -> CmdResult<Overview> {
+    blocking(&app, move |state| set_excluded(state, &profile_id, excluded).map(|()| overview(state))).await?
+}
+
+/// Opens the folder holding a profile's Auto Sync backups.
+#[tauri::command]
+pub async fn auto_sync_open_backups(app: AppHandle, profile_id: String) -> CmdResult<()> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+    let state = app.state::<AppState>();
+    crate::data::find_profile(&state, &profile_id)?;
+    let dir = state.paths.profile_dir(&profile_id).join(super::backup::DIR);
+    if !dir.is_dir() {
+        return Err("Auto Sync hasn't changed this profile, so it has no backups yet.".into());
+    }
+    app.opener().open_path(dir.display().to_string(), None::<&str>).map_err(|e| format!("Could not open the folder: {e}"))
 }

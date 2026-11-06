@@ -1,0 +1,42 @@
+{
+	"name": "storm.close",
+	"storming": true,
+	"overall-raining": true,
+	"bad-regions": [
+		"cold"
+	],
+	"regions": [
+		"surface"
+	],
+	"sounds": [
+		{
+			"name": "storm-close",
+			"files": [
+				"minecraft:entity.lightning_bolt.thunder"
+			],
+			"category": "weather",
+			"pause": {
+				"min": 150,
+				"max": 600
+			},
+			"volume": 0.5
+		},
+		{
+			"name": "wind",
+			"files": [
+				"minecraft:block.dry_grass.ambient"
+			],
+			"category": "weather",
+			"air": {
+				"min": 0.6
+			},
+			"volume": 0.4,
+			"mute-priority": 5,
+			"mute": 0.3,
+			"pause": {
+				"min": 0,
+				"max": 10
+			}
+		}
+	]
+}

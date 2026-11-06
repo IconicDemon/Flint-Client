@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { quotaLabel, type Quota } from "../../lib/aiQuota";
+import { formatDuration, quotaLabel, type Quota } from "../../lib/aiQuota";
 import { api, errorText, type LibraryHit, type PlanItem, type Profile } from "../../lib/api";
 import { QuotaExhausted, suggestMods, type AssistItem, type AssistResult, type AssistStage } from "../../lib/assist";
-import { markMissing, selectPlan } from "../../lib/assistPlan";
-import { bytes } from "../../lib/format";
+import { goalLabel, markMissing, selectPlan } from "../../lib/assistPlan";
+import { bytes, list } from "../../lib/format";
+import { formatLocale, useT, type MessageKey, type Translate } from "../../lib/i18n";
+import { liveInstall } from "../../lib/livePacks";
 import { sound } from "../../lib/sound";
 import { useStoreSelect } from "../../lib/store";
 import { loaderLabel } from "../../lib/versions";
@@ -14,7 +16,10 @@ import { Icon } from "../../ui/Icon";
 import { useToast } from "../../ui/overlays";
 import { ProjectIcon } from "./InstallDialog";
 
-/** What players can type without knowing a mod's name. */
+/**
+ * What players can type without knowing a mod's name. English on purpose: a click puts the example
+ * in the request, and Flint's smart search (the answer whenever Flint AI isn't) only reads English.
+ */
 const EXAMPLES = [
   "The best FPS mods and some useful PvP mods",
   "Lower fire, a smaller shield and no pumpkin blur",
@@ -25,23 +30,23 @@ const EXAMPLES = [
 
 type Availability = "checking" | "ready" | "offline" | "off";
 
-const STAGES: { id: AssistStage; label: string }[] = [
-  { id: "connecting", label: "Connecting to Flint AI" },
-  { id: "thinking", label: "Understanding your request" },
-  { id: "matching", label: "Searching Modrinth and checking compatibility" },
+const STAGES: { id: AssistStage; label: MessageKey }[] = [
+  { id: "connecting", label: "ai.stage.connecting" },
+  { id: "thinking", label: "ai.stage.thinking" },
+  { id: "matching", label: "ai.stage.matching" },
 ];
 
-const KIND_NAME: Record<string, string> = {
-  mod: "Mod",
-  resourcepack: "Resource pack",
-  shader: "Shader pack",
-  datapack: "Data pack",
+const KIND_NAME: Record<string, MessageKey> = {
+  mod: "library.kind.mod",
+  resourcepack: "library.kind.resourcepack",
+  shader: "ai.kind.shaderPack",
+  datapack: "library.kind.datapack",
 };
 
 type InspectKind = "mod" | "resourcepack" | "shader";
 
 /** The label on a result card: Iris is a mod, but players know it as the shader loader. */
-const kindLabel = (item: PlanItem) => (item.role === "shaderLoader" ? "Shader loader" : (KIND_NAME[item.kind] ?? item.kind));
+const kindLabel = (t: Translate, item: PlanItem) => (item.role === "shaderLoader" ? t("ai.kind.shaderLoader") : KIND_NAME[item.kind] ? t(KIND_NAME[item.kind]) : item.kind);
 
 /**
  * Flint AI: describe what you want in your own words; Flint AI works out the goals, and Flint finds
@@ -62,6 +67,7 @@ export default function FlintAI({
   /** Continues in the normal Library search (free, no AI). */
   onBrowse?: (query: string) => void;
 }) {
+  const t = useT();
   const { configured, running } = useStoreSelect((s) => ({ configured: s.info.gatewayConfigured, running: s.states[profile.id]?.state === "running" }));
   const toast = useToast();
   const [availability, setAvailability] = useState<Availability>(configured ? "checking" : "off");
@@ -128,7 +134,7 @@ export default function FlintAI({
   // A countdown is shown only when the allowance is used up: tick once a minute while visible.
   useEffect(() => {
     if (!exhausted || !active) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
+    const id = window.setInterval(() => setTick((n) => n + 1), 30_000);
     return () => window.clearInterval(id);
   }, [exhausted, active]);
   useEffect(() => {
@@ -140,10 +146,13 @@ export default function FlintAI({
     }
   }, [exhausted, msLeft, applyQuota]);
 
-  const items = useMemo<AssistItem[]>(() => markMissing(result?.plan.items ?? []), [result]);
+  // `t` is listed so the "Needs …" notes markMissing writes follow a language change.
+  const items = useMemo<AssistItem[]>(() => markMissing(result?.plan.items ?? []), [result, t]);
   const { on: included, titles: includedTitles, forced } = useMemo(() => selectPlan(items, picked), [items, picked]);
   const chosen = items.filter((i) => included.has(i.projectId) && i.versionId && i.status === "ok");
   const size = chosen.reduce((sum, i) => sum + (i.size ?? 0), 0);
+  // While the game runs, packs go into it at once (lib/livePacks.ts); mods need a restart.
+  const live = liveInstall(running, chosen);
   // Out of searches: the panel keeps working with Flint's free smart search until the reset.
   const useAi = availability === "ready" && !exhausted;
 
@@ -185,7 +194,7 @@ export default function FlintAI({
         applyQuota(e.quota);
         sound.play("error");
       } else if (errorText(e) !== "AI_CANCELLED") {
-        setError(`Flint couldn't reach Modrinth (${errorText(e)}). Check your connection and try again.`);
+        setError(t("ai.error.unreachable", { error: errorText(e) }));
         sound.play("error");
       }
     } finally {
@@ -227,7 +236,7 @@ export default function FlintAI({
     try {
       await api.installContent(
         profile.id,
-        chosen.length === 1 ? `Installing ${chosen[0].title}` : `Installing ${chosen.length} items from Flint AI`,
+        chosen.length === 1 ? t("library.install.jobSingle", { title: chosen[0].title }) : t("ai.install.job", { count: chosen.length }),
         chosen.map((i) => ({
           versionId: i.versionId!,
           kind: i.kind,
@@ -239,14 +248,14 @@ export default function FlintAI({
       sound.play("success");
       toast({
         tone: "neutral",
-        title: `Downloading ${chosen.length} item${chosen.length === 1 ? "" : "s"}`,
-        body: `Each file is verified before it's added to ${profile.name}.`,
+        title: t("ai.install.downloading", { count: chosen.length }),
+        body: t("ai.install.downloadingBody", { profile: profile.name }),
       });
       onClose();
     } catch (e) {
       toast({
         tone: "danger",
-        title: "Couldn't start the install",
+        title: t("library.install.failed"),
         body: errorText(e),
       });
     } finally {
@@ -273,35 +282,32 @@ export default function FlintAI({
         <FlintMark working={busy} size={30} />
         <div className="fa-title">
           <h2>Flint AI</h2>
-          <p className="faint">Describe what you want in your own words. Flint finds real mods, resource packs and shader packs that work with {profile.name}.</p>
+          <p className="faint">{t("ai.panel.intro", { profile: profile.name })}</p>
         </div>
         {quota && useAi && <span className={`fa-quota ${quota.remaining === 0 ? "is-empty" : ""}`}>{quotaLabel(quota, msLeft)}</span>}
-        <IconButton icon="x" label="Close Flint AI" onClick={onClose} />
+        <IconButton icon="x" label={t("ai.panel.close")} onClick={onClose} />
       </header>
 
       {exhausted && quota ? (
         <div className="fa-exhausted" role="status">
           <FlintMark size={40} />
-          <h3>You've used your {quota.limit} Flint AI searches</h3>
+          <h3>{t("ai.exhausted.title", { count: quota.limit })}</h3>
           <p className="muted">
-            {msLeft ? (
-              <>
-                They reset in <strong>{quotaLabel({ ...quota, remaining: 0 }, msLeft).replace("Your searches reset in ", "")}</strong>, at{" "}
-                {new Date(Date.now() + msLeft).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-                .
-              </>
-            ) : (
-              "They reset soon."
-            )}{" "}
-            Browsing and installing from the Library stays free.
+            {msLeft
+              ? t.rich("ai.exhausted.resetsAt", {
+                  duration: <strong>{formatDuration(msLeft)}</strong>,
+                  time: new Date(Date.now() + msLeft).toLocaleTimeString(formatLocale(), {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  }),
+                })
+              : t("ai.exhausted.resetsSoon")}{" "}
+            {t("ai.exhausted.libraryFree")}
           </p>
           {onBrowse && (
             <div className="fa-row">
               <Button variant="secondary" icon="search" onClick={() => onBrowse(prompt.trim())}>
-                Browse the Library
+                {t("ai.exhausted.browse")}
               </Button>
             </div>
           )}
@@ -315,8 +321,8 @@ export default function FlintAI({
             maxLength={600}
             value={prompt}
             disabled={busy}
-            placeholder={exhausted ? "Flint's smart search still works: describe what you want" : "e.g. lower fire and a smaller shield, plus a zoom key"}
-            aria-label="Describe what you want"
+            placeholder={t(exhausted ? "ai.ask.placeholderSmart" : "ai.ask.placeholder")}
+            aria-label={t("ai.ask.label")}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -327,16 +333,16 @@ export default function FlintAI({
           />
           {busy ? (
             <Button variant="secondary" icon="x" onClick={stop}>
-              Stop
+              {t("ai.ask.stop")}
             </Button>
           ) : (
             <Button variant="primary" icon="sparkle" disabled={prompt.trim().length < 2} onClick={() => void run()}>
-              {useAi ? "Ask Flint AI" : "Search"}
+              {t(useAi ? "ai.ask.submit" : "common.search")}
             </Button>
           )}
         </div>
         {!result && !busy && (
-          <div className="fa-examples" aria-label="Examples">
+          <div className="fa-examples" aria-label={t("ai.ask.examples")}>
             {EXAMPLES.map((ex) => (
               <button key={ex} type="button" className="fa-example" onClick={() => (setPrompt(ex), inputRef.current?.focus())}>
                 {ex}
@@ -345,10 +351,10 @@ export default function FlintAI({
           </div>
         )}
         <p className="fa-meta faint">
-          <span>For {target}</span>
-          {exhausted && <span>Searching with Flint's smart search (no AI, unlimited).</span>}
-          {availability === "offline" && <span className="fa-warn">Flint AI is unreachable right now, so Flint's own smart search answers instead.</span>}
-          {availability === "off" && <span>Flint AI isn't available in this build; Flint's smart search answers instead.</span>}
+          <span>{t("ai.ask.forTarget", { target })}</span>
+          {exhausted && <span>{t("ai.ask.smartOnly")}</span>}
+          {availability === "offline" && <span className="fa-warn">{t("ai.ask.offline")}</span>}
+          {availability === "off" && <span>{t("ai.ask.off")}</span>}
         </p>
       </div>
 
@@ -359,7 +365,7 @@ export default function FlintAI({
               <span className="fa-dot" aria-hidden>
                 {done.includes(s.id) && <Icon name="check" size={11} />}
               </span>
-              {s.label}
+              {t(s.label)}
             </li>
           ))}
         </ol>
@@ -370,7 +376,7 @@ export default function FlintAI({
           <Icon name="alert" size={15} />
           {error}
           <Button size="sm" variant="ghost" onClick={() => void run()}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </p>
       )}
@@ -378,16 +384,14 @@ export default function FlintAI({
       {result && !busy && (
         <div className="fa-results">
           <p className="fa-summary">
-            {result.mode === "ai" ? <Badge tone="accent">Flint AI</Badge> : <Badge>Flint smart search</Badge>}
+            {result.mode === "ai" ? <Badge tone="accent">Flint AI</Badge> : <Badge>{t("ai.results.smartBadge")}</Badge>}
             <span className="faint">
               {[
-                result.mode === "fallback" && result.reason && useAi ? `${result.reason}, so Flint's smart search answered (no AI).` : "",
-                result.lookup ? "" : result.goals.length ? `Understood: ${result.goals.join(", ")}.` : "",
+                result.mode === "fallback" && result.reason && useAi ? t("ai.results.fallback", { reason: result.reason }) : "",
+                result.lookup ? "" : result.goals.length ? t("ai.results.understood", { goals: result.goals.join(", ") }) : "",
                 result.note ?? "",
-                result.needsFabric.length
-                  ? `${result.needsFabric.join(", ")} need mods, and ${profile.name} runs vanilla Minecraft: create a Fabric profile for those.`
-                  : "",
-                unmatched ? `${unmatched} ${unmatched === 1 ? "idea had" : "ideas had"} no compatible match for Minecraft ${profile.gameVersion}.` : "",
+                result.needsFabric.length ? t("ai.results.needsFabric", { goals: result.needsFabric.join(", "), profile: profile.name }) : "",
+                unmatched ? t("ai.results.unmatched", { count: unmatched, version: profile.gameVersion }) : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -397,27 +401,23 @@ export default function FlintAI({
           {result.lookup && (
             <p className={`fa-lookup ${result.lookup.identified ? "" : "is-unsure"}`} role="status">
               <Icon name={result.lookup.identified ? "search" : "alert"} size={14} />
-              {result.lookup.identified
-                ? `Flint looked for one project that ${describeLookup(result.lookup)}. These are possible matches, not certain ones: check each description.`
-                : `Flint couldn't identify the project that ${describeLookup(result.lookup)} reliably.${groups.length ? " These are the closest it found." : ""}`}
+              {lookupText(t, result.lookup)}
+              {result.lookup.identified ? ` ${t("ai.lookup.possibleNote")}` : groups.length ? ` ${t("ai.lookup.closestNote")}` : ""}
             </p>
           )}
 
           {groups.length === 0 ? (
             <div className="fa-empty">
-              <h3>No compatible match turned up</h3>
-              <p className="muted">
-                Flint only shows projects it could verify for Minecraft {profile.gameVersion} with {loaderLabel(profile.loader)}. Try describing it differently,
-                or look through the Library.
-              </p>
+              <h3>{t("ai.empty.title")}</h3>
+              <p className="muted">{t("ai.empty.body", { version: profile.gameVersion, loader: loaderLabel(profile.loader) })}</p>
               {alternatives && alternatives.length > 0 && (
                 <>
-                  <p className="eyebrow">Closest on Modrinth for your words · not checked against your request</p>
+                  <p className="eyebrow">{t("ai.empty.alternatives")}</p>
                   <ul className="fa-alts">
                     {alternatives.map((hit) => (
                       <li key={hit.projectId}>
                         <button type="button" onClick={() => onInspect?.(hit, profile.loader === "fabric" ? result.searchKind : "resourcepack")} disabled={!onInspect}>
-                          <ProjectIcon src={hit.iconUrl} title={hit.title} size={28} />
+                          <ProjectIcon src={hit.iconUrl} title={hit.title} kind={hit.projectType} size={28} />
                           <span>
                             <strong>{hit.title}</strong>
                             <span className="faint">{hit.description}</span>
@@ -430,7 +430,7 @@ export default function FlintAI({
               )}
               {onBrowse && (
                 <Button variant="secondary" icon="search" onClick={() => onBrowse(prompt.trim())}>
-                  Search the Library
+                  {t("ai.empty.search")}
                 </Button>
               )}
             </div>
@@ -438,9 +438,9 @@ export default function FlintAI({
             groups.map((g) => (
               <section key={g.id} className={`fa-group is-${g.kind}`}>
                 <header>
-                  <span className="eyebrow">{g.title}</span>
-                  {g.kind === "dependency" && <span className="faint">Installed with the picks that need them</span>}
-                  {g.kind === "optional" && <span className="faint">Off unless you choose them</span>}
+                  <span className="eyebrow">{goalLabel(g.title)}</span>
+                  {g.kind === "dependency" && <span className="faint">{t("ai.group.dependencyHint")}</span>}
+                  {g.kind === "optional" && <span className="faint">{t("ai.group.optionalHint")}</span>}
                 </header>
                 {g.why && <p className="fa-why">{g.why}</p>}
                 <ul>
@@ -480,10 +480,11 @@ export default function FlintAI({
 
           {groups.length > 0 && (
             <footer className="fa-foot">
-              <span className="faint">{chosen.length ? `${chosen.length} file${chosen.length === 1 ? "" : "s"} · ${bytes(size)}` : "Nothing selected"}</span>
-              {running && <span className="fa-warn">Close Minecraft before changing this profile.</span>}
-              <Button variant="primary" icon="download" loading={installing} disabled={!chosen.length || running} onClick={() => void install()}>
-                Install to {profile.name}
+              <span className="faint">{chosen.length ? t("ai.foot.summary", { count: chosen.length, size: bytes(size) }) : t("ai.foot.nothing")}</span>
+              {live.state === "blocked" && <span className="fa-warn">{t(live.reason === "iris" ? "library.install.runningIris" : "library.install.runningMods")}</span>}
+              {live.state === "live" && chosen.length > 0 && <span className="fa-live">{t("ai.foot.live")}</span>}
+              <Button variant="primary" icon="download" loading={installing} disabled={!chosen.length || live.state === "blocked"} onClick={() => void install()}>
+                {t("ai.foot.install", { profile: profile.name })}
               </Button>
             </footer>
           )}
@@ -492,20 +493,19 @@ export default function FlintAI({
 
       <p className="fa-privacy faint">
         <Icon name="lock" size={12} />
-        {useAi
-          ? "Your request, Minecraft version and installed project names go to Flint AI on Cloudflare. Your Minecraft username only proves you own the game; your sign-in is never sent. Every result comes from Modrinth and is checked for this profile."
-          : "Flint's smart search runs on this computer and only searches Modrinth. Every result is checked for this profile."}
+        {t(useAi ? "ai.privacy.ai" : "ai.privacy.smart")}
       </p>
     </section>
   );
 }
 
-/** "lowers fire, low shield and no fog": the features a lookup searched for, as one phrase. */
-function describeLookup(lookup: { features: string[]; nameHint: string | null }): string {
-  const f = lookup.features;
-  const list = f.length > 1 ? `${f.slice(0, -1).join(", ")} and ${f[f.length - 1]}` : (f[0] ?? "you described");
-  const hint = lookup.nameHint ? (lookup.nameHint.length === 1 ? `, starting with “${lookup.nameHint.toUpperCase()}”` : `, named something like “${lookup.nameHint}”`) : "";
-  return `matches ${list}${hint}`;
+/** "Flint looked for one project that matches lower fire and no fog, starting with “L”.": what a lookup searched for. */
+function lookupText(t: Translate, lookup: { identified: boolean; features: string[]; nameHint: string | null }): string {
+  const features = list(lookup.features);
+  const hint = lookup.nameHint;
+  if (!hint) return t(lookup.identified ? "ai.lookup.found" : "ai.lookup.unsure", { features });
+  if (hint.length === 1) return t(lookup.identified ? "ai.lookup.foundLetter" : "ai.lookup.unsureLetter", { features, letter: hint.toUpperCase() });
+  return t(lookup.identified ? "ai.lookup.foundName" : "ai.lookup.unsureName", { features, name: hint });
 }
 
 function ResultCard({
@@ -518,7 +518,7 @@ function ResultCard({
   onToggle,
   onInspect,
 }: {
-  item: PlanItem;
+  item: AssistItem;
   index: number;
   compact: boolean;
   profile: Profile;
@@ -527,6 +527,7 @@ function ResultCard({
   onToggle?: (v: boolean) => void;
   onInspect?: (hit: LibraryHit, kind: InspectKind) => void;
 }) {
+  const t = useT();
   const blocked = item.status === "unavailable" || item.status === "conflict";
   const inspect =
     onInspect && (item.kind === "mod" || item.kind === "resourcepack" || item.kind === "shader")
@@ -548,7 +549,7 @@ function ResultCard({
       : undefined;
   return (
     <li className={`fa-card ${compact ? "is-compact" : ""} status-${item.status}`} style={{ "--i": Math.min(index, 10) } as React.CSSProperties}>
-      <ProjectIcon src={item.iconUrl} title={item.title} size={compact ? 28 : 40} />
+      <ProjectIcon src={item.iconUrl} title={item.title} kind={item.kind} size={compact ? 28 : 40} />
       <span className="fa-card-text">
         <span className="fa-card-title">
           {inspect ? (
@@ -558,22 +559,24 @@ function ResultCard({
           ) : (
             <strong>{item.title}</strong>
           )}
-          {item.author && <span className="faint">by {item.author}</span>}
-          <span className="fa-kind">{kindLabel(item)}</span>
+          {item.author && <span className="faint">{t("library.card.by", { author: item.author })}</span>}
+          <span className="fa-kind">{kindLabel(t, item)}</span>
         </span>
-        {compact && item.requiredBy && <span className="fa-needed faint">Needed by {item.requiredByAll?.length ? item.requiredByAll.join(", ") : item.requiredBy}</span>}
+        {compact && item.requiredBy && (
+          <span className="fa-needed faint">{t("ai.card.neededBy", { titles: item.requiredByAll?.length ? item.requiredByAll.join(", ") : item.requiredBy })}</span>
+        )}
         {!compact && item.description && <span className="fa-desc">{item.description}</span>}
-        {!compact && item.reason && /^(Possible|Closest) match/.test(item.reason) && <span className="fa-match">{item.reason.replace(/^(Possible|Closest) match — /, "")}</span>}
+        {!compact && item.match && <span className="fa-match">{item.match}</span>}
         <span className={`fa-compat ${blocked ? "is-bad" : ""}`}>
           {blocked ? (
             <>
               <Icon name="alert" size={12} />
-              {item.message ?? `No version for Minecraft ${profile.gameVersion}`}
+              {item.message ?? t("ai.card.noVersion", { version: profile.gameVersion })}
             </>
           ) : item.status === "installed" ? (
             <>
               <Icon name="check" size={12} />
-              Already installed
+              {t("library.plan.alreadyInstalled")}
             </>
           ) : (
             <>
@@ -586,7 +589,7 @@ function ResultCard({
         </span>
       </span>
       {item.status === "ok" && (onToggle || locked) ? (
-        <Checkbox checked={checked} disabled={locked} onChange={onToggle ?? (() => {})} label={`Include ${item.title}`} />
+        <Checkbox checked={checked} disabled={locked} onChange={onToggle ?? (() => {})} label={t("library.plan.include", { title: item.title })} />
       ) : null}
     </li>
   );

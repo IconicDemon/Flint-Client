@@ -180,8 +180,12 @@ pub fn valid_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 64 && value.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
 }
 
+/// A Minecraft version id such as `26.3` or `25w14a`. It becomes a folder and file name under
+/// `minecraft/versions`, so it must start with a letter or digit (never `.` or `..`).
 pub fn valid_game_version(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 24 && value.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+    value.len() <= 24
+        && value.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
 }
 
 /// The loader tags Modrinth uses on version files for each kind of content Flint installs.
@@ -461,4 +465,20 @@ pub fn library_status(state: State<'_, AppState>) -> Value {
         "userAgent": user_agent(),
         "rateLimit": state.modrinth.rate_limit(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn game_versions_are_plain_names() {
+        for good in ["26.3", "1.21.11", "25w14a", "1.21.11-pre1", "26.1_rc"] {
+            assert!(valid_game_version(good), "{good}");
+        }
+        // A modpack's version becomes `minecraft/versions/<id>/<id>.json`, so it can't be a dot path.
+        for bad in ["", ".", "..", "...", ".26", "-x", "26/3", "26\\3", "26:3", &"9".repeat(25)] {
+            assert!(!valid_game_version(bad), "{bad:?}");
+        }
+    }
 }

@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { PARTNERS } from "../../data/partners";
 import { api, errorText, type Category, type LibraryHit, type LibraryKind, type LibraryResults, type LibrarySearchParams, type Profile } from "../../lib/api";
 import { ago, compact } from "../../lib/format";
+import { useT, type MessageKey } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { useStoreSelect } from "../../lib/store";
@@ -11,6 +11,7 @@ import { FlintMark } from "../../ui/FlintMark";
 import { Icon, type IconName } from "../../ui/Icon";
 import { Dropdown, Menu, Popover } from "../../ui/overlays";
 import type { Navigate } from "../shell/Shell";
+import { PartnersDirectory } from "../partners/PartnersDirectory";
 import { InstallDialog, ProjectIcon, type InstallTarget } from "./InstallDialog";
 import { ProjectDrawer } from "./ProjectDrawer";
 
@@ -18,21 +19,37 @@ const FlintAI = lazy(() => import("./FlintAI"));
 
 type Tab = LibraryKind | "partners";
 
-const TABS: { id: Tab; label: string; icon: IconName }[] = [
-  { id: "modpack", label: "Modpacks", icon: "box" },
-  { id: "mod", label: "Mods", icon: "puzzle" },
-  { id: "resourcepack", label: "Resource Packs", icon: "image" },
-  { id: "datapack", label: "Data Packs", icon: "database" },
-  { id: "shader", label: "Shaders", icon: "sun" },
-  { id: "partners", label: "Partnership", icon: "handshake" },
+const TABS: { id: Tab; label: MessageKey; icon: IconName }[] = [
+  { id: "modpack", label: "library.tabs.modpacks", icon: "box" },
+  { id: "mod", label: "library.tabs.mods", icon: "puzzle" },
+  { id: "resourcepack", label: "library.tabs.resourcePacks", icon: "image" },
+  { id: "datapack", label: "library.tabs.dataPacks", icon: "database" },
+  { id: "shader", label: "library.tabs.shaders", icon: "sun" },
+  { id: "partners", label: "library.tabs.partners", icon: "handshake" },
 ];
 
-const SORTS: { value: LibrarySearchParams["index"]; label: string }[] = [
-  { value: "relevance", label: "Relevance" },
-  { value: "downloads", label: "Downloads" },
-  { value: "follows", label: "Follows" },
-  { value: "updated", label: "Recently updated" },
-  { value: "newest", label: "Newest" },
+/** The search box's hint and the empty state's message, by kind. */
+const SEARCH_HINT: Record<LibraryKind, MessageKey> = {
+  modpack: "library.search.modpack",
+  mod: "library.search.mod",
+  resourcepack: "library.search.resourcepack",
+  datapack: "library.search.datapack",
+  shader: "library.search.shader",
+};
+const NONE_FOR: Record<LibraryKind, MessageKey> = {
+  modpack: "library.results.noneFor.modpack",
+  mod: "library.results.noneFor.mod",
+  resourcepack: "library.results.noneFor.resourcepack",
+  datapack: "library.results.noneFor.datapack",
+  shader: "library.results.noneFor.shader",
+};
+
+const SORTS: { value: LibrarySearchParams["index"]; label: MessageKey }[] = [
+  { value: "relevance", label: "library.sort.relevance" },
+  { value: "downloads", label: "library.sort.downloads" },
+  { value: "follows", label: "library.sort.follows" },
+  { value: "updated", label: "library.sort.updated" },
+  { value: "newest", label: "library.sort.newest" },
 ];
 
 const PAGE = 24;
@@ -40,13 +57,14 @@ const ANY = "__any__";
 const NONE: string[] = [];
 
 export default function LibraryPage({ navigate, target }: { navigate: Navigate; target?: string }) {
+  const t = useT();
   // Only what this page shows: download progress elsewhere in the app doesn't re-render the results.
   const store = useStoreSelect((s) => ({ profiles: s.profiles, selectedId: s.selectedId, selected: s.selected, contentRevision: s.contentRevision }));
   // Settings → General → Flint Assist: when off, the Library is plain search with no AI entry point.
   const { flintAssist } = useSettings().settings;
   const initialProfile = target && store.profiles.some((p) => p.id === target.split(":")[0]) ? target.split(":")[0] : store.selectedId ?? ANY;
   const initialTab = (target?.split(":")[1] as Tab | undefined) ?? "mod";
-  const [tab, setTab] = useState<Tab>(TABS.some((t) => t.id === initialTab) ? initialTab : "mod");
+  const [tab, setTab] = useState<Tab>(TABS.some((item) => item.id === initialTab) ? initialTab : "mod");
   const [profileId, setProfileId] = useState<string>(initialProfile);
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -84,14 +102,14 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
   useEffect(() => localStorage.setItem("flint-library-view", view), [view]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(query.trim()), 320);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setDebounced(query.trim()), 320);
+    return () => window.clearTimeout(timer);
   }, [query]);
 
   useEffect(() => {
     void api
       .libraryTags()
-      .then((t) => setTags(t.categories))
+      .then((all) => setTags(all.categories))
       .catch(() => setTags([]));
   }, []);
 
@@ -142,8 +160,8 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
 
   const kindTags = useMemo(() => {
     if (!kind) return [];
-    const type = tags.some((t) => t.projectType === kind) ? kind : "mod";
-    return tags.filter((t) => t.projectType === type && t.header !== "resolutions" && !["fabric", "forge", "neoforge", "quilt", "iris", "optifine", "canvas"].includes(t.name));
+    const type = tags.some((tag) => tag.projectType === kind) ? kind : "mod";
+    return tags.filter((tag) => tag.projectType === type && tag.header !== "resolutions" && !["fabric", "forge", "neoforge", "quilt", "iris", "optifine", "canvas"].includes(tag.name));
   }, [tags, kind]);
 
   const pages = results ? Math.max(1, Math.ceil(Math.min(results.total, 10_000) / PAGE)) : 1;
@@ -155,32 +173,37 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
     <div className="page-body library">
       <header className="lib-head">
         <div>
-          <h1>Library</h1>
-          <p className="muted">Mods, packs and shaders from Modrinth, matched to your profile.</p>
+          <h1>{t("library.title")}</h1>
+          <p className="muted">{t(tab === "partners" ? "partners.directory.intro" : "library.subtitle")}</p>
         </div>
-        <div className="lib-head-actions">
-          <ProfilePicker profiles={store.profiles} value={profileId} onChange={setProfileId} kind={kind} />
-        </div>
+        {/* Partnerships installs nothing: no profile to pick there. */}
+        {kind && (
+          <div className="lib-head-actions">
+            <ProfilePicker profiles={store.profiles} value={profileId} onChange={setProfileId} kind={kind} />
+          </div>
+        )}
       </header>
 
-      <nav className="lib-tabs" role="tablist" aria-label="Content type">
-        {TABS.map((t) => (
+      <nav className="lib-tabs" role="tablist" aria-label={t("library.tabs.label")}>
+        {TABS.map((item) => (
           <button
-            key={t.id}
+            key={item.id}
             type="button"
             role="tab"
-            aria-selected={tab === t.id}
-            className={`lib-tab ${tab === t.id ? "is-active" : ""} ${t.id === "partners" ? "is-partner" : ""}`}
-            onClick={() => setTab(t.id)}
+            aria-selected={tab === item.id}
+            className={`lib-tab ${tab === item.id ? "is-active" : ""} ${item.id === "partners" ? "is-partner" : ""}`}
+            onClick={() => setTab(item.id)}
           >
-            <Icon name={t.icon} size={16} />
-            {t.label}
+            <Icon name={item.icon} size={16} />
+            {t(item.label)}
           </button>
         ))}
       </nav>
 
       {tab === "partners" ? (
-        <Partnership />
+        <div className="lib-results lib-partners">
+          <PartnersDirectory navigate={navigate} />
+        </div>
       ) : (
         <>
           <div className="lib-toolbar">
@@ -189,13 +212,13 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
               <input
                 ref={searchRef}
                 type="search"
-                placeholder={`Search ${TABS.find((t) => t.id === tab)?.label.toLowerCase()}`}
+                placeholder={kind ? t(SEARCH_HINT[kind]) : undefined}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search Modrinth"
+                aria-label={t("library.search.label")}
                 spellCheck={false}
               />
-              {query && <IconButton icon="x" size="sm" label="Clear search" onClick={() => setQuery("")} />}
+              {query && <IconButton icon="x" size="sm" label={t("library.search.clear")} onClick={() => setQuery("")} />}
             </label>
             {flintAssist && (
               <button
@@ -203,22 +226,22 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
                 className="lib-ai"
                 aria-expanded={assisting}
                 disabled={!aiProfile}
-                title={aiProfile ? "Describe what you want; Flint AI finds compatible mods and resource packs" : "Create a profile first"}
+                title={t(aiProfile ? "library.ai.hint" : "library.ai.needsProfile")}
                 onClick={() => (sound.play(assisting ? "tap" : "open"), setAssisting((a) => !a))}
               >
                 <FlintMark size={20} />
-                Find with Flint AI
+                {t("library.ai.button")}
               </button>
             )}
             <CategoryFilter tags={kindTags} value={categories} onChange={setCategories} />
-            <Dropdown label="Sort by" value={sort} onChange={setSort} options={SORTS} className="lib-sort" />
+            <Dropdown label={t("library.sort.label")} value={sort} onChange={setSort} options={SORTS.map((s) => ({ value: s.value, label: t(s.label) }))} className="lib-sort" />
             <Segmented
-              label="View"
+              label={t("library.view.label")}
               value={view}
               onChange={setView}
               options={[
-                { value: "grid", label: "Grid" },
-                { value: "list", label: "List" },
+                { value: "grid", label: t("library.view.grid") },
+                { value: "list", label: t("library.view.list") },
               ]}
             />
           </div>
@@ -226,22 +249,22 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
           <div className="lib-context">
             {profile && kind !== "modpack" ? (
               <span>
-                Showing {kind === "datapack" ? "data packs" : "results"} for <strong>Minecraft {profile.gameVersion}</strong>
+                {t.rich(kind === "datapack" ? "library.context.dataPacks" : "library.context.results", { version: <strong>Minecraft {profile.gameVersion}</strong> })}
                 {kind === "mod" || kind === "shader" ? ` · ${kind === "shader" ? "Iris" : loaderLabel(profile.loader)}` : ""}
               </span>
             ) : kind === "modpack" ? (
-              <span>Fabric modpacks. Installing one creates a new profile.</span>
+              <span>{t("library.context.modpacks")}</span>
             ) : (
-              <span>Showing every version. Choose a profile to see only what's compatible.</span>
+              <span>{t("library.context.anyVersion")}</span>
             )}
             {categories.length > 0 && (
               <button type="button" className="lib-clear" onClick={() => setCategories([])}>
-                Clear {categories.length} filter{categories.length === 1 ? "" : "s"}
+                {t("library.filters.clear", { count: categories.length })}
               </button>
             )}
-            {results?.stale && <span className="lib-stale">Offline · showing saved results</span>}
-            {results?.staging && <span className="lib-stale">Development API (staging)</span>}
-            {results && <span className="lib-count">{compact(results.total)} results</span>}
+            {results?.stale && <span className="lib-stale">{t("library.results.offline")}</span>}
+            {results?.staging && <span className="lib-stale">{t("library.results.staging")}</span>}
+            {results && <span className="lib-count">{t("library.results.count", { total: compact(results.total) })}</span>}
           </div>
 
           <div className="lib-results" ref={listRef}>
@@ -263,11 +286,11 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
             {error ? (
               <EmptyState
                 icon="wifiOff"
-                title="Couldn't reach Modrinth"
+                title={t("library.results.unreachable")}
                 body={error}
                 action={
                   <Button icon="refresh" onClick={() => setRetry((r) => r + 1)}>
-                    Try again
+                    {t("common.tryAgain")}
                   </Button>
                 }
               />
@@ -276,8 +299,8 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
             ) : results && results.hits.length === 0 ? (
               <EmptyState
                 icon="search"
-                title={debounced ? `Nothing matches “${debounced}”` : "Nothing here yet"}
-                body={profile ? `No ${TABS.find((t) => t.id === tab)?.label.toLowerCase()} for Minecraft ${profile.gameVersion} match these filters.` : "Try a different search or fewer filters."}
+                title={debounced ? t("library.results.noMatch", { query: debounced }) : t("library.results.empty")}
+                body={profile && kind ? t(NONE_FOR[kind], { version: profile.gameVersion }) : t("library.results.tryDifferent")}
               />
             ) : (
               <div className={`lib-${view} ${loading ? "is-refreshing" : ""}`}>
@@ -299,13 +322,11 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
           {results && results.total > PAGE && (
             <footer className="lib-pager">
               <Button size="sm" icon="chevronLeft" disabled={page === 0 || loading} onClick={() => setPage(page - 1)}>
-                Previous
+                {t("library.pager.previous")}
               </Button>
-              <span className="faint">
-                Page {page + 1} of {compact(pages)}
-              </span>
+              <span className="faint">{t("library.pager.page", { page: page + 1, pages: compact(pages) })}</span>
               <Button size="sm" iconRight="chevronRight" disabled={page + 1 >= pages || loading} onClick={() => setPage(page + 1)}>
-                Next
+                {t("library.pager.next")}
               </Button>
             </footer>
           )}
@@ -318,7 +339,7 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
         profile={openKind ? aiProfile : profile}
         installed={open ? installed.has(open.projectId) : false}
         onClose={() => setOpen(null)}
-        onInstall={(t) => setInstalling(t)}
+        onInstall={(next) => setInstalling(next)}
         onOpenProfile={(id) => navigate("profiles", `${id}:content`)}
       />
       <InstallDialog target={installing} profile={openKind ? aiProfile : profile} onClose={() => setInstalling(null)} />
@@ -327,6 +348,7 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
 }
 
 function ProfilePicker({ profiles, value, onChange, kind }: { profiles: Profile[]; value: string; onChange: (id: string) => void; kind: LibraryKind | null }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const current = profiles.find((p) => p.id === value);
@@ -335,16 +357,16 @@ function ProfilePicker({ profiles, value, onChange, kind }: { profiles: Profile[
       <button ref={anchor} type="button" className="lib-profile" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={kind === "modpack"}>
         {current ? <img src={versionMeta(current.gameVersion).thumb} alt="" /> : <span className="lib-profile-any"><Icon name="globe" size={16} /></span>}
         <span>
-          <span className="faint">{kind === "modpack" ? "Modpacks create new profiles" : "Installing to"}</span>
-          <strong>{kind === "modpack" ? "New profile" : current ? current.name : "No profile (browse only)"}</strong>
+          <span className="faint">{t(kind === "modpack" ? "library.profile.modpacksCreate" : "library.profile.installingTo")}</span>
+          <strong>{kind === "modpack" ? t("library.profile.newProfile") : current ? current.name : t("library.profile.none")}</strong>
         </span>
         <Icon name="chevronDown" size={15} />
       </button>
-      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label="Profile" className="profile-pop">
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label={t("library.profile.label")} className="profile-pop">
         <Menu
           onClose={() => setOpen(false)}
           items={[
-            { type: "heading", label: "Filter and install for" },
+            { type: "heading", label: t("library.profile.heading") },
             ...profiles.map((p) => ({
               label: (
                 <span className="profile-row">
@@ -361,7 +383,7 @@ function ProfilePicker({ profiles, value, onChange, kind }: { profiles: Profile[
               onSelect: () => onChange(p.id),
             })),
             { type: "separator" },
-            { label: "No profile (browse every version)", icon: <Icon name="globe" size={15} />, active: value === ANY, onSelect: () => onChange(ANY) },
+            { label: t("library.profile.noneAll"), icon: <Icon name="globe" size={15} />, active: value === ANY, onSelect: () => onChange(ANY) },
           ]}
         />
       </Popover>
@@ -370,11 +392,12 @@ function ProfilePicker({ profiles, value, onChange, kind }: { profiles: Profile[
 }
 
 function CategoryFilter({ tags, value, onChange }: { tags: Category[]; value: string[]; onChange: (v: string[]) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const groups = useMemo(() => {
     const map = new Map<string, Category[]>();
-    for (const t of tags) map.set(t.header, [...(map.get(t.header) ?? []), t]);
+    for (const tag of tags) map.set(tag.header, [...(map.get(tag.header) ?? []), tag]);
     return [...map.entries()];
   }, [tags]);
   const toggle = (name: string) => onChange(value.includes(name) ? value.filter((v) => v !== name) : [...value, name].slice(0, 6));
@@ -382,16 +405,17 @@ function CategoryFilter({ tags, value, onChange }: { tags: Category[]; value: st
     <>
       <button ref={anchor} type="button" className={`dropdown-trigger lib-filter ${value.length ? "has-value" : ""}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={!tags.length}>
         <Icon name="filter" size={15} />
-        <span>{value.length ? `${value.length} selected` : "Categories"}</span>
+        <span>{value.length ? t("library.categories.selected", { count: value.length }) : t("library.categories.label")}</span>
       </button>
-      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-start" label="Categories" className="lib-filter-pop">
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-start" label={t("library.categories.label")} className="lib-filter-pop">
+        {/* Category names and headers come from Modrinth's tag list, in English. */}
         {groups.map(([header, list]) => (
           <section key={header}>
             <span className="eyebrow">{header}</span>
             <div className="chip-wrap">
-              {list.map((t) => (
-                <button key={t.name} type="button" className={`chip ${value.includes(t.name) ? "is-on" : ""}`} aria-pressed={value.includes(t.name)} onClick={() => toggle(t.name)}>
-                  {t.name.replace(/-/g, " ")}
+              {list.map((tag) => (
+                <button key={tag.name} type="button" className={`chip ${value.includes(tag.name) ? "is-on" : ""}`} aria-pressed={value.includes(tag.name)} onClick={() => toggle(tag.name)}>
+                  {tag.name.replace(/-/g, " ")}
                 </button>
               ))}
             </div>
@@ -417,36 +441,37 @@ function ResultCard({
   onOpen: () => void;
   onInstall: () => void;
 }) {
+  const t = useT();
   const tags = (hit.categories ?? []).filter((c) => !["fabric", "forge", "neoforge", "quilt", "iris", "optifine", "minecraft", "datapack"].includes(c)).slice(0, view === "grid" ? 2 : 4);
   return (
     <article className={`result result-${view}`}>
-      <button type="button" className="result-open" onClick={onOpen} aria-label={`Open ${hit.title}`}>
+      <button type="button" className="result-open" onClick={onOpen} aria-label={t("library.card.open", { title: hit.title })}>
         {view === "grid" && (
           <span className="result-banner" style={hit.color != null ? { background: `#${hit.color.toString(16).padStart(6, "0")}` } : undefined}>
             {hit.gallery && <img src={hit.gallery} alt="" loading="lazy" />}
           </span>
         )}
         <span className="result-main">
-          <ProjectIcon src={hit.iconUrl} title={hit.title} size={view === "grid" ? 48 : 52} />
+          <ProjectIcon src={hit.iconUrl} title={hit.title} kind={hit.projectType} size={view === "grid" ? 48 : 52} />
           <span className="result-text">
             <strong>{hit.title}</strong>
-            <span className="faint">by {hit.author}</span>
+            <span className="faint">{t("library.card.by", { author: hit.author })}</span>
           </span>
         </span>
         <span className="result-desc">{hit.description}</span>
         <span className="result-meta">
-          <span title="Downloads">
+          <span title={t("library.card.downloads")}>
             <Icon name="download" size={13} />
             {compact(hit.downloads)}
           </span>
-          <span title="Followers">
+          <span title={t("library.card.followers")}>
             <Icon name="heart" size={13} />
             {compact(hit.follows)}
           </span>
-          {hit.dateModified && <span title="Last updated">{ago(hit.dateModified)}</span>}
-          {tags.map((t) => (
-            <span key={t} className="result-tag">
-              {t.replace(/-/g, " ")}
+          {hit.dateModified && <span title={t("library.card.updated")}>{ago(hit.dateModified)}</span>}
+          {tags.map((tag) => (
+            <span key={tag} className="result-tag">
+              {tag.replace(/-/g, " ")}
             </span>
           ))}
         </span>
@@ -454,11 +479,11 @@ function ResultCard({
       <div className="result-action">
         {installed ? (
           <span className="result-installed">
-            <Icon name="check" size={14} /> Installed
+            <Icon name="check" size={14} /> {t("library.card.installed")}
           </span>
         ) : (
-          <Button size="sm" variant="secondary" icon="download" onClick={onInstall} disabled={!canInstall} title={canInstall ? undefined : "Choose a profile first"}>
-            Install
+          <Button size="sm" variant="secondary" icon="download" onClick={onInstall} disabled={!canInstall} title={canInstall ? undefined : t("library.card.needsProfile")}>
+            {t("library.card.install")}
           </Button>
         )}
       </div>
@@ -467,8 +492,9 @@ function ResultCard({
 }
 
 function Skeletons({ view }: { view: "grid" | "list" }) {
+  const t = useT();
   return (
-    <div className={`lib-${view}`} aria-busy="true" aria-label="Loading results">
+    <div className={`lib-${view}`} aria-busy="true" aria-label={t("library.results.loading")}>
       {Array.from({ length: view === "grid" ? 12 : 8 }, (_, i) => (
         <div key={i} className={`result result-${view} is-skeleton`}>
           {view === "grid" && <span className="result-banner" />}
@@ -482,33 +508,6 @@ function Skeletons({ view }: { view: "grid" | "list" }) {
           <span className="sk sk-line" style={{ width: "92%" }} />
           <span className="sk sk-line" style={{ width: "70%" }} />
         </div>
-      ))}
-    </div>
-  );
-}
-
-function Partnership() {
-  if (PARTNERS.length === 0) {
-    return (
-      <section className="partner-empty">
-        <span className="partner-mark">
-          <Icon name="handshake" size={26} />
-        </span>
-        <h2>Partnership</h2>
-        <p>Servers and creators who partner with Flint will be featured here, clearly labelled. There aren't any partners yet, and Flint never shows placeholder listings.</p>
-      </section>
-    );
-  }
-  return (
-    <div className="partner-grid">
-      {PARTNERS.map((p) => (
-        <article key={p.name} className="partner-card">
-          <strong>{p.name}</strong>
-          <p className="muted">{p.description}</p>
-          <Button size="sm" iconRight="external" onClick={() => void api.openExternal(p.url)}>
-            Visit
-          </Button>
-        </article>
       ))}
     </div>
   );

@@ -10,35 +10,25 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import java.io.File;
 import java.io.InputStream;
 import java.nio.file.Files;
-import java.util.List;
-import java.util.Optional;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.BlockOutlineRenderState;
 import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
-import net.minecraft.tags.ItemTags;
 import net.minecraft.util.Util;
-import net.minecraft.world.inventory.tooltip.TooltipComponent;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.component.ItemContainerContents;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Minecraft 26.3's side of Overlay, Particle Changer, Block Outline, Shulker Preview and the screenshot preview. Each
+ * Minecraft 26.3's side of Overlay, Particle Changer, Block Outline and the screenshot preview (Shulker Preview: {@link Mc263Containers}). Each
  * path is fault-isolated; the per-frame ones allocate nothing in steady state. Render thread unless said otherwise.
  */
 public final class Mc263Visuals {
 	private static final int OVERLAY = Mods.index(VisualMods.Overlay.ID);
 	private static final int PARTICLES = Mods.index(VisualMods.ParticleChanger.ID);
 	private static final int OUTLINE = Mods.index(VisualMods.BlockOutline.ID);
-	private static final int SHULKER = Mods.index(UtilityMods.ShulkerPreview.ID);
 	private static final int SCREENSHOTS = Mods.index(UtilityMods.Screenshots.ID);
 	private static final HookGuard GUARD = new HookGuard("visual modules", (path, error) -> FlintClient.LOGGER.warn(
 		"Flint: the {} hook failed; it's off for this session", path, error));
@@ -116,13 +106,26 @@ public final class Mc263Visuals {
 
 	/** Tints the faces of the outlined block (the pose is already at the block). */
 	public static void fill(PoseStack poseStack, SubmitNodeCollector collector, BlockOutlineRenderState outline) {
-		ModuleState state = Mods.state(OUTLINE);
-		if (!state.bool(VisualMods.BlockOutline.FILL)) {
-			return;
+		if (fillOn()) {
+			int color = fillColor();
+			collector.submitCustomGeometry(poseStack, RenderTypes.debugFilledBox(), (pose, buffer) -> fill(buffer, pose, outline, color));
 		}
+	}
+
+	/** Whether the outlined block's faces are tinted. */
+	public static boolean fillOn() {
+		return Mods.state(OUTLINE).bool(VisualMods.BlockOutline.FILL);
+	}
+
+	public static int fillColor() {
+		ModuleState state = Mods.state(OUTLINE);
 		int alpha = Math.round(255 * state.integer(VisualMods.BlockOutline.FILL_OPACITY) / 100.0F);
-		int color = alpha << 24 | state.rgb(VisualMods.BlockOutline.FILL_COLOR);
-		collector.submitCustomGeometry(poseStack, RenderTypes.debugFilledBox(), (pose, buffer) -> outline.shape().forAllBoxes(
+		return alpha << 24 | state.rgb(VisualMods.BlockOutline.FILL_COLOR);
+	}
+
+	/** The tint's quads, a hair outside each box of the outlined shape ({@code pose} at the block), into a filled-box buffer. */
+	public static void fill(com.mojang.blaze3d.vertex.VertexConsumer buffer, PoseStack.Pose pose, BlockOutlineRenderState outline, int color) {
+		outline.shape().forAllBoxes(
 			(x0, y0, z0, x1, y1, z1) -> {
 				float e = 0.002F;
 				float ax = (float) x0 - e;
@@ -137,7 +140,7 @@ public final class Mc263Visuals {
 				quad(buffer, pose, color, ax, ay, bz, bx, ay, bz, bx, by, bz, ax, by, bz);
 				quad(buffer, pose, color, ax, ay, az, ax, ay, bz, ax, by, bz, ax, by, az);
 				quad(buffer, pose, color, bx, ay, az, bx, by, az, bx, by, bz, bx, ay, bz);
-			}));
+			});
 	}
 
 	private static void quad(com.mojang.blaze3d.vertex.VertexConsumer buffer, PoseStack.Pose pose, int color, float x0, float y0, float z0,
@@ -146,81 +149,6 @@ public final class Mc263Visuals {
 		buffer.addVertex(pose, x1, y1, z1).setColor(color);
 		buffer.addVertex(pose, x2, y2, z2).setColor(color);
 		buffer.addVertex(pose, x3, y3, z3).setColor(color);
-	}
-
-	// ---------- shulker preview ----------
-
-	/** A shulker box's tooltip image (its items in a grid), or empty to leave the tooltip as it is. */
-	public static Optional<TooltipComponent> shulkerImage(ItemStack stack, Optional<TooltipComponent> vanilla) {
-		if (vanilla.isPresent() || !GUARD.on() || !Mods.on(SHULKER) || !stack.is(ItemTags.SHULKER_BOXES)) {
-			return vanilla;
-		}
-		try {
-			ItemContainerContents contents = stack.get(DataComponents.CONTAINER);
-			if (contents == null || contents.nonEmptyItemCopyStream().findAny().isEmpty() || !shulkerShown()) {
-				return vanilla;
-			}
-			return Optional.of(new ShulkerTooltip(contents.itemCopies().toList()));
-		} catch (RuntimeException e) {
-			GUARD.fail(e);
-			return vanilla;
-		}
-	}
-
-	private static boolean shulkerShown() {
-		return Mods.state(SHULKER).option(UtilityMods.ShulkerPreview.SHOW) == 0 || Mc263ControlPlatform.keyDown(225)
-			|| Mc263ControlPlatform.keyDown(229);
-	}
-
-	/** Whether Minecraft's text list of a container's items is left out (the grid shows them). */
-	public static boolean hideContainerList() {
-		return GUARD.on() && Mods.on(SHULKER) && Mods.state(SHULKER).bool(UtilityMods.ShulkerPreview.HIDE_LIST) && shulkerShown();
-	}
-
-	/** The client side of {@link ShulkerTooltip}, or null for any other tooltip image. */
-	public static @Nullable ClientTooltipComponent clientTooltip(TooltipComponent component) {
-		return component instanceof ShulkerTooltip shulker ? new ShulkerGrid(shulker.items()) : null;
-	}
-
-	/** A shulker box's slots, empty ones included, so the grid keeps their places. */
-	public record ShulkerTooltip(List<ItemStack> items) implements TooltipComponent {
-	}
-
-	/** Nine items a row, 18 units a slot, with Minecraft's own item rendering and counts. */
-	private static final class ShulkerGrid implements ClientTooltipComponent {
-		private final List<ItemStack> items;
-
-		ShulkerGrid(List<ItemStack> items) {
-			this.items = items;
-		}
-
-		private int rows() {
-			return Math.max(1, (items.size() + 8) / 9);
-		}
-
-		@Override
-		public int getHeight(Font font) {
-			return rows() * 18 + 4;
-		}
-
-		@Override
-		public int getWidth(Font font) {
-			return 9 * 18;
-		}
-
-		@Override
-		public void extractImage(Font font, int x, int y, int w, int h, GuiGraphicsExtractor graphics) {
-			for (int i = 0; i < items.size(); i++) {
-				int sx = x + i % 9 * 18;
-				int sy = y + 2 + i / 9 * 18;
-				graphics.fill(sx, sy, sx + 17, sy + 17, 0x40000000);
-				ItemStack stack = items.get(i);
-				if (!stack.isEmpty()) {
-					graphics.item(stack, sx, sy);
-					graphics.itemDecorations(font, stack, sx, sy);
-				}
-			}
-		}
 	}
 
 	// ---------- screenshot preview ----------
@@ -301,12 +229,12 @@ public final class Mc263Visuals {
 			Minecraft mc = Minecraft.getInstance();
 			switch (action) {
 				case 1 -> mc.keyboardHandler.setClipboard(file.getAbsolutePath());
-				case 2 -> com.mojang.blaze3d.Blaze3D.openPath(file.toPath());
-				case 3 -> com.mojang.blaze3d.Blaze3D.openPath(file.toPath().getParent());
+				case 2 -> com.flintclient.client.compat.McCompat.openPath(file.toPath());
+				case 3 -> com.flintclient.client.compat.McCompat.openPath(file.toPath().getParent());
 				default -> {
 				}
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			FlintClient.LOGGER.warn("Flint couldn't run the after-screenshot action", e);
 		}
 	}
@@ -343,7 +271,7 @@ public final class Mc263Visuals {
 			long now = Util.getMillis();
 			ModuleState state = Mods.state(SCREENSHOTS);
 			long duration = state.integer(UtilityMods.Screenshots.DURATION) * 1000L;
-			if (!Mods.on(SCREENSHOTS) || now - shownAt > duration) {
+			if (!Mods.on(SCREENSHOTS) || shownAt == Long.MIN_VALUE || now - shownAt > duration) {
 				loaded = false;
 				Minecraft.getInstance().getTextureManager().release(SHOT);
 				return;
@@ -369,7 +297,7 @@ public final class Mc263Visuals {
 			int alpha = Math.round(255 * fade);
 			g.fill(x - 2, y - 2, x + w + 2, y + h + 2, alpha << 24 | state.rgb(UtilityMods.Screenshots.BORDER));
 			g.blit(RenderPipelines.GUI_TEXTURED, SHOT, x, y, 0, 0, w, h, shotW, shotH, shotW, shotH, alpha << 24 | 0xFFFFFF);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
 	}

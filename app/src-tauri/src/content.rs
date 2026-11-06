@@ -11,6 +11,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
+pub mod livepacks;
+pub mod updates;
+
 pub const MODRINTH_CDN: &[&str] = &["cdn.modrinth.com"];
 
 /// Flint's default performance set: established, open-source, client-side Fabric mods. Each is
@@ -46,7 +49,7 @@ fn default_kind() -> String {
 }
 
 /// One piece of content Flint installed into a profile. Stored per profile in `flint-content.json`.
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContentEntry {
     #[serde(default = "default_kind")]
@@ -79,6 +82,9 @@ pub struct ContentEntry {
     pub requires: Vec<String>,
     #[serde(default)]
     pub previous: Option<Box<ContentEntry>>,
+    /// The player keeps this version: Update all leaves it unticked, and it changes only when they pick it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 fn manifest_path(state: &AppState, id: &str) -> PathBuf {
@@ -88,10 +94,29 @@ fn manifest_path(state: &AppState, id: &str) -> PathBuf {
 /// Reads the profile's content manifest, migrating the older mods-only manifest on first use.
 pub fn load(state: &AppState, id: &str) -> Vec<ContentEntry> {
     let path = manifest_path(state, id);
-    if path.exists() {
-        return read_json(&path);
-    }
-    read_json(&state.paths.profile_dir(id).join("flint-mods.json"))
+    let entries: Vec<ContentEntry> = if path.exists() { read_json(&path) } else { read_json(&state.paths.profile_dir(id).join("flint-mods.json")) };
+    trusted_entries(entries)
+}
+
+/// A plain file name, exactly as `safe_name` would accept and keep it.
+fn plain_name(name: &str) -> bool {
+    safe_name(name).is_ok_and(|kept| kept == name)
+}
+
+/// The manifest's file and world names are joined to the profile's folders when content is removed, rolled
+/// back or updated, so an entry naming anything but a plain file there (an edited or planted manifest) is
+/// dropped, and an earlier version that does is forgotten.
+fn trusted_entries(entries: Vec<ContentEntry>) -> Vec<ContentEntry> {
+    entries
+        .into_iter()
+        .filter(|e| plain_name(&e.file_name) && e.world.as_deref().is_none_or(plain_name))
+        .map(|mut e| {
+            if e.previous.as_ref().is_some_and(|p| !plain_name(&p.file_name)) {
+                e.previous = None;
+            }
+            e
+        })
+        .collect()
 }
 
 fn save(state: &AppState, id: &str, entries: &[ContentEntry]) -> CmdResult<()> {
@@ -106,12 +131,29 @@ pub fn installed_slugs(state: &AppState, profile_id: &str) -> Vec<String> {
 pub fn target_profile(state: &AppState, profile_id: Option<&str>, game_version: Option<&str>) -> CmdResult<Profile> {
     match (profile_id, game_version) {
         (Some(id), _) => find_profile(state, id),
+        // A new profile for Modrinth content: 1.8.9 takes none of Modrinth's mods (see `takes_mods`).
         (None, Some(version)) if SUPPORTED_VERSIONS.contains(&version) && version != "1.8.9" => Ok(Profile {
             game_version: version.to_owned(),
             loader: "fabric".into(),
             ..Profile::default()
         }),
         _ => Err("Choose a Fabric version first.".into()),
+    }
+}
+
+/// Whether Modrinth's Fabric mods and shader packs can go in this profile. Modrinth's Fabric builds for 1.8.9 are made
+/// for Legacy Fabric, whose intermediary names aren't the Ornithe ones Flint's 1.8.9 Fabric runs on, so none of them would
+/// load: a 1.8.9 Fabric profile takes resource packs (and Flint's own runtime) only.
+pub fn takes_mods(profile: &Profile) -> bool {
+    profile.loader == "fabric" && profile.game_version != "1.8.9"
+}
+
+/// Why a profile takes no mods or shader packs.
+fn no_mods_reason(profile: &Profile) -> &'static str {
+    if profile.loader == "fabric" {
+        "Modrinth's mods for Minecraft 1.8.9 are built for Legacy Fabric, which this profile's Fabric can't load."
+    } else {
+        "This profile runs vanilla Minecraft, which can't load mods or shaders."
     }
 }
 
@@ -146,14 +188,6 @@ fn kind_dir(state: &AppState, profile_id: &str, kind: &str, world: Option<&str>)
     }
     let sub = content_dir(kind).ok_or("Unknown content type")?;
     Ok(state.paths.profile_dir(profile_id).join(sub))
-}
-
-fn max_bytes(kind: &str) -> u64 {
-    match kind {
-        "mod" => 64 * 1024 * 1024,
-        "resourcepack" => 512 * 1024 * 1024,
-        _ => 128 * 1024 * 1024,
-    }
 }
 
 fn file_fits(kind: &str, name: &str) -> bool {
@@ -199,6 +233,31 @@ async fn version(state: &AppState, id: &str) -> CmdResult<Value> {
     state.modrinth.get_fresh(&state.http, &format!("/version/{id}"), VERSIONS_TTL, "Couldn't load a version from Modrinth").await
 }
 
+/// Where planning reads Modrinth's projects and versions: the app's cached client (`AppState`), or fixed
+/// answers in tests.
+pub(crate) trait Catalog {
+    async fn project(&self, id: &str) -> CmdResult<Value>;
+    async fn version(&self, id: &str) -> CmdResult<Value>;
+    /// A project's versions for one kind of content on one Minecraft version, newest first.
+    async fn versions(&self, project_id: &str, kind: &str, game_version: &str) -> CmdResult<Value>;
+}
+
+impl Catalog for AppState {
+    async fn project(&self, id: &str) -> CmdResult<Value> {
+        project(self, id).await
+    }
+    async fn version(&self, id: &str) -> CmdResult<Value> {
+        version(self, id).await
+    }
+    async fn versions(&self, project_id: &str, kind: &str, game_version: &str) -> CmdResult<Value> {
+        if !valid_id(project_id) {
+            return Err("Invalid project".into());
+        }
+        let path = format!("/project/{project_id}/version{}", version_query(loaders_for(kind), Some(game_version)));
+        self.modrinth.get_fresh(&self.http, &path, VERSIONS_TTL, "Couldn't check versions on Modrinth").await
+    }
+}
+
 fn fits(version: &Value, kind: &str, game_version: &str) -> bool {
     let loaders = loaders_for(kind);
     let game = version["game_versions"].as_array().is_some_and(|v| v.iter().any(|x| x.as_str() == Some(game_version)));
@@ -206,9 +265,8 @@ fn fits(version: &Value, kind: &str, game_version: &str) -> bool {
     game && loader
 }
 
-async fn best_version(state: &AppState, project_id: &str, kind: &str, profile: &Profile) -> CmdResult<Option<Value>> {
-    let path = format!("/project/{project_id}/version{}", version_query(loaders_for(kind), Some(&profile.game_version)));
-    let list = state.modrinth.get_fresh(&state.http, &path, VERSIONS_TTL, "Couldn't check versions on Modrinth").await?;
+async fn best_version(catalog: &impl Catalog, project_id: &str, kind: &str, profile: &Profile) -> CmdResult<Option<Value>> {
+    let list = catalog.versions(project_id, kind, &profile.game_version).await?;
     Ok(pick_version(list.as_array().map(Vec::as_slice).unwrap_or_default()))
 }
 
@@ -240,9 +298,14 @@ fn plan_item(p: &Pending, version: Option<&Value>, status: &str, message: Option
 
 async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, roots: Vec<Pending>) -> CmdResult<Value> {
     let installed = profile_id.map(|id| load(state, id)).unwrap_or_default();
+    resolve_among(state, &installed, profile, roots).await
+}
+
+/// Plans `roots` and everything they need for a profile holding `installed`.
+async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profile: &Profile, roots: Vec<Pending>) -> CmdResult<Value> {
     let installed_ids: HashSet<String> = installed.iter().map(|e| format!("{}:{}", e.kind, e.project_id)).collect();
     let installed_mods: HashMap<String, String> = installed.iter().filter(|e| e.kind == "mod").map(|e| (e.project_id.clone(), e.title.clone())).collect();
-    let fabric = profile.loader == "fabric";
+    let fabric = takes_mods(profile);
 
     let mut items: Vec<Value> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -252,7 +315,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
     let mut queue = roots;
 
     if fabric && queue.iter().any(|p| p.kind == "shader") && !installed_mods.contains_key(IRIS) {
-        if let Ok(iris) = project(state, IRIS).await {
+        if let Ok(iris) = catalog.project(IRIS).await {
             let by = queue.iter().find(|p| p.kind == "shader").and_then(|p| p.project["title"].as_str()).map(str::to_owned);
             queue.push(Pending { project: iris, kind: "mod".into(), version_id: None, source: "dependency".into(), reason: Some("Shader packs need the Iris shader loader".into()), required_by: by, required: true });
         }
@@ -280,7 +343,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
                 continue;
             }
             if (p.kind == "mod" || p.kind == "shader") && !fabric {
-                items.push(plan_item(&p, None, "unavailable", Some("This profile runs vanilla Minecraft, which can't load mods or shaders.".into())));
+                items.push(plan_item(&p, None, "unavailable", Some(no_mods_reason(profile).into())));
                 continue;
             }
             if !loaders.iter().any(|l| needed.contains(&l.as_str())) {
@@ -303,7 +366,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
             }
 
             let chosen = match &p.version_id {
-                Some(id) => match version(state, id).await {
+                Some(id) => match catalog.version(id).await {
                     Ok(v) if fits(&v, &p.kind, &profile.game_version) => Some(v),
                     Ok(_) => None,
                     Err(_) => None,
@@ -312,7 +375,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
             };
             let chosen = match chosen {
                 Some(v) => Some(v),
-                None => best_version(state, &pid, &p.kind, profile).await?,
+                None => best_version(catalog, &pid, &p.kind, profile).await?,
             };
             let Some(v) = chosen else {
                 items.push(plan_item(&p, None, "unavailable", Some(format!("Not available for Minecraft {}", profile.game_version))));
@@ -327,7 +390,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
                 let dep_version = dep["version_id"].as_str();
                 let dep_project = match (dep_project, dep_version) {
                     (Some(id), _) => Some(id.to_owned()),
-                    (None, Some(vid)) => version(state, vid).await.ok().and_then(|x| x["project_id"].as_str().map(str::to_owned)),
+                    (None, Some(vid)) => catalog.version(vid).await.ok().and_then(|x| x["project_id"].as_str().map(str::to_owned)),
                     _ => None,
                 };
                 let Some(dep_id) = dep_project else { continue };
@@ -336,7 +399,7 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
                         if installed_mods.contains_key(&dep_id) {
                             continue;
                         }
-                        if let Ok(dp) = project(state, &dep_id).await {
+                        if let Ok(dp) = catalog.project(&dep_id).await {
                             let dep_kind = project_kind(&dp);
                             next.push(Pending {
                                 kind: if dep_kind == "datapack" { p.kind.clone() } else { dep_kind },
@@ -428,7 +491,10 @@ pub async fn content_plan(state: State<'_, AppState>, profile_id: String, reques
             required: true,
         });
     }
-    resolve(&state, &profile, Some(&profile_id), roots).await
+    let mut plan = resolve(&state, &profile, Some(&profile_id), roots).await?;
+    // Whether the game, while it runs, turns new packs on by itself (Flint's runtime is in it): the install dialog says so.
+    plan["gameApplies"] = json!(livepacks::game_applies(&state, &profile_id));
+    Ok(plan)
 }
 
 #[derive(Deserialize, Clone)]
@@ -653,11 +719,11 @@ pub async fn mods_resolve(
     requests: Vec<ResolveRequest>,
 ) -> CmdResult<Value> {
     let profile = target_profile(&state, profile_id.as_deref(), game_version.as_deref())?;
-    let fabric = profile.loader == "fabric";
+    let fabric = takes_mods(&profile);
     let requests: Vec<ResolveRequest> = requests.into_iter().take(16).collect();
     let kinds: Vec<Option<&'static str>> = requests.iter().map(|r| resolve_kind(r.kind.as_deref())).collect();
     if vanilla_refuses_all(fabric, &kinds) {
-        return Err("This profile runs vanilla Minecraft. Mods need a Fabric profile.".into());
+        return Err(if profile.loader == "fabric" { no_mods_reason(&profile).into() } else { "This profile runs vanilla Minecraft. Mods need a Fabric profile.".into() });
     }
     let mut roots = Vec::new();
     let mut unmatched = Vec::new();
@@ -808,76 +874,107 @@ fn backup_dir(state: &AppState, profile_id: &str, kind: &str) -> PathBuf {
 
 /// Installs a batch all-or-nothing: every file is downloaded and verified into a staging folder
 /// first, and only when all of them succeed are they moved into the profile.
-pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile_id: &str, items: Vec<InstallItem>, world: Option<String>) -> CmdResult<Value> {
+///
+/// While the profile's game runs, a batch of resource packs, shader packs and data packs goes in live (`livepacks`): each
+/// file takes a name nothing in its folder has, so a pack the game has open is never replaced, and the game is told
+/// (`enable_live`: turn the packs on in the game now). Mods need a restart and are refused then.
+pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile_id: &str, items: Vec<InstallItem>, world: Option<String>, enable_live: bool) -> CmdResult<Value> {
     let profile = find_profile(state, profile_id)?;
-    ensure_not_running(state, profile_id)?;
     let items: Vec<InstallItem> = items.into_iter().take(60).collect();
+    livepacks::check_kinds(state, profile_id, items.iter().map(|i| i.kind.as_deref().unwrap_or("mod")))?;
     let staging = state.paths.profile_dir(profile_id).join(format!(".flint-staging-{job}"));
     std::fs::create_dir_all(&staging).map_err(err("Could not prepare the download"))?;
     let total = items.len();
 
-    let staged: CmdResult<Vec<Staged>> = async {
-        let mut out = Vec::new();
+    // Several files are fetched at once (Settings → Storage's limit, at most MODRINTH_MAX): each takes a request or two
+    // to Modrinth and a download, and a batch such as a new profile's performance set (seven mods) spent about 4 s on them
+    // one after another. Each file is still verified, the batch is still all-or-nothing, and `staged` keeps its order.
+    // With several at once the job counts finished files instead of one file's bytes.
+    let parallel = crate::storage::modrinth_download_limit(&crate::data::load_settings(state));
+    let quiet = total > 1 && parallel > 1;
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    if quiet {
+        state.jobs.update(app, job, false, |j| {
+            j.state = "running".into();
+            j.stage = "Downloading".into();
+            j.items_done = 0;
+            j.items_total = total;
+        });
+    }
+    let staged: CmdResult<Vec<Staged>> = {
+        use futures_util::{StreamExt, TryStreamExt};
+        let (profile, staging, world, finished) = (&profile, &staging, &world, &finished);
+        // Made in a loop rather than by a stream's closure, whose borrowing futures Rust can't prove Send for every
+        // lifetime; none starts before `buffered` polls it.
+        let mut each = Vec::with_capacity(total);
         for (index, item) in items.iter().enumerate() {
-            state.jobs.update(app, job, false, |j| {
-                j.state = "running".into();
-                j.stage = "Checking compatibility".into();
-                j.items_done = index;
-                j.items_total = total;
-            });
-            let kind = item.kind.clone().unwrap_or_else(|| "mod".into());
-            if (kind == "mod" || kind == "shader") && profile.loader != "fabric" {
-                return Err("This profile runs vanilla Minecraft, which can't load mods or shaders.".into());
-            }
-            let v = version(state, &item.version_id).await?;
-            if !fits(&v, &kind, &profile.game_version) {
-                return Err(format!("{} isn't built for Minecraft {} with this loader", v["name"].as_str().unwrap_or("This release"), profile.game_version));
-            }
-            let file = primary_file(&v).ok_or("This release has no downloadable file")?;
-            let name = safe_name(file["filename"].as_str().unwrap_or_default())?.to_owned();
-            if !file_fits(&kind, &name) {
-                return Err(format!("{name} isn't a file type Flint installs for this content"));
-            }
-            let sha512 = file["hashes"]["sha512"].as_str().ok_or("Modrinth published no SHA-512 hash for this file")?.to_owned();
-            let url = file["url"].as_str().ok_or("No download address")?.to_owned();
-            let p = project(state, v["project_id"].as_str().unwrap_or_default()).await?;
-            let dir = kind_dir(state, profile_id, &kind, world.as_deref())?;
-            let target = staging.join(&name);
-            let size = download_verified(app, state, job, Fetch { url: &url, expected: Expected::Sha512(&sha512), max_bytes: max_bytes(&kind), allowed_hosts: MODRINTH_CDN }, &target).await?;
-            let requires: Vec<String> = v["dependencies"]
-                .as_array()
-                .map(|d| d.iter().filter(|x| x["dependency_type"] == "required").filter_map(|x| x["project_id"].as_str().map(str::to_owned)).collect())
-                .unwrap_or_default();
-            out.push(Staged {
-                entry: ContentEntry {
-                    kind: kind.clone(),
-                    project_id: v["project_id"].as_str().unwrap_or_default().to_owned(),
-                    version_id: item.version_id.clone(),
-                    slug: p["slug"].as_str().unwrap_or_default().to_owned(),
-                    title: p["title"].as_str().unwrap_or_default().to_owned(),
-                    author: None,
-                    version_number: v["version_number"].as_str().unwrap_or_default().to_owned(),
-                    file_name: name,
-                    sha512,
-                    size,
-                    source: match item.source.as_str() {
-                        "assistant" | "dependency" | "optional" | "modpack" | "flint" => item.source.clone(),
-                        _ => "user".into(),
+            each.push(async move {
+                if !quiet {
+                    state.jobs.update(app, job, false, |j| {
+                        j.state = "running".into();
+                        j.stage = "Checking compatibility".into();
+                        j.items_done = index;
+                        j.items_total = total;
+                    });
+                }
+                let kind = item.kind.clone().unwrap_or_else(|| "mod".into());
+                if (kind == "mod" || kind == "shader") && !takes_mods(profile) {
+                    return Err(no_mods_reason(profile).into());
+                }
+                let v = version(state, &item.version_id).await?;
+                if !fits(&v, &kind, &profile.game_version) {
+                    return Err(format!("{} isn't built for Minecraft {} with this loader", v["name"].as_str().unwrap_or("This release"), profile.game_version));
+                }
+                let file = primary_file(&v).ok_or("This release has no downloadable file")?;
+                let name = safe_name(file["filename"].as_str().unwrap_or_default())?.to_owned();
+                if !file_fits(&kind, &name) {
+                    return Err(format!("{name} isn't a file type Flint installs for this content"));
+                }
+                let sha512 = file["hashes"]["sha512"].as_str().ok_or("Modrinth published no SHA-512 hash for this file")?.to_owned();
+                let url = file["url"].as_str().ok_or("No download address")?.to_owned();
+                let p = project(state, v["project_id"].as_str().unwrap_or_default()).await?;
+                let dir = kind_dir(state, profile_id, &kind, world.as_deref())?;
+                let target = staging.join(&name);
+                let size = download_verified(app, state, job, Fetch { url: &url, expected: Expected::Sha512(&sha512), max_bytes: jobs::listed_cap(file["size"].as_u64()), allowed_hosts: MODRINTH_CDN, quiet }, &target).await?;
+                if quiet {
+                    let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    state.jobs.update(app, job, false, |j| j.items_done = done);
+                }
+                let requires: Vec<String> = v["dependencies"]
+                    .as_array()
+                    .map(|d| d.iter().filter(|x| x["dependency_type"] == "required").filter_map(|x| x["project_id"].as_str().map(str::to_owned)).collect())
+                    .unwrap_or_default();
+                Ok::<_, String>(Staged {
+                    entry: ContentEntry {
+                        kind: kind.clone(),
+                        project_id: v["project_id"].as_str().unwrap_or_default().to_owned(),
+                        version_id: item.version_id.clone(),
+                        slug: p["slug"].as_str().unwrap_or_default().to_owned(),
+                        title: p["title"].as_str().unwrap_or_default().to_owned(),
+                        author: None,
+                        version_number: v["version_number"].as_str().unwrap_or_default().to_owned(),
+                        file_name: name,
+                        sha512,
+                        size,
+                        source: match item.source.as_str() {
+                            "assistant" | "dependency" | "optional" | "modpack" | "flint" => item.source.clone(),
+                            _ => "user".into(),
+                        },
+                        reason: item.reason.clone().map(|r| r.chars().take(200).collect()),
+                        icon_url: p["icon_url"].as_str().map(str::to_owned),
+                        installed_at: now_secs(),
+                        world: if kind == "datapack" { world.clone() } else { None },
+                        requires,
+                        previous: None,
+                        pinned: false,
                     },
-                    reason: item.reason.clone().map(|r| r.chars().take(200).collect()),
-                    icon_url: p["icon_url"].as_str().map(str::to_owned),
-                    installed_at: now_secs(),
-                    world: if kind == "datapack" { world.clone() } else { None },
-                    requires,
-                    previous: None,
-                },
-                staged: target,
-                dir,
+                    staged: target,
+                    dir,
+                })
             });
         }
-        Ok(out)
-    }
-    .await;
+        futures_util::stream::iter(each).buffered(parallel).try_collect().await
+    };
 
     let staged = match staged {
         Ok(s) => s,
@@ -892,12 +989,36 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
         j.items_done = total;
     });
     let _guard = state.file_lock.lock().await;
-    ensure_not_running(state, profile_id)?;
+    let outcome = commit_staged(state, profile_id, staged, enable_live);
+    let _ = std::fs::remove_dir_all(&staging);
+    outcome
+}
+
+/// Moves a batch's verified downloads into the profile and records them (under the file lock). Whether the profile's game
+/// runs is looked at again here, as it may have started or closed during the download: while it runs, only packs go in, live.
+fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable_live: bool) -> CmdResult<Value> {
+    let live = livepacks::check_kinds(state, profile_id, staged.iter().map(|s| s.entry.kind.as_str()))?;
     let mut manifest = load(state, profile_id);
     let mut placed = Vec::new();
+    let mut notes: Vec<livepacks::Note> = Vec::new();
     for s in staged {
         std::fs::create_dir_all(&s.dir).map_err(err("Could not create the content folder"))?;
         let mut entry = s.entry;
+        if live {
+            // The running game may have the old file of this project (or one of the same name) open or turned on: it stays
+            // where it is, and the new file takes a name nothing in the folder has.
+            let name = livepacks::free_name(&s.dir, &entry.file_name);
+            livepacks::place(&s.staged, &s.dir, &name)?;
+            entry.file_name = name;
+            if let Some(old) = manifest.iter().find(|m| m.kind == entry.kind && m.project_id == entry.project_id && m.world == entry.world) {
+                entry.pinned = old.pinned;
+            }
+            notes.push(livepacks::Note::added(&entry.kind, &entry.file_name, &entry.title, entry.world.as_deref(), enable_live));
+            manifest.retain(|m| !(m.kind == entry.kind && m.project_id == entry.project_id && m.world == entry.world));
+            placed.push(entry.title.clone());
+            manifest.push(entry);
+            continue;
+        }
         let mut keep_disabled = false;
         if let Some(old) = manifest.iter().find(|m| m.kind == entry.kind && m.project_id == entry.project_id && m.world == entry.world).cloned() {
             keep_disabled = s.dir.join(format!("{}{DISABLED}", old.file_name)).exists();
@@ -911,6 +1032,7 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
             }
             let mut prev = old.clone();
             prev.previous = None;
+            entry.pinned = old.pinned;
             entry.previous = Some(Box::new(prev));
         }
         let target = if keep_disabled { s.dir.join(format!("{}{DISABLED}", entry.file_name)) } else { s.dir.join(&entry.file_name) };
@@ -930,8 +1052,23 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
         entry.requires.retain(|r| present.contains(r));
     }
     save(state, profile_id, &manifest)?;
-    let _ = std::fs::remove_dir_all(&staging);
-    Ok(json!({ "installed": placed, "failed": [] }))
+    if !live {
+        return Ok(json!({ "installed": placed, "failed": [] }));
+    }
+    // The files are in: a game that misses the message still lists them when its pack screen opens.
+    if let Err(error) = livepacks::tell_game(&state.paths.profile_dir(profile_id), &notes) {
+        eprintln!("[flint] couldn't tell the running game about new packs: {error}");
+    }
+    let kinds: HashSet<&str> = notes.iter().map(|n| n.kind.as_str()).collect();
+    Ok(json!({
+        "installed": placed,
+        "failed": [],
+        "live": {
+            "enable": enable_live && kinds.iter().any(|k| *k != "datapack"),
+            "datapack": kinds.contains("datapack"),
+            "applies": livepacks::game_applies(state, profile_id),
+        },
+    }))
 }
 
 /// Moves a file Flint didn't install (one the player added by hand) into `.flint-replaced` beside
@@ -953,17 +1090,26 @@ fn set_aside(path: &Path) -> CmdResult<PathBuf> {
     Ok(kept)
 }
 
+/// `enable_live`: while the profile's game runs, the packs installed are turned on in it at once (the default).
 #[tauri::command]
-pub async fn content_install(app: AppHandle, state: State<'_, AppState>, profile_id: String, title: String, items: Vec<InstallItem>, world: Option<String>) -> CmdResult<String> {
+pub async fn content_install(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: String,
+    title: String,
+    items: Vec<InstallItem>,
+    world: Option<String>,
+    enable_live: Option<bool>,
+) -> CmdResult<String> {
     let profile = find_profile(&state, &profile_id)?;
-    ensure_not_running(&state, &profile_id)?;
+    livepacks::check_kinds(&state, &profile_id, items.iter().map(|i| i.kind.as_deref().unwrap_or("mod")))?;
     if items.is_empty() {
         return Err("Nothing to install.".into());
     }
     let (id, _) = state.jobs.create(&app, "install", Some(&profile.id), &title, items.len());
     jobs::spawn(&app, id.clone(), move |app, job| async move {
         let state = app.state::<AppState>();
-        install_batch(&app, &state, &job, &profile_id, items, world).await
+        install_batch(&app, &state, &job, &profile_id, items, world, enable_live.unwrap_or(true)).await
     });
     Ok(id)
 }
@@ -973,7 +1119,7 @@ pub async fn content_install(app: AppHandle, state: State<'_, AppState>, profile
 pub async fn mods_install(app: AppHandle, state: State<'_, AppState>, profile_id: String, items: Vec<InstallItem>) -> CmdResult<Value> {
     find_profile(&state, &profile_id)?;
     let (job, _) = state.jobs.create(&app, "install", Some(&profile_id), "Mods for your new profile", items.len());
-    let outcome = install_batch(&app, &state, &job, &profile_id, items, None).await;
+    let outcome = install_batch(&app, &state, &job, &profile_id, items, None, false).await;
     state.jobs.finish(&app, &job, &outcome);
     outcome
 }
@@ -1061,6 +1207,9 @@ fn list_kind(state: &AppState, profile_id: &str, kind: &str, world: Option<&str>
             "installedAt": entry.installed_at,
             "canRollback": entry.previous.as_ref().is_some_and(|p| backups.join(&p.file_name).exists()),
             "previousVersion": entry.previous.as_ref().map(|p| p.version_number.clone()),
+            "pinned": entry.pinned,
+            // The jar's own logo: shown when there's no Modrinth icon, or it can't load (offline).
+            "localIcon": (kind == "mod").then(|| crate::modicons::url(profile_id, &entry.file_name)),
         }));
     }
     for (name, enabled, is_dir) in files {
@@ -1070,14 +1219,22 @@ fn list_kind(state: &AppState, profile_id: &str, kind: &str, world: Option<&str>
         let real = if enabled { name.clone() } else { format!("{name}{DISABLED}") };
         let (size, modified) = file_info(&dir.join(&real));
         let info = identified.get(&format!("{kind}/{}/{name}", world.unwrap_or("-"))).filter(|i| i.size == size && i.modified == modified).and_then(|i| i.info.clone());
+        // A jar Modrinth hasn't named (added by hand, imported, CurseForge-only) still shows its own name and version.
+        let jar = if kind == "mod" && !is_dir { crate::modicons::jar_info(&dir.join(&real)) } else { Default::default() };
         out.push(json!({
             "kind": kind,
             "fileName": name,
-            "title": info.as_ref().and_then(|i| i["title"].as_str()).map(str::to_owned).unwrap_or_else(|| name.trim_end_matches(".jar").trim_end_matches(".zip").to_owned()),
+            "title": info
+                .as_ref()
+                .and_then(|i| i["title"].as_str())
+                .map(str::to_owned)
+                .or(jar.name)
+                .unwrap_or_else(|| name.trim_end_matches(".jar").trim_end_matches(".zip").to_owned()),
             "projectId": info.as_ref().map(|i| i["projectId"].clone()),
             "versionId": info.as_ref().map(|i| i["versionId"].clone()),
-            "versionNumber": info.as_ref().map(|i| i["versionNumber"].clone()),
+            "versionNumber": info.as_ref().map(|i| i["versionNumber"].clone()).filter(|v| !v.is_null()).or(jar.version.map(Value::from)),
             "iconUrl": info.as_ref().map(|i| i["iconUrl"].clone()),
+            "localIcon": (kind == "mod" && !is_dir).then(|| crate::modicons::url(profile_id, &name)),
             "source": "manual",
             "size": size,
             "modified": modified,
@@ -1088,6 +1245,7 @@ fn list_kind(state: &AppState, profile_id: &str, kind: &str, world: Option<&str>
             "world": world,
             "requires": [],
             "identified": info.is_some(),
+            "pinned": false,
         }));
     }
     out
@@ -1162,13 +1320,26 @@ fn sha512_file(path: &Path) -> Option<String> {
 #[tauri::command]
 pub async fn content_identify(state: State<'_, AppState>, profile_id: String) -> CmdResult<Value> {
     find_profile(&state, &profile_id)?;
-    let manifest = load(&state, &profile_id);
-    let mut identified: HashMap<String, Identified> = read_json(&identified_path(&state, &profile_id));
-    let mut pending: Vec<(String, String)> = Vec::new();
+    let identified = identify(&state, &profile_id).await?;
+    Ok(json!({ "identified": identified }))
+}
+
+/// Every content folder of a profile: mods, resource packs, shader packs and each world's data packs.
+fn content_targets(state: &AppState, profile_id: &str) -> Vec<(String, Option<String>)> {
     let mut targets: Vec<(String, Option<String>)> = vec![("mod".into(), None), ("resourcepack".into(), None), ("shader".into(), None)];
-    targets.extend(worlds(&state, &profile_id).into_iter().filter_map(|w| w["id"].as_str().map(|id| ("datapack".to_owned(), Some(id.to_owned())))));
-    for (kind, world) in targets {
-        let Ok(dir) = kind_dir(&state, &profile_id, &kind, world.as_deref()) else { continue };
+    targets.extend(worlds(state, profile_id).into_iter().filter_map(|w| w["id"].as_str().map(|id| ("datapack".to_owned(), Some(id.to_owned())))));
+    targets
+}
+
+/// Hashes the files Flint didn't install (once per version of each file) and asks Modrinth which project each one
+/// is. Files in Flint's records without a project (pinned before Modrinth knew them) are asked about again, and
+/// filled in when Modrinth knows them now. Returns how many hand-added files Modrinth knows.
+async fn identify(state: &AppState, profile_id: &str) -> CmdResult<usize> {
+    let manifest = load(state, profile_id);
+    let mut identified: HashMap<String, Identified> = read_json(&identified_path(state, profile_id));
+    let mut pending: Vec<(String, String)> = Vec::new();
+    for (kind, world) in content_targets(state, profile_id) {
+        let Ok(dir) = kind_dir(state, profile_id, &kind, world.as_deref()) else { continue };
         for (name, enabled, is_dir) in scan(&dir, &kind) {
             if is_dir || manifest.iter().any(|m| m.kind == kind && m.file_name == name && m.world == world) {
                 continue;
@@ -1179,7 +1350,7 @@ pub async fn content_identify(state: State<'_, AppState>, profile_id: String) ->
             if identified.get(&key).is_some_and(|i| i.size == size && i.modified == modified) {
                 continue;
             }
-            if size > 256 * 1024 * 1024 {
+            if size > jobs::UNLISTED_MAX {
                 continue;
             }
             let path = real.clone();
@@ -1188,10 +1359,15 @@ pub async fn content_identify(state: State<'_, AppState>, profile_id: String) ->
             pending.push((key, hash));
         }
     }
-    if !pending.is_empty() {
-        let hashes: Vec<&str> = pending.iter().map(|(_, h)| h.as_str()).take(200).collect();
-        let found = state.modrinth.post(&state.http, "/version_files", &json!({ "hashes": hashes, "algorithm": "sha512" }), "Couldn't identify files").await?;
-        let ids: Vec<String> = found.as_object().map(|o| o.values().filter_map(|v| v["project_id"].as_str().map(str::to_owned)).collect::<HashSet<_>>().into_iter().collect()).unwrap_or_default();
+    let unknown: Vec<String> = manifest.iter().filter(|m| m.project_id.is_empty() && !m.sha512.is_empty()).map(|m| m.sha512.clone()).collect();
+    if !pending.is_empty() || !unknown.is_empty() {
+        let hashes: Vec<&str> = pending.iter().map(|(_, h)| h.as_str()).chain(unknown.iter().map(String::as_str)).collect();
+        let mut found = serde_json::Map::new();
+        for chunk in hashes.chunks(200) {
+            let answer = state.modrinth.post(&state.http, "/version_files", &json!({ "hashes": chunk, "algorithm": "sha512" }), "Couldn't identify files").await?;
+            found.extend(answer.as_object().cloned().unwrap_or_default());
+        }
+        let ids: Vec<String> = found.values().filter_map(|v| v["project_id"].as_str().map(str::to_owned)).collect::<HashSet<_>>().into_iter().collect();
         let projects = if ids.is_empty() {
             json!([])
         } else {
@@ -1201,22 +1377,40 @@ pub async fn content_identify(state: State<'_, AppState>, profile_id: String) ->
                 .await
                 .unwrap_or_else(|_| json!([]))
         };
+        let project_of = |v: &Value| projects.as_array().and_then(|l| l.iter().find(|p| p["id"] == v["project_id"])).cloned();
         for (key, hash) in &pending {
             let Some(v) = found.get(hash) else { continue };
-            let project = projects.as_array().and_then(|l| l.iter().find(|p| p["id"] == v["project_id"]));
+            let project = project_of(v);
             if let Some(entry) = identified.get_mut(key) {
                 entry.info = Some(json!({
                     "projectId": v["project_id"],
                     "versionId": v["id"],
                     "versionNumber": v["version_number"],
-                    "title": project.map(|p| p["title"].clone()),
-                    "iconUrl": project.map(|p| p["icon_url"].clone()),
+                    "title": project.as_ref().map(|p| p["title"].clone()),
+                    "iconUrl": project.as_ref().map(|p| p["icon_url"].clone()),
                 }));
             }
         }
+        if unknown.iter().any(|h| found.contains_key(h)) {
+            let _guard = state.file_lock.lock().await;
+            let mut manifest = load(state, profile_id);
+            for entry in manifest.iter_mut().filter(|m| m.project_id.is_empty()) {
+                let Some(v) = found.get(&entry.sha512) else { continue };
+                let project = project_of(v);
+                entry.project_id = v["project_id"].as_str().unwrap_or_default().to_owned();
+                entry.version_id = v["id"].as_str().unwrap_or_default().to_owned();
+                entry.version_number = v["version_number"].as_str().unwrap_or_default().to_owned();
+                if let Some(p) = project {
+                    entry.title = p["title"].as_str().unwrap_or(&entry.title).to_owned();
+                    entry.slug = p["slug"].as_str().unwrap_or_default().to_owned();
+                    entry.icon_url = p["icon_url"].as_str().map(str::to_owned);
+                }
+            }
+            save(state, profile_id, &manifest)?;
+        }
     }
-    write_json(&identified_path(&state, &profile_id), &identified)?;
-    Ok(json!({ "identified": identified.values().filter(|i| i.info.is_some()).count() }))
+    write_json(&identified_path(state, profile_id), &identified)?;
+    Ok(identified.values().filter(|i| i.info.is_some()).count())
 }
 
 // ---------- changing installed content ----------
@@ -1224,7 +1418,8 @@ pub async fn content_identify(state: State<'_, AppState>, profile_id: String) ->
 #[tauri::command]
 pub async fn content_set_enabled(state: State<'_, AppState>, profile_id: String, file_names: Vec<String>, enabled: bool) -> CmdResult<()> {
     find_profile(&state, &profile_id)?;
-    ensure_not_running(&state, &profile_id)?;
+    // Only mods are switched here, and they need a restart.
+    livepacks::check_kinds(&state, &profile_id, ["mod"])?;
     let _guard = state.file_lock.lock().await;
     let dir = state.paths.profile_dir(&profile_id).join("mods");
     for name in file_names.iter().take(500) {
@@ -1253,34 +1448,63 @@ pub struct ContentRef {
     world: Option<String>,
 }
 
+/// Removes content. While the profile's game runs, packs can still be removed (mods need a restart): the game is told, so
+/// they leave its lists. A pack the game holds open (one turned on, on Windows) can't be deleted; that says what to do.
 #[tauri::command]
 pub async fn content_remove(state: State<'_, AppState>, profile_id: String, items: Vec<ContentRef>) -> CmdResult<()> {
     find_profile(&state, &profile_id)?;
-    ensure_not_running(&state, &profile_id)?;
+    livepacks::check_kinds(&state, &profile_id, items.iter().map(|i| i.kind.as_str()))?;
     let _guard = state.file_lock.lock().await;
-    let mut manifest = load(&state, &profile_id);
+    remove_items(&state, &profile_id, &items)
+}
+
+fn remove_items(state: &AppState, profile_id: &str, items: &[ContentRef]) -> CmdResult<()> {
+    let live = livepacks::check_kinds(state, profile_id, items.iter().map(|i| i.kind.as_str()))?;
+    let mut manifest = load(state, profile_id);
+    let mut notes: Vec<livepacks::Note> = Vec::new();
+    let mut outcome = Ok(());
     for item in items.iter().take(500) {
         let name = safe_name(&item.file_name)?.to_owned();
-        let dir = kind_dir(&state, &profile_id, &item.kind, item.world.as_deref())?;
-        for candidate in [name.clone(), format!("{name}{DISABLED}")] {
-            let path = dir.join(&candidate);
-            if path.parent() != Some(dir.as_path()) {
-                return Err("Unsafe path".into());
+        let dir = kind_dir(state, profile_id, &item.kind, item.world.as_deref())?;
+        let gone = (|| {
+            for candidate in [name.clone(), format!("{name}{DISABLED}")] {
+                let path = dir.join(&candidate);
+                if path.parent() != Some(dir.as_path()) {
+                    return Err("Unsafe path".to_owned());
+                }
+                let removed = if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else if path.exists() {
+                    std::fs::remove_file(&path)
+                } else {
+                    Ok(())
+                };
+                removed.map_err(|e| if live { livepacks::removal_error(&item.kind, &e) } else { format!("Could not remove it: {e}") })?;
             }
-            if path.is_dir() {
-                std::fs::remove_dir_all(&path).map_err(err("Could not remove it"))?;
-            } else if path.exists() {
-                std::fs::remove_file(&path).map_err(err("Could not remove it"))?;
-            }
+            Ok(())
+        })();
+        if let Err(e) = gone {
+            // What was removed before it stays removed, and is recorded (and told to the game) below.
+            outcome = Err(e);
+            break;
         }
-        if let Some(entry) = manifest.iter().find(|m| m.kind == item.kind && m.file_name == name && m.world == item.world) {
-            if let Some(prev) = &entry.previous {
-                let _ = std::fs::remove_file(backup_dir(&state, &profile_id, &item.kind).join(&prev.file_name));
-            }
+        let entry = manifest.iter().find(|m| m.kind == item.kind && m.file_name == name && m.world == item.world);
+        let title = entry.map(|e| e.title.clone()).unwrap_or_default();
+        if let Some(prev) = entry.and_then(|e| e.previous.as_ref()) {
+            let _ = std::fs::remove_file(backup_dir(state, profile_id, &item.kind).join(&prev.file_name));
         }
         manifest.retain(|m| !(m.kind == item.kind && m.file_name == name && m.world == item.world));
+        if live {
+            notes.push(livepacks::Note::removed(&item.kind, &name, &title, item.world.as_deref()));
+        }
     }
-    save(&state, &profile_id, &manifest)
+    save(state, profile_id, &manifest)?;
+    if !notes.is_empty() {
+        if let Err(error) = livepacks::tell_game(&state.paths.profile_dir(profile_id), &notes) {
+            eprintln!("[flint] couldn't tell the running game about removed packs: {error}");
+        }
+    }
+    outcome
 }
 
 #[tauri::command]
@@ -1303,165 +1527,9 @@ pub async fn content_rollback(state: State<'_, AppState>, profile_id: String, ki
     }
     let restored = if disabled { format!("{}{DISABLED}", previous.file_name) } else { previous.file_name.clone() };
     std::fs::rename(&backup, dir.join(restored)).map_err(err("Could not restore the earlier version"))?;
-    manifest[index] = *previous;
+    // A pin belongs to the item, not to one of its versions.
+    manifest[index] = ContentEntry { pinned: current.pinned, ..*previous };
     save(&state, &profile_id, &manifest)
-}
-
-#[tauri::command]
-pub async fn content_updates(state: State<'_, AppState>, profile_id: String) -> CmdResult<Value> {
-    let profile = find_profile(&state, &profile_id)?;
-    let manifest = load(&state, &profile_id);
-    let identified: HashMap<String, Identified> = read_json(&identified_path(&state, &profile_id));
-    let mut updates = Vec::new();
-    for kind in ["mod", "resourcepack", "shader", "datapack"] {
-        if (kind == "mod" || kind == "shader") && profile.loader != "fabric" {
-            continue;
-        }
-        let mut known: Vec<(String, Value)> = manifest
-            .iter()
-            .filter(|m| m.kind == kind && !m.sha512.is_empty())
-            .map(|m| (m.sha512.clone(), json!({ "fileName": m.file_name, "projectId": m.project_id, "versionId": m.version_id, "versionNumber": m.version_number, "title": m.title, "world": m.world, "tracked": true })))
-            .collect();
-        for (key, i) in identified.iter().filter(|(k, i)| k.starts_with(&format!("{kind}/")) && i.info.is_some()) {
-            let mut parts = key.splitn(3, '/');
-            let (_, world, name) = (parts.next(), parts.next().unwrap_or("-"), parts.next().unwrap_or_default());
-            let info = i.info.clone().unwrap_or_default();
-            known.push((i.sha512.clone(), json!({ "fileName": name, "projectId": info["projectId"], "versionId": info["versionId"], "versionNumber": info["versionNumber"], "title": info["title"], "world": if world == "-" { Value::Null } else { json!(world) }, "tracked": false })));
-        }
-        if known.is_empty() {
-            continue;
-        }
-        let hashes: Vec<&str> = known.iter().map(|(h, _)| h.as_str()).take(300).collect();
-        let body = json!({ "hashes": hashes, "algorithm": "sha512", "loaders": loaders_for(kind), "game_versions": [profile.game_version] });
-        let latest = state.modrinth.post(&state.http, "/version_files/update", &body, "Couldn't check for updates").await?;
-        for (hash, current) in &known {
-            let Some(newest) = latest.get(hash) else { continue };
-            if newest["id"] == current["versionId"] {
-                continue;
-            }
-            let v = if newest["version_type"] == "release" {
-                newest.clone()
-            } else {
-                match stable_update(&state, current, kind, &profile.game_version).await {
-                    Some(v) => v,
-                    None => continue,
-                }
-            };
-            if v["id"] == current["versionId"] || !fits(&v, kind, &profile.game_version) {
-                continue;
-            }
-            let changelog: String = v["changelog"].as_str().unwrap_or_default().chars().take(1500).collect();
-            updates.push(json!({
-                "kind": kind,
-                "fileName": current["fileName"],
-                "title": current["title"],
-                "projectId": current["projectId"],
-                "world": current["world"],
-                "tracked": current["tracked"],
-                "currentVersion": current["versionNumber"],
-                "versionId": v["id"],
-                "versionNumber": v["version_number"],
-                "versionType": v["version_type"],
-                "datePublished": v["date_published"],
-                "changelog": changelog,
-            }));
-        }
-    }
-    Ok(json!({ "updates": updates, "checkedAt": now_secs() }))
-}
-
-fn stability(v: &Value) -> u8 {
-    match v["version_type"].as_str() {
-        Some("release") => 2,
-        Some("beta") => 1,
-        _ => 0,
-    }
-}
-
-/// Modrinth's update lookup returns the newest version of any channel. A stable install should
-/// only be offered newer versions that are at least as stable as the one it runs.
-async fn stable_update(state: &AppState, current: &Value, kind: &str, game_version: &str) -> Option<Value> {
-    let project = current["projectId"].as_str().filter(|p| valid_id(p))?;
-    let path = format!("/project/{project}/version{}", version_query(loaders_for(kind), Some(game_version)));
-    let (list, _) = state.modrinth.get(&state.http, &path, VERSIONS_TTL, "Couldn't check for updates").await.ok()?;
-    let list = list.as_array()?;
-    let installed = list.iter().find(|v| v["id"] == current["versionId"])?;
-    let floor = stability(installed);
-    let since = installed["date_published"].as_str().unwrap_or_default();
-    list.iter()
-        .filter(|v| stability(v) >= floor && v["date_published"].as_str().unwrap_or_default() > since)
-        .max_by(|a, b| a["date_published"].as_str().cmp(&b["date_published"].as_str()))
-        .cloned()
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateItem {
-    kind: String,
-    file_name: String,
-    version_id: String,
-    #[serde(default)]
-    world: Option<String>,
-}
-
-/// Updates replace one file per project; files the user added by hand are adopted into Flint's
-/// records first so the old version can be rolled back like any other.
-#[tauri::command]
-pub async fn content_update(app: AppHandle, state: State<'_, AppState>, profile_id: String, items: Vec<UpdateItem>) -> CmdResult<String> {
-    find_profile(&state, &profile_id)?;
-    ensure_not_running(&state, &profile_id)?;
-    {
-        let _guard = state.file_lock.lock().await;
-        let mut manifest = load(&state, &profile_id);
-        let identified: HashMap<String, Identified> = read_json(&identified_path(&state, &profile_id));
-        for item in &items {
-            if manifest.iter().any(|m| m.kind == item.kind && m.file_name == item.file_name && m.world == item.world) {
-                continue;
-            }
-            let key = format!("{}/{}/{}", item.kind, item.world.as_deref().unwrap_or("-"), item.file_name);
-            if let Some(info) = identified.get(&key).and_then(|i| i.info.clone().map(|info| (i.sha512.clone(), i.size, info))) {
-                manifest.push(ContentEntry {
-                    kind: item.kind.clone(),
-                    project_id: info.2["projectId"].as_str().unwrap_or_default().to_owned(),
-                    version_id: info.2["versionId"].as_str().unwrap_or_default().to_owned(),
-                    title: info.2["title"].as_str().unwrap_or(&item.file_name).to_owned(),
-                    version_number: info.2["versionNumber"].as_str().unwrap_or_default().to_owned(),
-                    file_name: item.file_name.clone(),
-                    sha512: info.0,
-                    size: info.1,
-                    source: "manual".into(),
-                    icon_url: info.2["iconUrl"].as_str().map(str::to_owned),
-                    installed_at: now_secs(),
-                    world: item.world.clone(),
-                    ..ContentEntry::default()
-                });
-            }
-        }
-        save(&state, &profile_id, &manifest)?;
-    }
-    let mut groups: Vec<(Option<String>, Vec<&UpdateItem>)> = Vec::new();
-    for item in &items {
-        match groups.iter_mut().find(|(w, _)| *w == item.world) {
-            Some((_, list)) => list.push(item),
-            None => groups.push((item.world.clone(), vec![item])),
-        }
-    }
-    let mut ids = Vec::new();
-    for (world, group) in groups {
-        let install: Vec<InstallItem> = group
-            .iter()
-            .map(|i| InstallItem { version_id: i.version_id.clone(), kind: Some(i.kind.clone()), source: "user".into(), reason: None })
-            .collect();
-        let title = if group.len() == 1 { format!("Updating {}", group[0].file_name) } else { format!("Updating {} items", group.len()) };
-        let (id, _) = state.jobs.create(&app, "update", Some(&profile_id), &title, install.len());
-        let profile_id = profile_id.clone();
-        jobs::spawn(&app, id.clone(), move |app, job| async move {
-            let state = app.state::<AppState>();
-            install_batch(&app, &state, &job, &profile_id, install, world).await
-        });
-        ids.push(id);
-    }
-    ids.first().cloned().ok_or_else(|| "Nothing to update.".into())
 }
 
 /// Installs Flint's performance set into a profile marked "pending", as a visible download job.
@@ -1511,21 +1579,46 @@ fn already_present(slug: &str, present: &HashSet<String>) -> bool {
     PERFORMANCE_MOD_IDS.iter().find(|(s, _)| *s == slug).is_some_and(|(_, ids)| ids.iter().any(|id| present.contains(*id)))
 }
 
-pub async fn apply_performance_set(app: &AppHandle, state: &AppState, profile_id: &str) {
-    let Ok(profile) = find_profile(state, profile_id) else { return };
-    if profile.performance.as_deref() != Some("pending") || profile.loader != "fabric" || !crate::data::performance_mods_enabled(state) {
-        return;
+/// The performance set's plan for a profile that is still waiting for it, from Modrinth (None: the profile doesn't get the
+/// set, or Modrinth couldn't be reached). Only reads: Modrinth's answers land in its cache.
+async fn plan_performance_set(state: &AppState, profile_id: &str) -> Option<(Profile, Value)> {
+    let profile = find_profile(state, profile_id).ok()?;
+    if profile.performance.as_deref() != Some("pending") || !takes_mods(&profile) || !crate::data::performance_mods_enabled(state) {
+        return None;
     }
+    // The set's projects and their versions for this Minecraft version are asked for all at once (twelve requests, well
+    // inside Modrinth's limits), so the resolver below, which goes one project at a time, finds them in the Modrinth cache
+    // instead of waiting for each in turn.
+    let projects = futures_util::future::join_all(PERFORMANCE_SET.iter().map(|(slug, _)| project(state, slug))).await;
     let mut roots = Vec::new();
-    for (slug, reason) in PERFORMANCE_SET {
-        if let Ok(p) = project(state, slug).await {
-            roots.push(Pending { project: p, kind: "mod".into(), version_id: None, source: "flint".into(), reason: Some(reason.into()), required: false, required_by: None });
+    for ((_, reason), found) in PERFORMANCE_SET.iter().zip(projects) {
+        if let Ok(p) = found {
+            roots.push(Pending { project: p, kind: "mod".into(), version_id: None, source: "flint".into(), reason: Some(reason.to_string()), required: false, required_by: None });
         }
     }
     if roots.is_empty() {
-        return;
+        return None;
     }
-    let Ok(plan) = resolve(state, &profile, Some(profile_id), roots).await else { return };
+    let ids: Vec<String> = roots.iter().filter_map(|p| p.project["id"].as_str().map(str::to_owned)).collect();
+    futures_util::future::join_all(ids.iter().map(|id| Catalog::versions(state, id, "mod", &profile.game_version))).await;
+    let plan = resolve(state, &profile, Some(profile_id), roots).await.ok()?;
+    Some((profile, plan))
+}
+
+/// Starts working out a new profile's performance set in the background while its game files download: Modrinth's
+/// answers (a few seconds of requests one after another) are then in the cache when `apply_performance_set` runs after
+/// the download, which only installs the mods. It writes nothing, so an install that fails or is paused meanwhile leaves
+/// nothing behind.
+pub fn prefetch_performance_set(app: &AppHandle, profile_id: &str) {
+    let (app, profile_id) = (app.clone(), profile_id.to_owned());
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = plan_performance_set(&state, &profile_id).await;
+    });
+}
+
+pub async fn apply_performance_set(app: &AppHandle, state: &AppState, profile_id: &str) {
+    let Some((profile, plan)) = plan_performance_set(state, profile_id).await else { return };
     // The resolver only knows what Flint installed; jars added by hand are found by their mod ids.
     // Only a jar built for this Minecraft version counts: a copy for another version would stop
     // Fabric from starting if Flint left its own out.
@@ -1535,12 +1628,123 @@ pub async fn apply_performance_set(app: &AppHandle, state: &AppState, profile_id
         Ok(json!({ "installed": [], "failed": [] }))
     } else {
         let (job, _) = state.jobs.create(app, "install", Some(profile_id), "Flint performance mods", items.len());
-        let outcome = install_batch(app, state, &job, profile_id, items, None).await;
+        let outcome = install_batch(app, state, &job, profile_id, items, None, false).await;
         state.jobs.finish(app, &job, &outcome);
         outcome
     };
     if outcome.is_ok() {
         let _ = crate::data::update_profile(state, profile_id, |p| p.performance = Some("applied".into())).await;
+    }
+}
+
+/// Libraries mods commonly need: the mod id they declare, their Modrinth project and their name. A mod copied in from
+/// another launcher often comes without the library its old launcher had installed; when one of these is missing, Play
+/// adds it (`add_missing_libraries`) instead of letting Minecraft refuse to start.
+const LIBRARIES: [(&str, &str, &str); 18] = [
+    ("fabric-api", "fabric-api", "Fabric API"),
+    ("fabric", "fabric-api", "Fabric API"),
+    ("cloth-config", "cloth-config", "Cloth Config API"),
+    ("cloth-config2", "cloth-config", "Cloth Config API"),
+    ("yet_another_config_lib_v3", "yacl", "YetAnotherConfigLib"),
+    ("architectury", "architectury-api", "Architectury API"),
+    ("fabric-language-kotlin", "fabric-language-kotlin", "Fabric Language Kotlin"),
+    ("owo", "owo-lib", "oωo"),
+    ("geckolib", "geckolib", "GeckoLib"),
+    ("modmenu", "modmenu", "Mod Menu"),
+    ("xaerolib", "xaerolib", "XaeroLib"),
+    ("forgeconfigapiport", "forge-config-api-port", "Forge Config API Port"),
+    ("puzzleslib", "puzzles-lib", "Puzzles Lib"),
+    ("midnightlib", "midnightlib", "MidnightLib"),
+    ("resourcefullib", "resourceful-lib", "Resourceful Lib"),
+    ("collective", "collective", "Collective"),
+    ("libipn", "libipn", "libIPN"),
+    ("walksylib", "walksylib", "Walksy Lib"),
+];
+
+/// "AppleSkin", "AppleSkin and Axiom", "AppleSkin, Axiom and 19 more".
+fn mod_names(names: &[String]) -> String {
+    match names {
+        [] => "A mod".into(),
+        [one] => one.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, rest @ ..] => format!("{a}, {b} and {} more", rest.len()),
+    }
+}
+
+/// Adds the libraries (`LIBRARIES`) that mods in a Fabric profile require and that aren't there, from Modrinth, built for
+/// this profile's version: a visible download before the game starts. Anything else that's missing is left to
+/// `dependency_check`, which names it. Offline or unanswered, nothing is added and the check explains.
+pub async fn add_missing_libraries(app: &AppHandle, state: &AppState, profile_id: &str) {
+    let Ok(profile) = find_profile(state, profile_id) else { return };
+    if !takes_mods(&profile) {
+        return;
+    }
+    let missing = crate::perfcore::missing_dependencies(&crate::perfcore::scan_mods(&state.paths.profile_dir(profile_id).join("mods")));
+    let mut wanted: Vec<(&str, String)> = Vec::new();
+    for m in &missing {
+        if let Some((_, slug, _)) = LIBRARIES.iter().find(|(id, _, _)| *id == m.id) {
+            if !wanted.iter().any(|(s, _)| s == slug) {
+                wanted.push((slug, mod_names(&m.needed_by)));
+            }
+        }
+    }
+    let mut roots = Vec::new();
+    for (slug, needed_by) in wanted {
+        if let Ok(p) = project(state, slug).await {
+            roots.push(Pending { project: p, kind: "mod".into(), version_id: None, source: "dependency".into(), reason: Some(format!("Needed by {needed_by}")), required: true, required_by: None });
+        }
+    }
+    if roots.is_empty() {
+        return;
+    }
+    let Ok(plan) = resolve(state, &profile, Some(profile_id), roots).await else { return };
+    let items: Vec<InstallItem> = plan["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| i["status"] == "ok" && i["source"] != "optional")
+        .filter_map(|i| Some(InstallItem { version_id: i["versionId"].as_str()?.to_owned(), kind: Some("mod".into()), source: "dependency".into(), reason: i["reason"].as_str().map(str::to_owned) }))
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let (job, _) = state.jobs.create(app, "install", Some(profile_id), "Libraries your mods need", items.len());
+    let outcome = install_batch(app, state, &job, profile_id, items, None, false).await;
+    state.jobs.finish(app, &job, &outcome);
+}
+
+/// The player-facing lines for mods that require others the profile doesn't have (at most three).
+fn missing_lines(missing: &[crate::perfcore::Missing]) -> Vec<String> {
+    missing
+        .iter()
+        .take(3)
+        .map(|m| {
+            let what = LIBRARIES.iter().find(|(id, _, _)| *id == m.id).map(|(_, _, name)| (*name).to_owned()).unwrap_or_else(|| format!("the mod “{}”", m.id));
+            let one = m.needed_by.len() == 1;
+            format!(
+                "{} {} {what}, which isn't in this profile. Add it from the Library (or switch it back on), or remove {}.",
+                mod_names(&m.needed_by),
+                if one { "needs" } else { "need" },
+                if one { "that mod" } else { "those mods" }
+            )
+        })
+        .collect()
+}
+
+/// Stops a launch Fabric would refuse because a mod requires another that isn't in the profile (or is switched off),
+/// naming them, instead of leaving the player with Fabric's error window. Fabric's dependency overrides
+/// (`config/fabric_loader_dependencies.json`) can lift a requirement, so a profile with them is left to Fabric.
+pub fn dependency_check(state: &AppState, profile_id: &str) -> CmdResult<()> {
+    let Ok(profile) = find_profile(state, profile_id) else { return Ok(()) };
+    let dir = state.paths.profile_dir(profile_id);
+    if profile.loader != "fabric" || dir.join("config").join("fabric_loader_dependencies.json").exists() {
+        return Ok(());
+    }
+    let lines = missing_lines(&crate::perfcore::missing_dependencies(&crate::perfcore::scan_mods(&dir.join("mods"))));
+    if lines.is_empty() {
+        Ok(())
+    } else {
+        Err(lines.join("\n"))
     }
 }
 
@@ -1555,7 +1759,8 @@ pub fn launch_preflight(state: &AppState, profile_id: &str) -> CmdResult<()> {
     for entry in manifest.iter().filter(|m| m.kind == "mod") {
         let on = enabled(&entry.file_name);
         let off = dir.join(format!("{}{DISABLED}", entry.file_name)).is_file();
-        if !on && !off {
+        // A hand-added jar Flint only keeps a pin for isn't Flint's to miss.
+        if !on && !off && !entry.project_id.is_empty() {
             problems.push(format!("{} is missing from the mods folder. Open the profile and reinstall or remove it.", entry.title));
             continue;
         }
@@ -1572,6 +1777,10 @@ pub fn launch_preflight(state: &AppState, profile_id: &str) -> CmdResult<()> {
     }
     // Vanilla doesn't load the mods folder.
     if find_profile(state, profile_id).is_ok_and(|p| p.loader == "fabric") {
+        // Mods dropped in as .zip, .rar or .7z (and packs dropped in by mistake) first become what Fabric loads.
+        for line in crate::modarchives::tidy(&state.paths.profile_dir(profile_id)).lines {
+            eprintln!("[flint] mods folder: {line}");
+        }
         let jars = crate::perfcore::scan_mods(&dir);
         // Two copies of a mod start fine (Fabric picks one), so they're only noted.
         for duplicate in crate::perfcore::duplicate_mods(&jars) {
@@ -1654,32 +1863,8 @@ fn list_logs(state: &AppState, profile_id: &str) -> CmdResult<Value> {
     Ok(json!(out))
 }
 
-pub fn redact(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.lines() {
-        let mut words: Vec<String> = Vec::new();
-        let mut hide_next = false;
-        for word in line.split(' ') {
-            if hide_next {
-                words.push("[hidden]".into());
-                hide_next = false;
-                continue;
-            }
-            let lower = word.to_ascii_lowercase();
-            if lower == "--accesstoken" || lower == "--session" {
-                hide_next = true;
-                words.push(word.to_owned());
-            } else if word.matches('.').count() == 2 && word.starts_with("eyJ") && word.len() > 40 {
-                words.push("[hidden token]".into());
-            } else {
-                words.push(word.to_owned());
-            }
-        }
-        out.push_str(&words.join(" "));
-        out.push('\n');
-    }
-    out
-}
+/// Tokens, addresses, player UUIDs and the user's home folder out of log text (redact.rs).
+pub use crate::redact::redact;
 
 #[tauri::command]
 pub async fn profile_log_read(app: AppHandle, profile_id: String, folder: String, name: String) -> CmdResult<String> {
@@ -1703,6 +1888,26 @@ fn read_log(state: &AppState, profile_id: &str, folder: &str, name: &str) -> Cmd
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_requirements_are_explained_in_plain_words() {
+        let missing = |id: &str, by: &[&str]| crate::perfcore::Missing { id: id.into(), needed_by: by.iter().map(|s| s.to_string()).collect() };
+        let lines = missing_lines(&[
+            missing("fabric-api", &["AppleSkin", "Axiom", "Capes", "Voxy"]),
+            missing("cloth-config2", &["Minimap"]),
+            missing("odd_lib", &["A", "B"]),
+            missing("never_shown", &["C"]),
+        ]);
+        assert_eq!(lines.len(), 3, "at most three lines");
+        assert_eq!(lines[0], "AppleSkin, Axiom and 2 more need Fabric API, which isn't in this profile. Add it from the Library (or switch it back on), or remove those mods.");
+        assert_eq!(lines[1], "Minimap needs Cloth Config API, which isn't in this profile. Add it from the Library (or switch it back on), or remove that mod.");
+        assert!(lines[2].starts_with("A and B need the mod “odd_lib”"), "{}", lines[2]);
+        // Every library Play adds has a real Modrinth project and a name.
+        for (id, slug, name) in LIBRARIES {
+            assert!(!id.is_empty() && crate::modrinth::valid_id(slug) && !name.is_empty(), "{id}");
+        }
+    }
+
 
     /// 2026-10-13, the fixtures' "today".
     const NOW: u64 = 1_791_849_600;
@@ -1782,6 +1987,31 @@ mod tests {
             assert!(safe_name(bad).is_err(), "{bad:?} must be refused");
         }
         assert!(safe_name(&"a".repeat(181)).is_err());
+    }
+
+    #[test]
+    fn manifest_entries_naming_files_outside_their_folder_are_dropped() {
+        let dir = TestDir::new();
+        let state = AppState::for_tests(dir.0.clone());
+        let entry = |file: &str| ContentEntry { kind: "mod".into(), project_id: file.into(), version_id: "v".into(), title: file.into(), file_name: file.into(), ..Default::default() };
+        let mut kept_without_backup = entry("lithium.jar");
+        kept_without_backup.previous = Some(Box::new(entry("../../../outside.jar")));
+        let mut world_pack = entry("pack.zip");
+        world_pack.world = Some("../elsewhere".into());
+        let mut with_backup = entry("sodium-0.9.2.jar");
+        with_backup.previous = Some(Box::new(entry("sodium-0.9.1.jar")));
+        let planted = vec![with_backup, entry("../../outside.txt"), entry("..\\outside.txt"), entry("C:\\Windows\\x.jar"), entry(".hidden.jar"), kept_without_backup, world_pack];
+        write_json(&manifest_path(&state, "p1"), &planted).unwrap();
+
+        let loaded = load(&state, "p1");
+        let names: Vec<&str> = loaded.iter().map(|e| e.file_name.as_str()).collect();
+        assert_eq!(names, ["sodium-0.9.2.jar", "lithium.jar"]);
+        assert_eq!(loaded[0].previous.as_ref().map(|p| p.file_name.as_str()), Some("sodium-0.9.1.jar"), "a plain earlier version is kept");
+        assert!(loaded[1].previous.is_none(), "an earlier version outside the folder is forgotten");
+        // The older mods-only manifest is read the same way.
+        std::fs::remove_file(manifest_path(&state, "p1")).unwrap();
+        write_json(&state.paths.profile_dir("p1").join("flint-mods.json"), &vec![entry("/etc/passwd"), entry("ok.jar")]).unwrap();
+        assert_eq!(load(&state, "p1").iter().map(|e| e.file_name.as_str()).collect::<Vec<_>>(), ["ok.jar"]);
     }
 
     #[test]
@@ -1878,6 +2108,17 @@ mod tests {
     }
 
     #[test]
+    fn a_1_8_9_fabric_profile_takes_no_modrinth_mods() {
+        let profile = |version: &str, loader: &str| Profile { game_version: version.into(), loader: loader.into(), ..Profile::default() };
+        assert!(takes_mods(&profile("26.3", "fabric")));
+        assert!(takes_mods(&profile("1.21.11", "fabric")));
+        assert!(!takes_mods(&profile("1.8.9", "fabric")), "Modrinth's 1.8.9 Fabric mods are Legacy Fabric builds");
+        assert!(!takes_mods(&profile("26.3", "vanilla")));
+        assert!(no_mods_reason(&profile("1.8.9", "fabric")).contains("Legacy Fabric"));
+        assert!(no_mods_reason(&profile("26.3", "vanilla")).contains("vanilla"));
+    }
+
+    #[test]
     fn author_lookups_are_batched() {
         let ids: Vec<String> = (0..45).map(|n| format!("id{n:06}")).collect();
         let paths = author_search_paths(&ids);
@@ -1902,7 +2143,6 @@ mod tests {
         // A resource pack is a .zip; a .jar is never accepted as one.
         assert!(file_fits("resourcepack", "Faithful 32x.zip"));
         assert!(!file_fits("resourcepack", "sodium.jar"));
-        assert!(max_bytes("resourcepack") > max_bytes("mod"));
     }
 
     #[test]
@@ -2037,5 +2277,172 @@ mod tests {
         crate::perfcore::test_jar(&vanilla_mods, "a.jar", r#"{"id":"a","version":"1","breaks":{"b":"*"}}"#);
         crate::perfcore::test_jar(&vanilla_mods, "b.jar", r#"{"id":"b","version":"1"}"#);
         assert!(launch_preflight(&state, &vanilla.id).is_ok());
+    }
+
+    /// A verified download waiting in the profile's staging folder, as `install_batch` leaves it.
+    fn staged_file(state: &AppState, kind: &str, file: &str, world: Option<&str>, bytes: &[u8]) -> Staged {
+        let staging = state.paths.profile_dir("p1").join(".flint-staging-test");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join(file), bytes).unwrap();
+        Staged {
+            entry: ContentEntry {
+                kind: kind.into(),
+                project_id: format!("proj-{file}"),
+                version_id: "v1".into(),
+                title: file.trim_end_matches(".zip").into(),
+                file_name: file.into(),
+                world: world.map(str::to_owned),
+                ..Default::default()
+            },
+            staged: staging.join(file),
+            dir: kind_dir(state, "p1", kind, world).unwrap(),
+        }
+    }
+
+    fn handoff(state: &AppState) -> Value {
+        serde_json::from_slice(&std::fs::read(state.paths.profile_dir("p1").join(livepacks::FILE)).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_pack_installed_while_the_game_runs_goes_in_beside_the_one_in_use_and_the_game_is_told() {
+        let dir = TestDir::new();
+        let state = AppState::for_tests(dir.0.clone());
+        let packs = state.paths.profile_dir("p1").join("resourcepacks");
+        std::fs::create_dir_all(&packs).unwrap();
+        // The player's own pack of the same name, turned on in the running game (and open, on Windows).
+        std::fs::write(packs.join("Dirt Tint.zip"), b"in use").unwrap();
+        // Flint's runtime is in the game: it turns packs on by itself.
+        let mods = state.paths.profile_dir("p1").join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join(crate::runtime::FILE_NAME), b"runtime").unwrap();
+        state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
+
+        let shaders = state.paths.profile_dir("p1").join("shaderpacks");
+        let batch = vec![staged_file(&state, "resourcepack", "Dirt Tint.zip", None, b"new"), staged_file(&state, "shader", "Tint.zip", None, b"shader")];
+        let result = commit_staged(&state, "p1", batch, true).unwrap();
+        assert_eq!(result["installed"], json!(["Dirt Tint", "Tint"]));
+        assert_eq!(result["live"], json!({ "enable": true, "datapack": false, "applies": true }));
+        assert_eq!(std::fs::read(packs.join("Dirt Tint.zip")).unwrap(), b"in use", "never replaced");
+        assert_eq!(std::fs::read(packs.join("Dirt Tint (2).zip")).unwrap(), b"new");
+        assert_eq!(std::fs::read(shaders.join("Tint.zip")).unwrap(), b"shader");
+        let manifest = load(&state, "p1");
+        assert_eq!(manifest.iter().map(|m| m.file_name.as_str()).collect::<Vec<_>>(), ["Dirt Tint (2).zip", "Tint.zip"]);
+
+        let file = handoff(&state);
+        let changes = file["changes"].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert_eq!((changes[0]["kind"].as_str(), changes[0]["file"].as_str(), changes[0]["enable"].as_bool()), (Some("resourcepack"), Some("Dirt Tint (2).zip"), Some(true)));
+        assert_eq!((changes[1]["kind"].as_str(), changes[1]["file"].as_str(), changes[1]["action"].as_str()), (Some("shaderpack"), Some("Tint.zip"), Some("added")));
+        assert_eq!(changes[0]["revision"], file["revision"]);
+
+        // "Turn it on in the game now" off: the game only lists it.
+        let result = commit_staged(&state, "p1", vec![staged_file(&state, "resourcepack", "Quiet.zip", None, b"q")], false).unwrap();
+        assert_eq!(result["live"], json!({ "enable": false, "datapack": false, "applies": true }));
+        let file = handoff(&state);
+        let last = file["changes"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!((last["file"].as_str(), last["enable"].as_bool()), (Some("Quiet.zip"), Some(false)));
+        assert_eq!(file["changes"].as_array().unwrap().len(), 3, "the earlier batch is still there for a game that hasn't looked yet");
+    }
+
+    #[test]
+    fn a_data_pack_goes_in_live_to_its_world_and_mods_wait_for_a_restart() {
+        let dir = TestDir::new();
+        let state = AppState::for_tests(dir.0.clone());
+        let world = state.paths.profile_dir("p1").join("saves").join("New World");
+        std::fs::create_dir_all(&world).unwrap();
+        std::fs::write(world.join("level.dat"), b"x").unwrap();
+        state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
+
+        let result = commit_staged(&state, "p1", vec![staged_file(&state, "datapack", "Trees.zip", Some("New World"), b"dp")], true).unwrap();
+        assert_eq!(result["live"], json!({ "enable": false, "datapack": true, "applies": false }), "no runtime in this game");
+        assert!(world.join("datapacks").join("Trees.zip").is_file());
+        let change = handoff(&state)["changes"][0].clone();
+        assert_eq!(change["world"], "New World");
+        assert_eq!(change["enable"], false, "a data pack loads at /reload or the next world load");
+
+        // A mod in the batch: nothing is moved, and the reason is the restart.
+        let mods = state.paths.profile_dir("p1").join("mods");
+        let batch = vec![staged_file(&state, "resourcepack", "Fine.zip", None, b"f"), staged_file(&state, "mod", "iris.jar", None, b"jar")];
+        assert_eq!(commit_staged(&state, "p1", batch, true).unwrap_err(), "Mods need a restart: close Minecraft first.");
+        assert!(!mods.join("iris.jar").exists());
+        assert!(!state.paths.profile_dir("p1").join("resourcepacks").join("Fine.zip").exists());
+    }
+
+    #[test]
+    fn with_the_game_closed_an_install_is_as_before_and_tells_no_game() {
+        let dir = TestDir::new();
+        let state = AppState::for_tests(dir.0.clone());
+        let batch = vec![staged_file(&state, "resourcepack", "Dirt Tint.zip", None, b"new"), staged_file(&state, "mod", "lithium.jar", None, b"jar")];
+        let result = commit_staged(&state, "p1", batch, true).unwrap();
+        assert_eq!(result, json!({ "installed": ["Dirt Tint", "lithium.jar"], "failed": [] }));
+        assert!(state.paths.profile_dir("p1").join("resourcepacks").join("Dirt Tint.zip").is_file());
+        assert!(state.paths.profile_dir("p1").join("mods").join("lithium.jar").is_file());
+        assert!(!state.paths.profile_dir("p1").join(livepacks::FILE).exists());
+    }
+
+    #[test]
+    fn packs_are_removed_live_and_mods_are_not() {
+        let dir = TestDir::new();
+        let state = AppState::for_tests(dir.0.clone());
+        let batch = vec![staged_file(&state, "resourcepack", "Old.zip", None, b"old"), staged_file(&state, "mod", "sodium.jar", None, b"jar")];
+        commit_staged(&state, "p1", batch, false).unwrap();
+        state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
+
+        let pack = ContentRef { kind: "resourcepack".into(), file_name: "Old.zip".into(), world: None };
+        remove_items(&state, "p1", &[pack]).unwrap();
+        assert!(!state.paths.profile_dir("p1").join("resourcepacks").join("Old.zip").exists());
+        let change = handoff(&state)["changes"][0].clone();
+        assert_eq!((change["action"].as_str(), change["file"].as_str(), change["title"].as_str()), (Some("removed"), Some("Old.zip"), Some("Old")));
+
+        let jar = ContentRef { kind: "mod".into(), file_name: "sodium.jar".into(), world: None };
+        assert_eq!(remove_items(&state, "p1", &[jar]), Err("Mods need a restart: close Minecraft first.".into()));
+        assert!(state.paths.profile_dir("p1").join("mods").join("sodium.jar").is_file());
+        assert_eq!(load(&state, "p1").iter().map(|m| m.file_name.as_str()).collect::<Vec<_>>(), ["sodium.jar"]);
+    }
+
+    /// Dev-only: the launcher's own live install and removal (`commit_staged`, `remove_items`) against a real game folder, for the
+    /// QA tours that run a game and check what it shows (game-runtime/qa/tools/live-packs.mjs). Only the Modrinth download is
+    /// left out: the pack comes from a file. FLINT_QA_ROOT is a folder laid out as Flint's data folder (`profiles/<id>` is the game
+    /// folder), FLINT_QA_PROFILE the profile's id, FLINT_QA_ACTION `install` or `remove`, FLINT_QA_KIND, FLINT_QA_FILE (the pack
+    /// to install, or the file name to remove), FLINT_QA_TITLE, FLINT_QA_ENABLE (`false` for "Turn it on in the game now" off),
+    /// FLINT_QA_WORLD (a data pack's world). The profile's game counts as running, as when Flint started it. Prints one
+    /// `QA-DRIVER` line with the outcome.
+    #[test]
+    #[ignore = "QA driver: run by game-runtime/qa/tools/live-packs.mjs against a running game"]
+    fn qa_live_pack_change() {
+        let env = |key: &str| std::env::var(key).unwrap_or_default();
+        let state = AppState::for_tests(PathBuf::from(env("FLINT_QA_ROOT")));
+        let id = env("FLINT_QA_PROFILE");
+        assert!(crate::core::is_safe_id(&id), "FLINT_QA_PROFILE");
+        state.running.lock().unwrap().insert(id.clone(), RunningGame { kill: None });
+        let kind = env("FLINT_QA_KIND");
+        let world = Some(env("FLINT_QA_WORLD")).filter(|w| !w.is_empty());
+        let outcome: CmdResult<Value> = match env("FLINT_QA_ACTION").as_str() {
+            "install" => {
+                let source = PathBuf::from(env("FLINT_QA_FILE"));
+                let name = source.file_name().unwrap().to_string_lossy().into_owned();
+                let staging = state.paths.profile_dir(&id).join(".flint-staging-qa");
+                std::fs::create_dir_all(&staging).unwrap();
+                std::fs::copy(&source, staging.join(&name)).unwrap();
+                let entry = ContentEntry {
+                    kind: kind.clone(),
+                    project_id: format!("qa-{}", name.to_ascii_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "")),
+                    version_id: "qa".into(),
+                    title: env("FLINT_QA_TITLE"),
+                    file_name: name.clone(),
+                    world: world.clone(),
+                    source: "user".into(),
+                    installed_at: now_secs(),
+                    ..Default::default()
+                };
+                let dir = kind_dir(&state, &id, &kind, world.as_deref());
+                let result = dir.and_then(|dir| commit_staged(&state, &id, vec![Staged { entry, staged: staging.join(&name), dir }], env("FLINT_QA_ENABLE") != "false"));
+                let _ = std::fs::remove_dir_all(&staging);
+                result
+            }
+            "remove" => remove_items(&state, &id, &[ContentRef { kind: kind.clone(), file_name: env("FLINT_QA_FILE"), world }]).map(|()| json!("removed")),
+            other => Err(format!("unknown FLINT_QA_ACTION {other:?}")),
+        };
+        println!("QA-DRIVER {}", json!({ "ok": outcome.is_ok(), "result": outcome.as_ref().ok(), "error": outcome.as_ref().err() }));
     }
 }

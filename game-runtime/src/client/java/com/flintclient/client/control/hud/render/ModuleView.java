@@ -58,9 +58,33 @@ abstract class ModuleView {
 		return false;
 	}
 
+	/**
+	 * How opaque the whole module is drawn on the HUD, panel included (1: as styled). A module that shows something for a
+	 * moment (Item Info, Damage Indicator) fades out with it; previews always draw at full opacity.
+	 */
+	float opacity() {
+		return 1;
+	}
+
 	/** Whether the style's panel and padding go around the content (Keystrokes draws a panel per key instead). */
 	boolean panelled() {
 		return true;
+	}
+
+	/**
+	 * Whether only the HUD editor shows this view: the module draws itself from a hook of its own (Armor, with the hotbar), so the
+	 * HUD leaves it out and the editor uses the view for where it is and how big.
+	 */
+	boolean editorOnly() {
+		return false;
+	}
+
+	/**
+	 * Where the module sits while its own settings place it rather than its HUD placement (Armor against the hotbar): its
+	 * top-left corner in GUI units into {@code out}, and true; false while its placement places it. After {@link #update}.
+	 */
+	boolean ownSpot(float[] out) {
+		return false;
 	}
 
 	/** Drops whatever was read from the world (the world was left), so nothing keeps it in memory. */

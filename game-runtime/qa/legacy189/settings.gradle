@@ -1,0 +1,17 @@
+// Dev-only: the QA tour mod for Minecraft 1.8.9 (never shipped). Build from game-runtime with: ./gradlew -p qa/legacy189 build
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		maven {
+			name = "Ornithe Releases"
+			url = "https://maven.ornithemc.net/releases"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = "flint-qa-189"

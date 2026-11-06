@@ -1,0 +1,129 @@
+# How Minecraft 1.21.11 builds the shared sources (src/client/java), which are written against 26.x: see
+# legacy/buildSrc/src/main/java/SharedSources.java for the rule forms. Every rule must still match (the build fails otherwise),
+# so a shared file that changes brings its rules back here for a look. Methods 26.x added to Minecraft's own classes come
+# from the bridges in compat/ (GraphicsBridge, GuiBridge, ChatBridge, MinecraftBridge…), which Loom adds to those classes.
+
+# ---------- classes 26.1 moved or renamed ----------
+replace net.minecraft.client.renderer.state.level.CameraRenderState net.minecraft.client.renderer.state.CameraRenderState
+replace net.minecraft.client.renderer.state.level.BlockOutlineRenderState net.minecraft.client.renderer.state.BlockOutlineRenderState
+replace net.minecraft.client.multiplayer.chat.GuiMessage; net.minecraft.client.GuiMessage;
+replace PlayerFaceExtractor.extractRenderState PlayerFaceExtractor.draw
+word PlayerFaceExtractor PlayerFaceRenderer
+word ContainerInput ClickType
+word handleContainerInput handleInventoryMouseClick
+word GuiGraphicsExtractor GuiGraphics
+replace renderer/state/level/ renderer/state/
+replace net.minecraft.client.renderer.state.gui. net.minecraft.client.gui.render.state.
+# GuiGraphics' own methods 26.1 renamed, where mixins name them in descriptors (calls in code go through GraphicsBridge).
+replace Lnet/minecraft/client/gui/GuiGraphics;text( Lnet/minecraft/client/gui/GuiGraphics;drawString(
+replace Lnet/minecraft/client/gui/GuiGraphics;textWithBackdrop( Lnet/minecraft/client/gui/GuiGraphics;drawStringWithBackdrop(
+
+# ---------- 26.1 renamed the GUI's render methods to extract… ----------
+word-in {ui,control,platform}/** extractRenderState render
+word-in {ui,control,platform}/** extractBackground renderBackground
+word-in ui/** extractContents renderContents
+word-in control/keys/** extractContent renderContent
+word-in control/** extractImage renderImage
+word-in control/** extractEntityInInventoryFollowsMouse renderEntityInInventoryFollowsMouse
+# …and in the mixins on GUI classes (entity renderers kept extractRenderState: their mixins aren't listed here).
+s-in mixin/{control,feature}/{HudBarsMixin,HudFeatureMixin,HudOverlayMixin,PlayerTabOverlayMixin,ScreenContainerAnimationMixin,ToastInstanceMixin,ChatScreenMixin,BossHealthOverlayMixin,InventoryEffectsMixin,AbstractContainerScreenMixin,CustomF3Mixin,SubtitleOverlayMixin}.java \bextractRenderStateWithTooltipAndSubtitles\b => renderWithTooltipAndSubtitles
+s-in mixin/{control,feature}/{HudBarsMixin,HudFeatureMixin,HudOverlayMixin,PlayerTabOverlayMixin,ScreenContainerAnimationMixin,ToastInstanceMixin,ChatScreenMixin,BossHealthOverlayMixin,InventoryEffectsMixin,AbstractContainerScreenMixin,CustomF3Mixin,SubtitleOverlayMixin}.java \bextractRenderState\b => render
+s-in mixin/{control,feature}/{HudBarsMixin,HudFeatureMixin,HudOverlayMixin,PlayerTabOverlayMixin,ScreenContainerAnimationMixin,ToastInstanceMixin,ChatScreenMixin,BossHealthOverlayMixin,InventoryEffectsMixin,AbstractContainerScreenMixin,CustomF3Mixin,SubtitleOverlayMixin}.java \bextract([A-Z]\w*) => render$1
+
+# ---------- single lines ----------
+file control/platform/Mc263Chat.java
+s import net\.minecraft\.client\.multiplayer\.chat\.GuiMessageSource;\n =>
+s message\.source\(\) == GuiMessageSource\.PLAYER => com.flintclient.client.compat.McCompat.fromPlayer(message)
+s message\.source\(\) != GuiMessageSource\.PLAYER => !com.flintclient.client.compat.McCompat.fromPlayer(message)
+
+file control/platform/Mc263Nametags.java
+s state\.scoreText != null => false
+
+file control/platform/Mc263Features.java
+# 1.21.11's FogData has no colour: the colour setupFog worked out is set instead (mixin.feature.FogRendererMixin).
+s fog\.color\.set\( => com.flintclient.client.compat.McCompat.fogColor().set(
+
+file control/platform/BuiltInResources.java
+s metadata = ResourceMetadata\.of\(PackMetadataSection\.CLIENT_TYPE, pack\); => metadata = com.flintclient.client.compat.McCompat.packMetadata(pack);
+
+file control/platform/Mc263World.java
+# 1.21.11 culls a gizmo quad's back face (26.x doesn't): Light Overlay's solid squares are given both ways round.
+s Gizmos\.rect\( => com.flintclient.client.compat.McCompat.rectBothSides(
+
+file control/platform/Mc263Waypoints.java
+# 1.21.11's camera state has no projection or view matrices: the world's own, kept as it was drawn (McCompat.worldProjection).
+s (?s)CameraRenderState camera = com\.flintclient\.client\.compat\.McCompat\.cameraState\(\);.*?return camera\.pos; => return com.flintclient.client.compat.McCompat.worldProjection(out);
+
+file control/platform/Mc263LookMods.java
+s ItemFeatureRenderer\.ENCHANTED_GLINT_ => net.minecraft.client.renderer.entity.ItemRenderer.ENCHANTED_GLINT_
+
+file mixin/feature/ChatLineMixin.java
+s net/minecraft/client/multiplayer/chat/GuiMessageTag => net/minecraft/client/GuiMessageTag
+
+file mixin/feature/SkullBlockRendererMixin.java
+# 1.21.11's submitSkull also takes the skull's facing and rotation.
+s private static void flint\$voxelHead\(float animation, => private static void flint\$voxelHead(net.minecraft.core.Direction direction, float yaw, float animation,
+s SkullBlockRenderer\.submitSkull\(animation, => SkullBlockRenderer.submitSkull(direction, yaw, animation,
+
+file mixin/feature/EntityRendererMixin.java
+# 1.21.11 submits the name tag in submitNameTag, without a y offset.
+s "submitNameDisplay\( => "submitNameTag(
+s state/CameraRenderState;I\)V" => state/CameraRenderState;)V"
+s CameraRenderState camera, int yOffset, => CameraRenderState camera,
+
+file mixin/feature/InventoryScreenAnimationMixin.java
+# 1.21.11 draws the inventory's player in renderBg.
+s method = "extractBackground" => method = "renderBg"
+s InventoryScreen;extractEntityInInventoryFollowsMouse => InventoryScreen;renderEntityInInventoryFollowsMouse
+
+file mixin/feature/InventoryDollMixin.java
+s method = "extractEntityInInventoryFollowsMouse\( => method = "renderEntityInInventoryFollowsMouse(
+
+file mixin/feature/GuiGraphicsDarkMixin.java
+s method = "text\( => method = "drawString(
+
+file mixin/feature/GuiGraphicsTooltipMixin.java
+s method = "tooltip" => method = "renderTooltip"
+
+file mixin/feature/MinecraftFeatureMixin.java
+s method = "resizeGui" => method = "resizeDisplay"
+
+file mixin/MinecraftMixin.java
+s method = "resizeGui" => method = "resizeDisplay"
+
+file mixin/TitleScreenFlintButtonMixin.java
+# The title screen draws in render on 1.21.x (the veil goes over it at the end).
+s method = "extractRenderState" => method = "render"
+
+file mixin/LoadingOverlayFadeMixin.java
+# The Mojang loading overlay draws in render on 1.21.x.
+s method = "extractRenderState" => method = "render"
+
+file mixin/feature/ToastManagerMixin.java
+s method = "lambda\$update\$1" => method = "method_61992"
+
+file mixin/feature/PlayerHeadSpecialRendererMixin.java
+# 1.21.11's special renderers also take the display context.
+s PlayerSkinRenderCache\$RenderInfo;Lcom/mojang/blaze3d/vertex/PoseStack; => PlayerSkinRenderCache\$RenderInfo;Lnet/minecraft/world/item/ItemDisplayContext;Lcom/mojang/blaze3d/vertex/PoseStack;
+
+file mixin/feature/ShieldTintMixin.java
+s DataComponentMap;Lcom/mojang/blaze3d/vertex/PoseStack; => DataComponentMap;Lnet/minecraft/world/item/ItemDisplayContext;Lcom/mojang/blaze3d/vertex/PoseStack;
+
+# ---------- No Chat Reports ----------
+file mixin/ncr/NcrGuiMessageTagMixin.java
+s net\.minecraft\.client\.multiplayer\.chat\.GuiMessageTag => net.minecraft.client.GuiMessageTag
+
+file mixin/ncr/NcrOnlineServerEntryMixin.java
+s method = "extractContent" => method = "renderContent"
+
+file control/platform/ambient/AmbientCompat.java
+# 1.21.11 calls an entity's scoreboard tags getTags.
+s entity\.entityTags\(\) => entity.getTags()
+
+file control/platform/Mc263Animations.java
+# The map renderer's extractRenderState keeps its name (the GUI rename above is for screens).
+s getMapRenderer\(\)\.render\(id, data, render\) => getMapRenderer().extractRenderState(id, data, render)
+
+file control/platform/Mc263LootBeams.java
+# 1.21.11 draws a GuiGraphics' deferred tooltip with renderDeferredElements (26.x: extractDeferredElements with the mouse).
+s graphics\.extractDeferredElements\(0, 0, 0\) => graphics.renderDeferredElements()

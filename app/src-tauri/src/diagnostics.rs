@@ -135,9 +135,32 @@ pub fn crash_description(report: &str) -> Option<String> {
         .filter(|d| !d.is_empty())
 }
 
+/// Fabric's own reasons for refusing to start, from the "More details" list it logs ("Mod 'AppleSkin' (appleskin)
+/// 3.0.8 requires any version of fabric-api, which is missing!"), in plain words: the mod's name, without ids,
+/// version and exclamation mark.
+pub fn fabric_reasons(log: &str) -> Vec<String> {
+    log.lines()
+        .filter_map(|line| line.trim_start().strip_prefix("- Mod '"))
+        .filter_map(|rest| {
+            let (name, rest) = rest.split_once("' (")?;
+            // "(appleskin) 3.0.8+mc1.21.11 requires …": skip the id and the version.
+            let (_, rest) = rest.split_once(") ")?;
+            let (_, reason) = rest.split_once(' ')?;
+            let reason = reason.trim_end_matches('!').replace(", which is missing", ", which isn't in this profile");
+            Some(format!("{name} {reason}"))
+        })
+        .collect()
+}
+
 /// A short, player-facing explanation of why the game stopped.
 pub fn summarize(log: &str, crash: Option<&str>, exit: Option<i32>, during_startup: bool) -> String {
     let haystack = |needle: &str| log.contains(needle) || crash.is_some_and(|c| c.contains(needle));
+    // Fabric names exactly which mods it refused and why; say that rather than the general explanation below.
+    let reasons = fabric_reasons(log);
+    if !reasons.is_empty() {
+        let more = if reasons.len() > 2 { format!(" (and {} more; the log lists them all)", reasons.len() - 2) } else { String::new() };
+        return format!("Fabric couldn't start this profile: {}{more}.", reasons.iter().take(2).cloned().collect::<Vec<_>>().join("; "));
+    }
     for (needles, explanation) in KNOWN {
         if needles.iter().any(|n| haystack(n)) {
             return (*explanation).to_owned();
@@ -202,6 +225,23 @@ pub fn new_crash_report(game_dir: &Path, since: SystemTime) -> Option<(String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fabrics_own_reasons_are_said_in_plain_words() {
+        // As Fabric Loader 0.19 logged them for a 1.21.11 profile copied from another launcher without Fabric API.
+        let log = "[00:05:02] [main/ERROR]: Incompatible mods found!
+More details:
+	 - Mod 'AppleSkin' (appleskin) 3.0.8+mc1.21.11 requires any version of fabric-api, which is missing!
+	 - Mod 'Continuity' (continuity) 3.0.1-beta.1+1.21.11 requires version 0.140.0 or later of fabric-api, which is missing!
+	 - Mod 'Capes' (capes) 1.5.10+1.21.11 requires any version of fabric, which is missing!
+";
+        assert_eq!(fabric_reasons(log)[1], "Continuity requires version 0.140.0 or later of fabric-api, which isn't in this profile");
+        assert_eq!(
+            summarize(log, None, Some(1), true),
+            "Fabric couldn't start this profile: AppleSkin requires any version of fabric-api, which isn't in this profile; Continuity requires version 0.140.0 or later of fabric-api, which isn't in this profile (and 1 more; the log lists them all)."
+        );
+        assert!(fabric_reasons("[main/INFO]: Loading 40 mods").is_empty());
+    }
 
     const XML: &str = r#"<log4j:Event logger="net.minecraft.client.Minecraft" timestamp="1791917449086" level="INFO" thread="Render thread">
   <log4j:Message><![CDATA[Setting user: Steve]]></log4j:Message>

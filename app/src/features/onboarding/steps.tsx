@@ -2,14 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, errorText, subscribe, type Account, type Catalog, type LibraryHit } from "../../lib/api";
 import { formatDuration, quotaLabel } from "../../lib/aiQuota";
 import { EXAMPLES, QuotaExhausted, suggestMods } from "../../lib/assist";
-import { groupPlan, type DisplayGroup } from "../../lib/assistPlan";
+import { goalLabel, groupPlan, type DisplayGroup } from "../../lib/assistPlan";
 import { bodyFromSkin, headFromSkin } from "../../lib/avatar";
 import { bytes, compact, dashedUuid, shortDate } from "../../lib/format";
+import { useT, type MessageKey } from "../../lib/i18n";
 import { EFFECTS, useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { useStore } from "../../lib/store";
 import { VERSIONS, defaultProfileName, platformBlock, versionMeta } from "../../lib/versions";
-import { FontPicker, ThemePicker } from "../../ui/AppearancePickers";
+import { EFFECT_TEXT, FontPicker, ThemePicker } from "../../ui/AppearancePickers";
 import { Badge, Button, Checkbox, RadioCards, Segmented, Slider, Spinner, Switch, TextArea, TextField } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { FlintMark } from "../../ui/Logo";
@@ -29,7 +30,8 @@ export type Answers = {
   /** The Minecraft version the plan was checked for; a different version re-checks it. */
   planVersion?: string | null;
   launchAtLogin: boolean;
-  community: "pending" | "opened" | "skipped";
+  /** After sign-in: the guided setup, or straight to Home with Flint's defaults. */
+  path: "setup" | "skip";
 };
 
 export const DEFAULT_ANSWERS: Answers = {
@@ -41,7 +43,7 @@ export const DEFAULT_ANSWERS: Answers = {
   assistMode: null,
   plan: [],
   launchAtLogin: false,
-  community: "pending",
+  path: "setup",
 };
 
 export type StepProps = {
@@ -83,9 +85,10 @@ export function Avatar({ account, size = 40 }: { account: Account | null; size?:
 
 // ---------------- Welcome ----------------
 
-const WELCOME_STEPS = ["Sign in with Microsoft", "Choose a Minecraft version", "Pick your mods"];
+const WELCOME_STEPS: MessageKey[] = ["onboarding.welcome.steps.signIn", "onboarding.welcome.steps.version", "onboarding.welcome.steps.mods"];
 
 export function WelcomeStep({ setCanContinue, onStart }: StepProps & { onStart: () => void }) {
+  const t = useT();
   useEffect(() => setCanContinue(true), [setCanContinue]);
   return (
     <div className="ob-welcome">
@@ -96,40 +99,39 @@ export function WelcomeStep({ setCanContinue, onStart }: StepProps & { onStart: 
         </span>
         <span className="ob-welcome-floor" />
       </div>
-      <h1 className="ob-welcome-title">Welcome to Flint.</h1>
-      <p className="ob-welcome-lede">Your Minecraft experience, made simpler.</p>
-      <p className="ob-welcome-body">
-        Flint prepares Minecraft: Java Edition for you: the game files, the right Java and your mods, each downloaded from official sources and checked before it runs.
-      </p>
+      <h1 className="ob-welcome-title">{t("onboarding.welcome.title")}</h1>
+      <p className="ob-welcome-lede">{t("onboarding.welcome.lede")}</p>
+      <p className="ob-welcome-body">{t("onboarding.welcome.body")}</p>
       <ol className="ob-welcome-steps">
         {WELCOME_STEPS.map((label, i) => (
           <li key={label}>
             <span>{i + 1}</span>
-            {label}
+            {t(label)}
           </li>
         ))}
       </ol>
       <Button variant="primary" size="lg" iconRight="arrowRight" onClick={onStart} className="ob-start" data-autofocus>
-        Get started
+        {t("onboarding.welcome.start")}
       </Button>
-      <p className="ob-welcome-legal">Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
+      <p className="ob-welcome-legal">{t("onboarding.welcome.legal")}</p>
     </div>
   );
 }
 
 // ---------------- Account ----------------
 
-const AUTH_STAGES: { key: string; label: string }[] = [
-  { key: "browser", label: "Sign in on Microsoft's page" },
-  { key: "exchange", label: "Confirm the Microsoft sign-in" },
-  { key: "xbox", label: "Connect to Xbox Live" },
-  { key: "minecraft", label: "Sign in to Minecraft services" },
-  { key: "ownership", label: "Check Java Edition ownership" },
-  { key: "profile", label: "Load your Minecraft profile" },
+const AUTH_STAGES: { key: string; label: MessageKey }[] = [
+  { key: "browser", label: "onboarding.account.stages.browser" },
+  { key: "exchange", label: "onboarding.account.stages.exchange" },
+  { key: "xbox", label: "onboarding.account.stages.xbox" },
+  { key: "minecraft", label: "onboarding.account.stages.minecraft" },
+  { key: "ownership", label: "onboarding.account.stages.ownership" },
+  { key: "profile", label: "onboarding.account.stages.profile" },
 ];
 
 function AccountReveal({ account, fresh }: { account: Account; fresh: boolean }) {
   const { skins } = useStore();
+  const t = useT();
   const skin = skins[account.uuid];
   const [body, setBody] = useState<string | null>(null);
   useEffect(() => {
@@ -138,18 +140,20 @@ function AccountReveal({ account, fresh }: { account: Account; fresh: boolean })
   }, [skin?.dataUrl, skin?.model]);
   return (
     <div className={`ob-reveal ${fresh ? "is-fresh" : ""}`}>
-      <div className="ob-reveal-figure">{body ? <img src={body} alt="" /> : <Avatar account={account} size={72} />}</div>
+      {/* The figure's frame stays empty until the skin is drawn, then the character fades in. */}
+      <div className="ob-reveal-figure">{body && <img src={body} alt="" />}</div>
       <div className="ob-reveal-text">
-        <span className="ob-reveal-kicker">Signed in as</span>
+        <span className="ob-reveal-kicker">{t("onboarding.account.signedInAs")}</span>
         <strong>{account.username}</strong>
         <span className="mono faint">{dashedUuid(account.uuid)}</span>
         {import.meta.env.DEV && account.qa ? (
+          // Development builds only; stays English.
           <Badge tone="warning">
             <Icon name="alert" size={12} /> Development test identity
           </Badge>
         ) : (
           <Badge tone="success">
-            <Icon name="check" size={12} /> Owns Minecraft: Java Edition
+            <Icon name="check" size={12} /> {t("onboarding.account.ownsJava")}
           </Badge>
         )}
       </div>
@@ -159,6 +163,7 @@ function AccountReveal({ account, fresh }: { account: Account; fresh: boolean })
 
 export function AccountStep({ answers, set, setCanContinue }: StepProps) {
   const store = useStore();
+  const t = useT();
   const account = store.accounts.find((a) => a.uuid === answers.accountUuid) ?? null;
   const [phase, setPhase] = useState<"idle" | "working" | "error" | "cancelled">("idle");
   const [stage, setStage] = useState("browser");
@@ -201,13 +206,9 @@ export function AccountStep({ answers, set, setCanContinue }: StepProps) {
   return (
     <div className="ob-step ob-narrow ob-account-step">
       <StepHead
-        eyebrow="Account"
-        title={account && phase !== "working" ? `Good to see you, ${account.username}.` : "Connect your Minecraft account."}
-        body={
-          account && phase !== "working"
-            ? "Your account is ready. Continue when you are."
-            : "Use the Microsoft account that owns Minecraft: Java Edition. Microsoft handles the sign-in on its own page, so Flint never sees your password."
-        }
+        eyebrow={t("onboarding.account.eyebrow")}
+        title={account && phase !== "working" ? t("onboarding.account.titleReady", { name: account.username }) : t("onboarding.account.title")}
+        body={account && phase !== "working" ? t("onboarding.account.bodyReady") : t("onboarding.account.body")}
       />
       <section className="ob-signin card">
         {phase === "working" ? (
@@ -216,15 +217,15 @@ export function AccountStep({ answers, set, setCanContinue }: StepProps) {
               {AUTH_STAGES.map((s, i) => (
                 <li key={s.key} className={i < stageIndex ? "is-done" : i === stageIndex ? "is-current" : ""}>
                   <span className="ob-signin-dot">{i < stageIndex ? <Icon name="check" size={11} /> : i === stageIndex ? <Spinner size={12} /> : null}</span>
-                  {s.label}
+                  {t(s.label)}
                 </li>
               ))}
             </ol>
             <div className="ob-signin-foot">
-              <p className="muted">{stage === "browser" ? "A Microsoft page opened in your browser. Come back here when you've finished." : "Almost there. This only takes a moment."}</p>
+              <p className="muted">{stage === "browser" ? t("onboarding.account.browserOpened") : t("onboarding.account.almostThere")}</p>
               {stage === "browser" && (
                 <Button variant="secondary" size="sm" onClick={() => void api.cancelSignIn()}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               )}
             </div>
@@ -238,21 +239,21 @@ export function AccountStep({ answers, set, setCanContinue }: StepProps) {
                 <Icon name="microsoft" size={22} />
               </span>
               <div>
-                <strong>Microsoft handles your sign-in</strong>
-                <span className="muted">You'll sign in on Microsoft's secure page in your browser, then come back here.</span>
+                <strong>{t("onboarding.account.msTitle")}</strong>
+                <span className="muted">{t("onboarding.account.msBody")}</span>
               </div>
             </div>
             <button type="button" className="ob-ms-btn" onClick={() => void connect()}>
               <Icon name="microsoft" size={18} />
-              Sign in with Microsoft
+              {t("onboarding.account.signIn")}
             </button>
-            {phase === "cancelled" && <p className="ob-signin-note muted">Sign-in was cancelled. You can try again whenever you're ready.</p>}
+            {phase === "cancelled" && <p className="ob-signin-note muted">{t("onboarding.account.cancelled")}</p>}
             {phase === "error" && (
               <div className="ob-error" role="alert">
                 <Icon name="alert" size={16} />
                 <span>{error}</span>
                 <Button size="sm" variant="secondary" icon="refresh" onClick={() => void connect()}>
-                  Try again
+                  {t("common.tryAgain")}
                 </Button>
               </div>
             )}
@@ -260,21 +261,22 @@ export function AccountStep({ answers, set, setCanContinue }: StepProps) {
         )}
         <ul className="ob-access">
           <li>
-            <Icon name="check" size={13} /> Flint receives your Minecraft username, player ID and skin.
+            <Icon name="check" size={13} /> {t("onboarding.account.access.receives")}
           </li>
           <li>
-            <Icon name="lock" size={13} /> Sign-in tokens stay in your system keychain, never in Flint's files.
+            <Icon name="lock" size={13} /> {t("onboarding.account.access.tokens")}
           </li>
           <li>
-            <Icon name="x" size={13} /> Flint never sees your password or email, and can't make purchases.
+            <Icon name="x" size={13} /> {t("onboarding.account.access.never")}
           </li>
         </ul>
       </section>
       {account && phase !== "working" && (
         <button className="ob-link" type="button" onClick={() => void connect()}>
-          Use a different account
+          {t("onboarding.account.switch")}
         </button>
       )}
+      {/* Development builds only; stays English. */}
       {import.meta.env.DEV && store.info.qa && !account && phase !== "working" && (
         <button className="ob-link ob-qa" type="button" onClick={() => void useTestIdentity()}>
           Development build: continue with a local test identity
@@ -293,6 +295,7 @@ export function VersionStep({ answers, set, setCanContinue }: StepProps) {
     api.catalog().then(setCatalog, () => setCatalogError(true));
   }, []);
   const store = useStore();
+  const t = useT();
   const nameOk = answers.profileName.trim().length > 0;
   const selectedBlocked = platformBlock(answers.version, store.info);
   useEffect(() => setCanContinue(nameOk && !selectedBlocked), [nameOk, selectedBlocked, setCanContinue]);
@@ -304,8 +307,8 @@ export function VersionStep({ answers, set, setCanContinue }: StepProps) {
 
   return (
     <div className="ob-step ob-wide">
-      <StepHead title="Which Minecraft version would you like to play?" body="Each version gets its own profile, folder and mods. You can add more later." />
-      <div className="ob-versions" role="radiogroup" aria-label="Minecraft version">
+      <StepHead title={t("onboarding.version.title")} body={t("onboarding.version.body")} />
+      <div className="ob-versions" role="radiogroup" aria-label={t("onboarding.version.listLabel")}>
         {VERSIONS.map((v) => {
           const live = catalog?.versions.find((c) => c.id === v.id);
           const fabric = live ? live.fabric : v.fabric;
@@ -326,13 +329,15 @@ export function VersionStep({ answers, set, setCanContinue }: StepProps) {
               <span className="ob-version-shade" />
               <span className="ob-version-body">
                 <span className="ob-version-id">{v.id}</span>
-                <span className="ob-version-drop">{v.drop ?? (live?.releaseTime ? `Released ${shortDate(live.releaseTime)}` : "Minecraft release")}</span>
+                <span className="ob-version-drop">
+                  {v.drop ?? (live?.releaseTime ? t("onboarding.version.released", { date: shortDate(live.releaseTime) }) : t("onboarding.version.release"))}
+                </span>
                 <span className="ob-version-tags">
                   {blocked ? (
-                    <Badge tone="warning">Not on Apple silicon yet</Badge>
+                    <Badge tone="warning">{t("onboarding.version.appleSilicon")}</Badge>
                   ) : (
                     <>
-                      {fabric ? <Badge tone="accent">Fabric</Badge> : <Badge>Vanilla only</Badge>}
+                      {fabric ? <Badge tone="accent">Fabric</Badge> : <Badge>{t("onboarding.version.vanillaOnly")}</Badge>}
                       <Badge>Java {v.java}</Badge>
                     </>
                   )}
@@ -351,32 +356,33 @@ export function VersionStep({ answers, set, setCanContinue }: StepProps) {
         {catalog ? (
           catalog.offline ? (
             <>
-              <Icon name="wifiOff" size={14} /> Offline: showing the last verified list. Flint checks again during setup.
+              <Icon name="wifiOff" size={14} /> {t("onboarding.version.offline")}
             </>
           ) : (
             <>
-              <Icon name="check" size={14} /> Verified just now with Mojang and Fabric{catalog.fabricLoader ? ` (Fabric Loader ${catalog.fabricLoader})` : ""}.
+              <Icon name="check" size={14} />{" "}
+              {catalog.fabricLoader ? t("onboarding.version.verifiedLoader", { version: catalog.fabricLoader }) : t("onboarding.version.verified")}
             </>
           )
         ) : catalogError ? (
           <>
-            <Icon name="wifiOff" size={14} /> Couldn't reach Mojang or Fabric. Availability will be checked during setup.
+            <Icon name="wifiOff" size={14} /> {t("onboarding.version.unreachable")}
           </>
         ) : (
           <>
-            <Spinner size={12} /> Checking availability with Mojang and Fabric…
+            <Spinner size={12} /> {t("onboarding.version.checking")}
           </>
         )}
       </p>
       {versionMeta(answers.version).note && <p className="ob-note">{versionMeta(answers.version).note}</p>}
       <div className="ob-name">
         <TextField
-          label="Profile name"
+          label={t("onboarding.version.nameLabel")}
           value={answers.profileName}
           maxLength={40}
           onChange={(e) => set({ profileName: e.target.value, nameTouched: true })}
-          hint="This names the setup in Flint. It's separate from your Minecraft username."
-          error={nameOk ? undefined : "Give your profile a name."}
+          hint={t("onboarding.version.nameHint")}
+          error={nameOk ? undefined : t("onboarding.version.nameMissing")}
         />
       </div>
     </div>
@@ -407,26 +413,37 @@ function ModRow({
   onRemove: () => void;
   onReplace: () => void;
 }) {
+  const t = useT();
   const blocked = item.status === "conflict" || item.status === "unavailable";
   const dependency = item.source === "dependency";
   const optional = item.source === "optional";
-  const needers = item.requiredByAll?.length ? item.requiredByAll : item.requiredBy ? [item.requiredBy] : ["another mod"];
-  const neededNow = needers.filter((t) => includedTitles.has(t));
-  const neededLater = needers.filter((t) => !includedTitles.has(t));
+  // The mods that need a dependency, when the resolver named them.
+  const needers = item.requiredByAll?.length ? item.requiredByAll : item.requiredBy ? [item.requiredBy] : [];
+  const neededNow = needers.filter((title) => includedTitles.has(title)).join(", ");
+  const neededLater = needers.filter((title) => !includedTitles.has(title)).join(", ");
+  const dependencyNote = () => {
+    if (included) {
+      if (!neededNow) return t("onboarding.mods.note.neededByIncluded");
+      return neededLater ? t("onboarding.mods.note.neededLater", { mods: neededNow, later: neededLater }) : t("onboarding.mods.note.needed", { mods: neededNow });
+    }
+    if (!needers.length) return t("onboarding.mods.note.neededByAnother");
+    return t(needers.length > 1 ? "onboarding.mods.note.neededIfAny" : "onboarding.mods.note.neededIfOne", { mods: needers.join(", ") });
+  };
+  const parent = item.requiredBy;
+  const optionalNote = () => {
+    if (!parentOn) return parent ? t("onboarding.mods.note.addonParentOff", { mod: parent }) : t("onboarding.mods.note.addonParentOffUnknown");
+    if (included) return parent ? t("onboarding.mods.note.addonOn", { mod: parent }) : t("onboarding.mods.note.addonOnUnknown");
+    return parent ? t("onboarding.mods.note.addonOff", { mod: parent }) : t("onboarding.mods.note.addonOffUnknown");
+  };
+  // Backend and Modrinth text (the resolver's message, the pick's reason, the description) stays as it is.
   const note = blocked
     ? item.message
     : dependency
-      ? included
-        ? `Needed by ${neededNow.join(", ")}${neededLater.length ? `, and by ${neededLater.join(", ")} if included` : ""}`
-        : `Needed by ${needers.join(", ")}. Installs only if ${needers.length > 1 ? "one of them" : "that"} is included.`
+      ? dependencyNote()
       : optional
-        ? !parentOn
-          ? `Optional add-on for ${item.requiredBy ?? "a mod"}, which isn't included.`
-          : included
-            ? `Optional add-on for ${item.requiredBy ?? "your mods"}. Included because you ticked it.`
-            : `Optional add-on for ${item.requiredBy ?? "your mods"}. Off unless you tick it.`
+        ? optionalNote()
         : forced
-          ? `Needed by another included mod${item.reason ? ` · ${item.reason}` : ""}`
+          ? [t("onboarding.mods.note.neededByIncluded"), item.reason].filter(Boolean).join(" · ")
           : (item.reason ?? item.description);
   const compat = item.status === "ok" ? compatibility(item, gameVersion) : null;
   // Dependencies follow the mods that need them; a pick another included mod needs can't be cleared.
@@ -434,7 +451,7 @@ function ModRow({
   const locked = blocked || dependency || forced || (optional && !parentOn);
   return (
     <li className={`ob-mod ${blocked ? "is-blocked" : ""} ${dependency ? "is-dep" : ""} ${!included && !blocked ? "is-off" : ""}`}>
-      <Checkbox checked={checked} disabled={locked} onChange={onToggle} label={`Include ${item.title}`} />
+      <Checkbox checked={checked} disabled={locked} onChange={onToggle} label={t("onboarding.mods.row.include", { mod: item.title })} />
       <span className="ob-mod-icon">{item.iconUrl ? <img src={item.iconUrl} alt="" loading="lazy" /> : <Icon name="cube" size={16} />}</span>
       <div className="ob-mod-text">
         <strong>{item.title}</strong>
@@ -443,12 +460,13 @@ function ModRow({
         </span>
       </div>
       <span className="ob-mod-meta">
-        {item.source === "assistant" && <Badge tone="accent">AI suggestion</Badge>}
-        {item.source === "user" && <Badge>{item.reason ? "Search match" : "You added"}</Badge>}
-        {dependency && <Badge>Required</Badge>}
-        {optional && <Badge>Optional</Badge>}
-        {item.status === "conflict" && <Badge tone="danger">Conflict</Badge>}
-        {item.status === "unavailable" && <Badge tone="warning">Not available</Badge>}
+        {item.source === "assistant" && <Badge tone="accent">{t("onboarding.mods.row.aiSuggestion")}</Badge>}
+        {item.source === "user" && <Badge>{item.reason ? t("onboarding.mods.row.searchMatch") : t("onboarding.mods.row.youAdded")}</Badge>}
+        {dependency && <Badge>{t("onboarding.mods.row.required")}</Badge>}
+        {optional && <Badge>{t("onboarding.mods.row.optional")}</Badge>}
+        {item.status === "conflict" && <Badge tone="danger">{t("onboarding.mods.row.conflict")}</Badge>}
+        {item.status === "unavailable" && <Badge tone="warning">{t("onboarding.mods.row.unavailable")}</Badge>}
+        {/* Modrinth's channel (beta, alpha), as Modrinth writes it. */}
         {item.versionType && item.versionType !== "release" && item.status === "ok" && <Badge tone="warning">{item.versionType}</Badge>}
         {compat && (
           <span className="ob-mod-compat faint" title={compat.title}>
@@ -459,10 +477,22 @@ function ModRow({
       </span>
       {!dependency && !optional ? (
         <span className="ob-mod-actions">
-          <button type="button" className="icon-btn icon-btn-sm icon-btn-ghost" aria-label={`Replace ${item.title}`} title="Replace" onClick={onReplace}>
+          <button
+            type="button"
+            className="icon-btn icon-btn-sm icon-btn-ghost"
+            aria-label={t("onboarding.mods.row.replaceLabel", { mod: item.title })}
+            title={t("onboarding.mods.row.replace")}
+            onClick={onReplace}
+          >
             <Icon name="refresh" size={14} />
           </button>
-          <button type="button" className="icon-btn icon-btn-sm icon-btn-ghost" aria-label={`Remove ${item.title}`} title="Remove" onClick={onRemove}>
+          <button
+            type="button"
+            className="icon-btn icon-btn-sm icon-btn-ghost"
+            aria-label={t("onboarding.mods.row.removeLabel", { mod: item.title })}
+            title={t("common.remove")}
+            onClick={onRemove}
+          >
             <Icon name="x" size={14} />
           </button>
         </span>
@@ -475,11 +505,13 @@ function ModRow({
 
 /** Flint's automatic performance set, as the Mods step and Review show it (names only: what fits is decided at install). */
 export function PerformanceSetNote({ compact }: { compact?: boolean }) {
+  const t = useT();
   return (
     <div className={`ob-perf ${compact ? "is-compact" : ""}`}>
       {!compact && (
         <h4>
-          Flint performance set<span className="faint">Added automatically where compatible · can be turned off in Settings</span>
+          {t("onboarding.perf.title")}
+          <span className="faint">{t("onboarding.perf.hint")}</span>
         </h4>
       )}
       <p className="ob-perf-names">
@@ -489,7 +521,7 @@ export function PerformanceSetNote({ compact }: { compact?: boolean }) {
           </span>
         ))}
       </p>
-      {!compact && <p className="faint ob-perf-foot">Each one is added only if Modrinth has a build for your version, plus anything it needs. They're labelled in the profile, and the finished screen lists what was installed.</p>}
+      {!compact && <p className="faint ob-perf-foot">{t("onboarding.perf.foot")}</p>}
     </div>
   );
 }
@@ -498,28 +530,29 @@ export function ModPicker({ open, onClose, gameVersion, title, onPick }: { open:
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<LibraryHit[] | null>(null);
   const [error, setError] = useState("");
+  const t = useT();
   useEffect(() => {
     if (!open) return;
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setError("");
       api.librarySearch({ kind: "mod", query, index: "relevance", offset: 0, limit: 20, gameVersion, loader: "fabric", categories: [] }).then(
         (r) => setHits(r.hits),
         (e) => setError(errorText(e)),
       );
     }, 220);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [open, query, gameVersion]);
   return (
     <Modal open={open} onClose={onClose} title={title} width={560}>
-      <TextField icon="search" placeholder={`Search Fabric mods for ${gameVersion}`} value={query} onChange={(e) => setQuery(e.target.value)} data-autofocus />
+      <TextField icon="search" placeholder={t("onboarding.picker.placeholder", { version: gameVersion })} value={query} onChange={(e) => setQuery(e.target.value)} data-autofocus />
       <ul className="picker scroll">
         {error && <li className="picker-empty">{error}</li>}
         {!error && hits === null && (
           <li className="picker-empty">
-            <Spinner size={14} /> Searching Modrinth…
+            <Spinner size={14} /> {t("onboarding.picker.searching")}
           </li>
         )}
-        {hits?.length === 0 && <li className="picker-empty">No Fabric mods for {gameVersion} match that search.</li>}
+        {hits?.length === 0 && <li className="picker-empty">{t("onboarding.picker.empty", { version: gameVersion })}</li>}
         {hits?.map((hit) => (
           <li key={hit.projectId}>
             <button
@@ -546,15 +579,16 @@ export function ModPicker({ open, onClose, gameVersion, title, onPick }: { open:
   );
 }
 
-const GROUP_NOTE: Record<DisplayGroup<PlanEntry>["kind"], string> = {
-  goal: "",
-  picks: "Added by you",
-  dependency: "Installed with the picks that need them",
-  optional: "Off unless you tick them",
+const GROUP_NOTE: Record<DisplayGroup<PlanEntry>["kind"], MessageKey | null> = {
+  goal: null,
+  picks: "onboarding.mods.groupNote.picks",
+  dependency: "onboarding.mods.groupNote.dependency",
+  optional: "onboarding.mods.groupNote.optional",
 };
 
 export function ModsStep({ answers, set, setCanContinue }: StepProps) {
   const store = useStore();
+  const t = useT();
   // AI suggestions need the gateway and Flint Assist (Settings → General); otherwise Flint's smart search answers.
   const { flintAssist } = useSettings().settings;
   const aiOn = store.info.gatewayConfigured && flintAssist;
@@ -582,9 +616,9 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
       .then((plans) => {
         if (!live) return;
         set((a) => ({ plan: rebasePlan(a.plan, joinResolved(plans.map((p) => p.items))), planVersion: version }));
-        setStatus({ tone: "info", text: `Checked your mods again for Minecraft ${version}.` });
+        setStatus({ tone: "info", text: t("onboarding.mods.status.rechecked", { version }) });
       })
-      .catch((e) => live && setStatus({ tone: "error", text: `Couldn't check your mods for ${version}: ${errorText(e)}. Flint checks them again during setup.` }))
+      .catch((e) => live && setStatus({ tone: "error", text: t("onboarding.mods.status.recheckFailed", { version, error: errorText(e) }) }))
       .finally(() => live && setBusy("idle"));
     return () => {
       live = false;
@@ -610,25 +644,31 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
       if (requestRef.current !== requestId) return;
       set((a) => ({ plan: mergePlan(a.plan, result.plan.items), planVersion: answers.version, assistMode: result.mode }));
       const missed = result.plan.unmatched?.length ?? 0;
-      const goals = result.goals.length ? ` Understood: ${result.goals.join(", ")}.` : "";
+      // The goals Flint AI understood are the AI's own words.
+      const goals = result.goals.length ? t("onboarding.mods.status.understood", { goals: result.goals.join(", ") }) : "";
+      // Whole sentences, joined with spaces.
+      let parts: (string | null | undefined)[];
       if (result.mode === "fallback") {
-        const why = aiOn ? `${result.reason}, so Flint smart search answered instead (no AI).` : "Flint smart search answered (no AI).";
-        setStatus({ tone: aiOn ? "warn" : "info", text: `${why}${goals}${missed ? ` ${missed} item(s) had no match for this version.` : ""} Review the list before continuing.` });
+        const why = aiOn ? t("onboarding.mods.status.fallbackReason", { reason: result.reason ?? "" }) : t("onboarding.mods.status.fallback");
+        parts = [why, goals, missed ? t("onboarding.mods.status.noMatch", { count: missed }) : "", t("onboarding.mods.status.reviewList")];
       } else {
-        const parts = [goals.trim(), result.note, missed ? `${missed} suggestion(s) weren't found on Modrinth for ${answers.version} and were left out.` : "", result.quota ? `${quotaLabel(result.quota)}.` : ""];
-        setStatus({ tone: "info", text: parts.filter(Boolean).join(" ") });
+        parts = [goals, result.note, missed ? t("onboarding.mods.status.notFound", { count: missed, version: answers.version }) : "", result.quota ? `${quotaLabel(result.quota)}.` : ""];
       }
+      setStatus({ tone: result.mode === "fallback" && aiOn ? "warn" : "info", text: parts.filter(Boolean).join(" ") });
       sound.play("success");
     } catch (e) {
       if (e instanceof QuotaExhausted) {
         // The same allowance as the Library: when it's used up, Flint's free smart search answers instead.
-        const reset = e.quota.resetInMs ? ` (they reset in ${formatDuration(e.quota.resetInMs)})` : "";
+        // The reason reads as a clause: "{reason}, so Flint smart search answered instead".
+        const reason = e.quota.resetInMs
+          ? t("onboarding.mods.status.quotaUsedReset", { count: e.quota.limit, time: formatDuration(e.quota.resetInMs) })
+          : t("onboarding.mods.status.quotaUsed", { count: e.quota.limit });
         if (requestRef.current === requestId) requestRef.current = null;
         setBusy("idle");
-        return void run(`You've used your ${e.quota.limit} Flint AI searches${reset}`);
+        return void run(reason);
       }
       if (errorText(e) !== "AI_CANCELLED") {
-        setStatus({ tone: "error", text: `Couldn't reach Modrinth: ${errorText(e)}. You can try again or skip this step.` });
+        setStatus({ tone: "error", text: t("onboarding.mods.status.searchFailed", { error: errorText(e) }) });
         sound.play("error");
       }
     } finally {
@@ -643,7 +683,7 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
     if (requestRef.current) void api.aiCancel(requestRef.current);
     requestRef.current = null;
     setBusy("idle");
-    setStatus({ tone: "info", text: "Stopped. Nothing was added." });
+    setStatus({ tone: "info", text: t("onboarding.mods.status.stopped") });
   };
 
   const addFromSearch = async (hit: LibraryHit, replace?: string) => {
@@ -665,12 +705,10 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
   if (!fabric) {
     return (
       <div className="ob-step ob-narrow">
-        <StepHead title="What would you like to add to your Minecraft setup?" />
+        <StepHead title={t("onboarding.mods.title")} />
         <div className="card ob-vanilla">
           <Icon name="info" size={18} />
-          <p>
-            Minecraft {answers.version} runs without a mod loader in Flint, because official Fabric doesn't support it. Continue to set it up as vanilla, or go back and pick a newer version for mods.
-          </p>
+          <p>{t("onboarding.mods.vanilla", { version: answers.version })}</p>
         </div>
       </div>
     );
@@ -684,18 +722,11 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
   const toggle = (projectId: string, v: boolean) => set((a) => ({ plan: a.plan.map((i) => (i.projectId === projectId ? { ...i, selected: v } : i)) }));
   return (
     <div className="ob-step ob-mid">
-      <StepHead
-        title="What would you like to add to your Minecraft setup?"
-        body={
-          aiOn
-            ? "Describe it in your own words. Flint AI works out what you're after; Flint then finds real Modrinth mods and checks each one for Fabric and your version. Nothing downloads until you approve."
-            : "Describe it in a few words. Flint searches Modrinth for matching Fabric mods for your version. Nothing downloads until you approve."
-        }
-      />
+      <StepHead title={t("onboarding.mods.title")} body={aiOn ? t("onboarding.mods.bodyAi") : t("onboarding.mods.body")} />
       <div className="ob-assist">
         <TextArea
-          aria-label="Describe what you want to add"
-          placeholder="e.g. smoother FPS, a minimap, and a zoom key"
+          aria-label={t("onboarding.mods.promptLabel")}
+          placeholder={t("onboarding.mods.promptPlaceholder")}
           value={answers.assistPrompt}
           maxLength={600}
           disabled={busy !== "idle"}
@@ -725,11 +756,11 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
           </div>
           {busy === "idle" ? (
             <Button variant="primary" icon={aiOn ? "sparkle" : "search"} disabled={answers.assistPrompt.trim().length < 2} onClick={() => void run()}>
-              {aiOn ? "Suggest mods" : "Find mods"}
+              {aiOn ? t("onboarding.mods.suggest") : t("onboarding.mods.find")}
             </Button>
           ) : (
             <Button variant="secondary" onClick={cancel} icon="x">
-              Stop
+              {t("onboarding.mods.stop")}
             </Button>
           )}
         </div>
@@ -737,14 +768,14 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
       {aiOn && (
         <p className="ob-assist-privacy">
           <Icon name="lock" size={12} />
-          Your request and Minecraft version are sent to Flint AI (Cloudflare). Your Minecraft username is used only to confirm you own the game. Your sign-in is never sent.
+          {t("onboarding.mods.privacy")}
         </p>
       )}
 
       {busy !== "idle" && (
         <div className="ob-assist-status" role="status">
           <Spinner size={14} />
-          {busy === "connecting" ? "Connecting to Flint AI…" : busy === "thinking" ? "Flint AI is reading your request…" : "Searching Modrinth for compatible versions…"}
+          {busy === "connecting" ? t("onboarding.mods.busy.connecting") : busy === "thinking" ? t("onboarding.mods.busy.thinking") : t("onboarding.mods.busy.matching")}
         </div>
       )}
       {status && (
@@ -757,32 +788,38 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
       {answers.plan.length > 0 && (
         <section className="ob-plan">
           <header>
-            <h3>Proposed mods</h3>
+            <h3>{t("onboarding.mods.plan.title")}</h3>
             {answers.assistMode === "ai" ? (
               <Badge tone="accent">Flint AI</Badge>
             ) : answers.assistMode === "fallback" ? (
-              <span className="ob-assist-mode">Using Flint smart search</span>
+              <span className="ob-assist-mode">{t("onboarding.mods.plan.smartSearch")}</span>
             ) : null}
             <span className="faint">
-              {installing.length} to install · {bytes(totalSize)} · {stale ? `checking for ${answers.version}…` : `checked for Fabric ${answers.version}`}
+              {t("onboarding.mods.plan.toInstall", { count: installing.length })} · {bytes(totalSize)} ·{" "}
+              {stale ? t("onboarding.mods.plan.checking", { version: answers.version }) : t("onboarding.mods.plan.checked", { version: answers.version })}
             </span>
             <Button size="sm" variant="ghost" icon="plus" onClick={() => setPicker({})}>
-              Add a mod
+              {t("onboarding.mods.plan.addMod")}
             </Button>
           </header>
           {blocked.length > 0 && (
             <p className="ob-plan-warn" role="status">
               <Icon name="alert" size={14} />
-              {blocked.length === 1 ? `${blocked[0].title} can't be installed: ${blocked[0].message ?? "no compatible release"}.` : `${blocked.length} mods can't be installed and will be left out. Details are shown on each row.`}
+              {blocked.length > 1
+                ? t("onboarding.mods.plan.blockedMany", { count: blocked.length })
+                : blocked[0].message
+                  ? t("onboarding.mods.plan.blockedOne", { mod: blocked[0].title, reason: blocked[0].message })
+                  : t("onboarding.mods.plan.blockedOneNoReason", { mod: blocked[0].title })}
             </p>
           )}
           {groupPlan(answers.plan.filter((i) => i.status !== "not-needed")).map((g) => {
             const rows = g.items;
+            const groupNote = GROUP_NOTE[g.kind];
             return (
               <div key={g.id} className={`ob-plan-group is-${g.kind}`}>
                 <h4>
-                  {g.title}
-                  {GROUP_NOTE[g.kind] && <span className="faint">{GROUP_NOTE[g.kind]}</span>}
+                  {goalLabel(g.title)}
+                  {groupNote && <span className="faint">{t(groupNote)}</span>}
                 </h4>
                 <ul>
                   {rows.map((item) => (
@@ -807,7 +844,7 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
       )}
       {answers.plan.length === 0 && busy === "idle" && (
         <button type="button" className="ob-link" onClick={() => setPicker({})}>
-          Or search Modrinth yourself
+          {t("onboarding.mods.searchYourself")}
         </button>
       )}
       {settings.performanceMods && <PerformanceSetNote />}
@@ -815,7 +852,7 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
         open={!!picker}
         onClose={() => setPicker(null)}
         gameVersion={answers.version}
-        title={picker?.replace ? "Replace with another mod" : "Add a mod"}
+        title={picker?.replace ? t("onboarding.picker.replaceTitle") : t("onboarding.picker.addTitle")}
         onPick={(hit) => void addFromSearch(hit, picker?.replace)}
       />
     </div>
@@ -825,57 +862,65 @@ export function ModsStep({ answers, set, setCanContinue }: StepProps) {
 // ---------------- Startup ----------------
 
 export function StartupStep({ answers, set, setCanContinue }: StepProps) {
+  const t = useT();
   useEffect(() => setCanContinue(true), [setCanContinue]);
   return (
     <div className="ob-step ob-narrow">
-      <StepHead title="Would you like Flint to open when your computer starts?" body="Only for your user account. You can change this any time in Settings." />
+      <StepHead title={t("onboarding.startup.title")} body={t("onboarding.startup.body")} />
       <RadioCards
         name="startup"
         className="ob-yesno"
         value={answers.launchAtLogin ? "yes" : "no"}
         onChange={(v) => set({ launchAtLogin: v === "yes" })}
         options={[
-          { value: "no", title: "No, I'll open it myself", description: "Recommended. Flint stays out of the way until you need it." },
-          { value: "yes", title: "Yes, open Flint at login", description: "Flint starts when you sign in to your computer." },
+          { value: "no", title: t("onboarding.startup.no"), description: t("onboarding.startup.noBody") },
+          { value: "yes", title: t("onboarding.startup.yes"), description: t("onboarding.startup.yesBody") },
         ]}
       />
     </div>
   );
 }
 
-// ---------------- Community ----------------
+// ---------------- Path ----------------
 
-export function CommunityStep({ answers, set, setCanContinue }: StepProps) {
-  const { info } = useStore();
+/**
+ * After sign-in (and the Import step): the guided setup, or Home straight away with Flint's defaults, or with
+ * the profiles just imported (`imported`: how many).
+ */
+export function PathStep({ answers, set, setCanContinue, error, imported = 0 }: StepProps & { error: string | null; imported?: number }) {
+  const t = useT();
   useEffect(() => setCanContinue(true), [setCanContinue]);
   return (
     <div className="ob-step ob-narrow">
-      <StepHead title="Want to stay connected with Flint?" body="Get release news, share setups and report bugs in the community." />
-      <div className="ob-community card">
-        <span className="ob-community-logo">
-          <Icon name="discord" size={26} />
-        </span>
-        <div>
-          <strong>Flint Community on Discord</strong>
-          <p className="muted">
-            {info.discordUrl ? "Opens in your browser. Joining is completely optional." : "The invite link hasn't been published yet. It will appear on Home once it's available."}
-          </p>
+      <StepHead title={t("onboarding.path.title")} body={t("onboarding.path.body")} />
+      <RadioCards
+        name="path"
+        className="ob-yesno"
+        value={answers.path}
+        onChange={(path) => set({ path })}
+        options={[
+          {
+            value: "setup",
+            title: t("onboarding.path.setup"),
+            description: imported ? t("onboarding.path.setupBodyImported") : t("onboarding.path.setupBody"),
+          },
+          {
+            value: "skip",
+            title: t("onboarding.path.skip"),
+            description: imported
+              ? imported === 1
+                ? t("onboarding.path.skipBodyImportedOne")
+                : t("onboarding.path.skipBodyImportedMany")
+              : t("onboarding.path.skipBody", { version: DEFAULT_ANSWERS.version }),
+          },
+        ]}
+      />
+      {error && (
+        <div className="ob-error" role="alert">
+          <Icon name="alert" size={16} />
+          <span>{error}</span>
         </div>
-        {info.discordUrl ? (
-          <Button
-            variant="secondary"
-            iconRight="external"
-            onClick={() => {
-              void api.openExternal(info.discordUrl!);
-              set({ community: "opened" });
-            }}
-          >
-            {answers.community === "opened" ? "Opened in browser" : "Join"}
-          </Button>
-        ) : (
-          <Badge>Awaiting URL</Badge>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -884,33 +929,44 @@ export function CommunityStep({ answers, set, setCanContinue }: StepProps) {
 
 export function AppearanceStep({ setCanContinue }: StepProps) {
   const { settings, update } = useSettings();
+  const t = useT();
   useEffect(() => setCanContinue(true), [setCanContinue]);
+  const effects = EFFECT_TEXT[settings.effects] ?? EFFECT_TEXT.full;
   return (
     <div className="ob-step ob-mid">
-      <StepHead title="Make Flint feel like yours." body="Changes preview instantly. Everything here also lives in Settings → Appearance." />
+      <StepHead title={t("onboarding.appearance.title")} body={t("onboarding.appearance.body")} />
       <div className="ob-appearance">
         <section>
-          <h3 className="ob-label">Theme</h3>
+          <h3 className="ob-label">{t("onboarding.appearance.theme")}</h3>
           <ThemePicker value={settings.theme} onChange={(theme) => update({ theme })} />
         </section>
         <section>
-          <h3 className="ob-label">Typography</h3>
+          <h3 className="ob-label">{t("onboarding.appearance.typography")}</h3>
           <FontPicker value={settings.font} onChange={(font) => update({ font })} />
         </section>
         <section className="ob-rows">
           <div className="ob-row">
             <div>
-              <strong>Interface sounds</strong>
-              <span className="muted">Quiet cues when downloads finish, the game launches or something fails.</span>
+              <strong>{t("onboarding.appearance.sounds")}</strong>
+              <span className="muted">{t("onboarding.appearance.soundsBody")}</span>
             </div>
-            <Switch checked={settings.sounds} onChange={(sounds) => update({ sounds })} label="Interface sounds" />
+            <Switch checked={settings.sounds} onChange={(sounds) => update({ sounds })} label={t("onboarding.appearance.sounds")} />
           </div>
           <div className="ob-row">
             <div>
-              <strong>Volume</strong>
+              <strong>{t("onboarding.appearance.volume")}</strong>
             </div>
             <div className="ob-row-inline">
-              <Slider value={Math.round(settings.volume * 100)} min={0} max={100} step={5} label="Sound volume" disabled={!settings.sounds} onChange={(v) => update({ volume: v / 100 })} format={(v) => `${v}%`} />
+              <Slider
+                value={Math.round(settings.volume * 100)}
+                min={0}
+                max={100}
+                step={5}
+                label={t("onboarding.appearance.volumeLabel")}
+                disabled={!settings.sounds}
+                onChange={(v) => update({ volume: v / 100 })}
+                format={(v) => t("onboarding.appearance.volumeValue", { value: v })}
+              />
               <Button
                 size="sm"
                 variant="secondary"
@@ -923,30 +979,35 @@ export function AppearanceStep({ setCanContinue }: StepProps) {
                   sound.play("success");
                 }}
               >
-                Preview
+                {t("onboarding.appearance.preview")}
               </Button>
             </div>
           </div>
           <div className="ob-row">
             <div>
-              <strong>Animations</strong>
-              <span className="muted">Transitions and the character's idle motion.</span>
+              <strong>{t("onboarding.appearance.animations")}</strong>
+              <span className="muted">{t("onboarding.appearance.animationsBody")}</span>
             </div>
-            <Switch checked={settings.animations} onChange={(animations) => update({ animations })} label="Animations" />
+            <Switch checked={settings.animations} onChange={(animations) => update({ animations })} label={t("onboarding.appearance.animations")} />
           </div>
           <div className="ob-row">
             <div>
-              <strong>Wallpaper parallax</strong>
-              <span className="muted">The Home background shifts a few pixels with your cursor.</span>
+              <strong>{t("onboarding.appearance.parallax")}</strong>
+              <span className="muted">{t("onboarding.appearance.parallaxBody")}</span>
             </div>
-            <Switch checked={settings.parallax} onChange={(parallax) => update({ parallax })} label="Wallpaper parallax" />
+            <Switch checked={settings.parallax} onChange={(parallax) => update({ parallax })} label={t("onboarding.appearance.parallax")} />
           </div>
           <div className="ob-row">
             <div>
-              <strong>Visual effects</strong>
-              <span className="muted">{EFFECTS.find((e) => e.id === settings.effects)?.note}</span>
+              <strong>{t("onboarding.appearance.effects")}</strong>
+              <span className="muted">{t(effects.note)}</span>
             </div>
-            <Segmented label="Visual effects" value={settings.effects} onChange={(effects) => update({ effects })} options={EFFECTS.map((e) => ({ value: e.id, label: e.name }))} />
+            <Segmented
+              label={t("onboarding.appearance.effects")}
+              value={settings.effects}
+              onChange={(level) => update({ effects: level })}
+              options={EFFECTS.map((e) => ({ value: e.id, label: t(EFFECT_TEXT[e.id].name) }))}
+            />
           </div>
         </section>
       </div>
@@ -955,15 +1016,16 @@ export function AppearanceStep({ setCanContinue }: StepProps) {
 }
 
 export function Segment({ value, onChange }: { value: "low" | "medium" | "high"; onChange: (v: "low" | "medium" | "high") => void }) {
+  const t = useT();
   return (
     <Segmented
-      label="Assistant reasoning effort"
+      label={t("onboarding.effort.label")}
       value={value}
       onChange={onChange}
       options={[
-        { value: "low", label: "Fast" },
-        { value: "medium", label: "Balanced" },
-        { value: "high", label: "Thorough" },
+        { value: "low", label: t("onboarding.effort.low") },
+        { value: "medium", label: t("onboarding.effort.medium") },
+        { value: "high", label: t("onboarding.effort.high") },
       ]}
     />
   );

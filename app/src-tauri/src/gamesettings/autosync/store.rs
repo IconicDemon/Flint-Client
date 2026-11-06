@@ -86,6 +86,34 @@ pub struct State {
     /// are (nothing overwritten). Profiles created later get the whole store at their first launch.
     #[serde(default)]
     pub baseline_ids: BTreeSet<String>,
+    /// Settings → Syncing's switches that were turned on while Auto Sync was on, by id (`switches::Switch`).
+    /// Each time, the switch's entries start again from one profile, and every profile is taken as it is for
+    /// them when next met.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub switches: BTreeMap<String, SwitchStart>,
+    /// When Auto Sync last looked at a profile (a launch or an exit), for Settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<Box<LastSync>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchStart {
+    /// Raised each time the switch is turned on.
+    pub epoch: u64,
+    /// The newest revision when it was: the entries it started from are at or below it.
+    pub since: u64,
+    /// The profile its entries started from (None: no profile could be read, so it started empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    pub at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LastSync {
+    pub at: u64,
+    pub profile: String,
 }
 
 impl State {
@@ -102,7 +130,14 @@ impl State {
             epoch: 1,
             baseline_rev: 0,
             baseline_ids: BTreeSet::new(),
+            switches: BTreeMap::new(),
+            last: None,
         }
+    }
+
+    /// How a switch last started (epoch 0: never turned on since this store was made).
+    pub fn switch_start(&self, id: &str) -> SwitchStart {
+        self.switches.get(id).cloned().unwrap_or_default()
     }
 
     /// The tag a profile's record carries while it is in step with this store and epoch.
@@ -214,11 +249,41 @@ pub struct ProfileSync {
     /// Hash cache for packs, by "<folder>/<name>".
     #[serde(default)]
     pub packs: BTreeMap<String, CachedPack>,
+    /// The version family the profile was met as when this record was saved ("26.3", "1.21.11", "1.8.9"), or
+    /// "" when values couldn't be brought into it (a version Flint hadn't checked, or not installed yet).
+    /// Missing in records saved before 1.21.x and 1.8.9 were checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub met_as: Option<String>,
+    /// Per Settings → Syncing switch that was ever turned on (`State::switches`): the start the profile was
+    /// last met under, and the revision its entries for that switch come in from.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub marks: BTreeMap<String, Mark>,
+    /// Put back into Auto Sync (it had been left out in Settings → Syncing) when the store's newest revision
+    /// was this: it is taken as it is when next met, and only changes made after that come in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejoined: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Mark {
+    pub epoch: u64,
+    pub floor: u64,
 }
 
 impl ProfileSync {
     pub fn new(applied_rev: u64) -> Self {
         Self { schema: SCHEMA, applied_rev, ..Default::default() }
+    }
+
+    /// Whether values could be brought into the profile when this record was saved. A record from before
+    /// 1.21.x and 1.8.9 were checked doesn't say; then only 26.x profiles could, so the family the profile is
+    /// met as `now` decides.
+    pub fn could_take(&self, now: &str) -> bool {
+        match &self.met_as {
+            Some(family) => !family.is_empty(),
+            None => !now.starts_with("1."),
+        }
     }
 
     /// Last-seen values of `prefix` entries.

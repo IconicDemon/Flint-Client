@@ -1,0 +1,17 @@
+{
+    "name": "dripstone",
+    "groups": [
+        "dripstone"
+    ],
+    "low-count": 3,
+    "high-count": 5,
+    "and": [
+        {
+            "groups": [
+                "rock"
+            ],
+            "low-weight": 0.2,
+            "high-weight": 0.25
+        }
+    ]
+}

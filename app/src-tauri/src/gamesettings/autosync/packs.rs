@@ -348,7 +348,7 @@ pub fn read_mcmeta(path: &Path, dir: bool) -> Option<Json> {
         }
         std::fs::read(file).ok()?
     } else {
-        let mut archive = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+        let mut archive = zip::ZipArchive::new(std::io::BufReader::new(std::fs::File::open(path).ok()?)).ok()?;
         let entry = archive.by_name("pack.mcmeta").ok()?;
         let mut bytes = Vec::new();
         entry.take(MAX_MCMETA + 1).read_to_end(&mut bytes).ok()?;

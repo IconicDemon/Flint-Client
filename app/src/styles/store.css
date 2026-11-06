@@ -1,0 +1,1355 @@
+/*
+ * The Store page (features/pages/StorePage.tsx, features/store), laid out as a wardrobe: a header (title, Merit, Orders,
+ * Open Flint Store, "⋯"), then a sticky 3D stage on the left beside the slot tabs and one grid of equal tiles. Orders and
+ * Merit open in a side panel (.store-drawer). Before there is anything of the account's: one hero card.
+ *
+ * One system: the gaps are 8, 12, 16 and 20 px (the --space scale), every surface is the same card (--surface-1, a 1 px
+ * line, --r-lg), amber marks only what is worn or chosen, and nothing is a gradient.
+ */
+
+.store-page {
+  --store-gap: var(--space-5);
+  /* The stage, the hero and the empty card share one height, so the page's bottom edge never jumps between states. */
+  --stage-h: clamp(360px, calc(100vh - 212px), 760px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--store-gap);
+}
+
+/* With the offline note above it, the stage is shorter by the note, so it still ends inside the window. */
+.store-page:has(> .store-offline) {
+  --stage-h: clamp(340px, calc(100vh - 294px), 760px);
+}
+
+/* The page scrolls; nothing in it is squeezed to fit the window. */
+.store-page > *,
+.store-skeleton > * {
+  flex-shrink: 0;
+}
+
+.store-page > .callout {
+  margin: 0;
+}
+
+/* ---------- Header ---------- */
+
+.store-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-6);
+}
+
+.store-head-text {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1 1 300px;
+}
+
+.store-head-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.store-head-title h1 {
+  font-size: clamp(26px, 2vw, 32px);
+}
+
+.store-head-text .muted {
+  font-size: 14px;
+}
+
+.store-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* "Test Store": only when Flint isn't connected to the live Store. */
+.store-test-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  background: var(--warning-soft);
+  box-shadow: inset 0 0 0 1px rgba(var(--warning-rgb), 0.3);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--warning);
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* The Merit balance: the star and the amount. Opens the Merit history. */
+.store-merit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 38px;
+  padding: 0 14px 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  white-space: nowrap;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    transform var(--t-press) var(--ease);
+}
+
+.store-merit:hover {
+  background: var(--surface-3);
+}
+
+.store-merit:active {
+  transform: scale(var(--press-scale));
+}
+
+.store-merit.is-stale {
+  opacity: 0.7;
+}
+
+.store-merit-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.store-merit-value {
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.store-merit-unit {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.merit-star {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  image-rendering: pixelated;
+}
+
+.store-more.icon-btn-md {
+  width: 38px;
+  height: 38px;
+}
+
+/* ---------- Two columns: the stage and the items ---------- */
+
+.store-main {
+  display: grid;
+  grid-template-columns: clamp(280px, 30%, 420px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--store-gap);
+}
+
+/* One card for every surface. */
+.store-stage,
+.store-hero,
+.store-items.is-empty,
+.store-tile {
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ---------- The stage ---------- */
+
+.store-stage {
+  position: sticky;
+  top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  height: var(--stage-h);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.store-stage-canvas {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  cursor: grab;
+}
+
+.store-stage-canvas:active {
+  cursor: grabbing;
+}
+
+.store-stage-canvas canvas {
+  display: block;
+}
+
+/* Where the character stands: a soft shadow on the floor. */
+.store-stage-floor {
+  position: absolute;
+  bottom: 11%;
+  left: 50%;
+  width: min(180px, 46%);
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  filter: blur(9px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* While an item is pointed at: "Preview · its name", over the character. */
+.store-stage-tag {
+  position: absolute;
+  top: var(--space-4);
+  left: 50%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: fade-in var(--t-fast) var(--ease-out);
+}
+
+.store-stage-tag span::after {
+  content: "·";
+  margin-left: 6px;
+}
+
+.store-stage-tag strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--fg);
+  text-overflow: ellipsis;
+}
+
+/* Turn, front and back, pause: shown while the pointer or keyboard focus is on the stage. */
+.store-stage-tools {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 5px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.82);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    var(--shadow-2);
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition:
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+  backdrop-filter: blur(12px);
+}
+
+.store-stage:hover .store-stage-tools,
+.store-stage:focus-within .store-stage-tools {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.store-stage-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 3px;
+  background: var(--line-strong);
+}
+
+.store-stage-fallback {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-2);
+}
+
+/* ---------- The items ---------- */
+
+.store-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.store-items.is-empty {
+  display: grid;
+  place-items: center;
+  min-height: var(--stage-h);
+  padding: var(--space-6);
+}
+
+.store-items.is-empty .empty p {
+  max-width: 400px;
+}
+
+/* The slot tabs, and (for a slot with many items) search, order and view on the same line. */
+.store-items-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 40px;
+}
+
+.store-items-bar .tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Beside the tabs when there is room, else on a line of its own; either way the search takes the space left. */
+.store-finder {
+  display: flex;
+  flex: 1 1 380px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.store-search {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 150px;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-3);
+  transition: box-shadow var(--t-micro) var(--ease);
+}
+
+.store-search:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 0 3px var(--accent-soft);
+}
+
+.store-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.store-search input:focus-visible {
+  box-shadow: none;
+}
+
+.store-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.dropdown-trigger.store-sort {
+  flex: none;
+  min-width: 132px;
+  height: 40px;
+}
+
+.store-finder .segmented button {
+  height: 34px;
+}
+
+.store-inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+.store-inline-error svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* A group of a slot's tiles with its own pages (more than one group: each with its title). */
+.store-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* A titled group: its name, and on the right what applies to it ("Check again"). Same height with or without. */
+.store-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-height: 30px;
+}
+
+.store-group-note {
+  font-size: 12.5px;
+}
+
+.store-group + .store-group {
+  margin-top: var(--space-2);
+}
+
+.store-group-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.store-group > .empty {
+  padding: var(--space-10) var(--space-6);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.store-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ---------- A tile: picture, name, one status ---------- */
+
+.store-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text-2);
+  transition:
+    background-color var(--t-micro) var(--ease),
+    box-shadow var(--t-micro) var(--ease),
+    transform var(--t-press) var(--ease);
+}
+
+button.store-tile:hover:not([aria-disabled="true"]) {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+button.store-tile:active:not([aria-disabled="true"]) {
+  transform: scale(0.985);
+}
+
+/* What the slot wears: an amber edge, and "Wearing". */
+.store-tile.is-worn,
+.store-tile.is-worn:hover:not([aria-disabled="true"]) {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.store-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.store-tile[aria-disabled="true"] {
+  cursor: default;
+}
+
+.store-tile-art {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  aspect-ratio: 1;
+  container-type: inline-size;
+}
+
+.store-tile-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* In the grid the status keeps to the tile's foot, so a row of tiles lines up whatever lines each has above it. */
+.store-tile-grid .store-tile-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.store-tile-grid .store-tile-body > :last-child {
+  margin-top: auto;
+}
+
+.store-tile-grid .store-tile-meta {
+  margin-top: -3px;
+}
+
+/* A reward's foot holds a status or a button: the same height on every reward tile. */
+.store-tile-foot {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  min-height: 30px;
+  container-type: inline-size;
+}
+
+/* A narrow tile keeps the action's words on one line: the Discord mark steps out first. */
+@container (max-width: 132px) {
+  .btn.store-tile-action > svg {
+    display: none;
+  }
+}
+
+/* A longer status ("Can't check Discord right now", "Unlocks the next time you sign in…") takes two lines, not a cut. */
+.store-tile-state.is-text {
+  align-items: flex-start;
+  height: auto;
+  white-space: normal;
+  line-height: 15px;
+}
+
+.store-tile-state.is-text > svg,
+.store-tile-state.is-text > .spinner {
+  flex: none;
+  margin-top: 1.5px;
+}
+
+.store-tile-words {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.store-tile-name {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-tile-meta {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-tile-test {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+/* One line for the status, the same height on every tile: "Wearing", "Updating…", or "Wear" while pointed at. */
+.store-tile-state {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  justify-self: start;
+  gap: 5px;
+  max-width: 100%;
+  height: 22px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.store-tile-state.is-worn {
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.store-tile-state.is-busy {
+  color: var(--text-2);
+}
+
+.store-tile-state.is-wear {
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.store-tile:hover .store-tile-state.is-wear,
+.store-tile:focus-visible .store-tile-state.is-wear {
+  opacity: 1;
+}
+
+.store-tile-flags {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.store-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--bg-rgb), 0.78);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.store-flag i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* "Test": a test Store's item, in the picture's lower corner. */
+.store-flag.is-test {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  color: var(--warning);
+  pointer-events: none;
+}
+
+.store-flag.is-gift,
+.store-flag.is-icon {
+  justify-content: center;
+  width: 19px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--accent-text);
+}
+
+/* A locked reward: the lock in the corner, the picture a step back. */
+.store-flag.is-icon {
+  color: var(--text-2);
+}
+
+.store-tile.is-locked .store-art {
+  filter: saturate(0.5) brightness(0.78) drop-shadow(0 8px 12px rgba(0, 0, 0, 0.45));
+}
+
+/* ---------- Community Rewards: the same tiles, with what earns each and one action ---------- */
+
+/* A reward that isn't worn with a click: its picture is a button that shows it on the stage. */
+button.store-tile-art {
+  width: 100%;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  cursor: zoom-in;
+}
+
+/* Unlocked and not worn: "Unlocked" at rest, "Wear" while pointed at. */
+.store-tile-state.is-unlocked {
+  color: var(--success);
+}
+
+.store-tile-state .store-tile-hover {
+  display: none;
+  color: var(--fg);
+}
+
+.store-tile:hover .store-tile-state.can-wear .store-tile-rest,
+.store-tile:focus-visible .store-tile-state.can-wear .store-tile-rest {
+  display: none;
+}
+
+.store-tile:hover .store-tile-state.can-wear .store-tile-hover,
+.store-tile:focus-visible .store-tile-state.can-wear .store-tile-hover {
+  display: inline;
+}
+
+.store-tile-rest {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.store-tile-state.is-neutral {
+  color: var(--text-3);
+}
+
+.store-tile-state.is-warning {
+  color: var(--warning);
+}
+
+.store-tile-state.is-success {
+  color: var(--success);
+}
+
+/* The one action (Connect Discord, Join, Boost): as wide as the tile, wrapping in a long language. */
+.btn.store-tile-action {
+  align-self: end;
+  justify-content: center;
+  width: 100%;
+  min-height: 30px;
+  height: auto;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: center;
+}
+
+/* ---------- Pictures ---------- */
+
+.store-art {
+  --u: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+/* In a grid tile the picture grows with the tile, in whole pixels so pixel art stays even. */
+@supports (width: round(down, 4.2cqi, 1px)) {
+  .store-tile-grid .store-art:not(.is-small) {
+    --u: max(4px, round(down, 4.2cqi, 1px));
+  }
+}
+
+/* A cape's front (10 × 16 units of the 64 × 32 texture), pixel for pixel. */
+.store-art-cape {
+  width: calc(10 * var(--u));
+  height: calc(16 * var(--u));
+  overflow: hidden;
+  border-radius: 3px;
+  background-repeat: no-repeat;
+  background-size: calc(64 * var(--u)) calc(32 * var(--u));
+  background-position: calc(-1 * var(--u)) calc(-1 * var(--u));
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.5));
+  transition: transform var(--t-fast) var(--ease);
+}
+
+button.store-tile:hover:not([aria-disabled="true"]) .store-art-cape {
+  transform: translateY(-2px);
+}
+
+.store-art-cape:has(.store-art-frames.is-ready) {
+  background-image: none !important;
+}
+
+.store-art-frames {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.store-art-frames.is-ready {
+  opacity: 1;
+}
+
+.store-art-whole {
+  max-width: 60%;
+  max-height: 60%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.45));
+}
+
+.store-art.is-missing {
+  display: grid;
+  place-items: center;
+  width: calc(10 * var(--u));
+  height: calc(16 * var(--u));
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-3);
+}
+
+.store-art.is-small {
+  --u: 4px;
+}
+
+/* "None": an empty outline where a cape would be. */
+.store-none-art {
+  --u: 6px;
+  display: grid;
+  place-items: center;
+  width: calc(10 * var(--u));
+  height: calc(16 * var(--u));
+  border-radius: 4px;
+  outline: 1.5px dashed var(--line-focus);
+  outline-offset: -1.5px;
+  color: var(--text-3);
+}
+
+@supports (width: round(down, 4.2cqi, 1px)) {
+  .store-tile-grid .store-none-art {
+    --u: max(4px, round(down, 4.2cqi, 1px));
+  }
+}
+
+.store-tile.is-none.is-worn .store-none-art {
+  outline-color: var(--accent-line);
+  color: var(--accent-text);
+}
+
+/* ---------- List rows ---------- */
+
+.store-tile-list {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--space-4) 6px 6px;
+}
+
+.store-tile-list .store-tile-art {
+  width: 56px;
+  aspect-ratio: auto;
+  height: 72px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.store-tile-list .store-art {
+  --u: 4px;
+}
+
+.store-tile-list .store-none-art {
+  --u: 3.5px;
+}
+
+.store-tile-list .store-tile-flags,
+.store-tile-list .store-flag.is-test {
+  display: none;
+}
+
+.store-tile-list .store-tile-body {
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name state"
+    "meta state";
+  align-items: center;
+  column-gap: var(--space-4);
+  row-gap: 2px;
+  padding: 0;
+}
+
+.store-tile-list .store-tile-name {
+  grid-area: name;
+}
+
+.store-tile-list .store-tile-meta {
+  grid-area: meta;
+}
+
+.store-tile-list .store-tile-state {
+  grid-area: state;
+  align-self: center;
+}
+
+/* ---------- Pages ---------- */
+
+.store-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.store-pager-count {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.store-pager-pages {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.store-pager-page {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  transition:
+    background-color var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease);
+}
+
+.store-pager-page:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.store-pager-page.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+}
+
+.store-pager-page:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.store-pager-gap {
+  padding: 0 3px;
+  color: var(--text-4);
+}
+
+/* ---------- Orders and Merit: the side panel ---------- */
+
+.drawer.store-drawer {
+  width: min(720px, calc(100vw - var(--content-left) - 40px));
+}
+
+.store-drawer .drawer-head {
+  align-items: center;
+}
+
+.store-drawer > .tabs {
+  align-self: flex-start;
+}
+
+.store-activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  container-type: inline-size;
+}
+
+.store-activity > .empty {
+  padding: var(--space-10) var(--space-4);
+}
+
+.store-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.store-row {
+  display: grid;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3) var(--space-1);
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.store-row-head {
+  padding: 0 var(--space-1) var(--space-2);
+  border-top: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Every row is its own grid: fixed outer columns keep them in line. */
+.store-order {
+  grid-template-columns: 96px minmax(0, 1fr) 104px 132px;
+}
+
+.store-ledger {
+  grid-template-columns: 96px minmax(0, 1fr) 88px 96px;
+}
+
+.store-row .is-end {
+  justify-self: end;
+  text-align: right;
+}
+
+.store-cell-date {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.store-cell-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.store-cell-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.store-order-item {
+  overflow: hidden;
+  font-weight: 550;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-order-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: 12px;
+}
+
+.store-order-gift {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-text);
+}
+
+.store-order-amount {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.store-order-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.store-order-status .badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-delta {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.store-delta.is-earned {
+  color: var(--success);
+}
+
+.store-delta.is-spent {
+  color: var(--text-2);
+}
+
+.store-table.is-skeleton .store-row {
+  padding: 14px var(--space-1);
+}
+
+@container (max-width: 600px) {
+  .store-row-head {
+    display: none;
+  }
+
+  .store-order,
+  .store-ledger {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main amount"
+      "date status";
+  }
+
+  .store-row > :nth-child(1) {
+    grid-area: date;
+  }
+
+  .store-row > :nth-child(2) {
+    grid-area: main;
+  }
+
+  .store-row > :nth-child(3) {
+    grid-area: amount;
+  }
+
+  .store-row > :nth-child(4) {
+    grid-area: status;
+  }
+}
+
+/* ---------- Approving a Store sign-in in a browser ---------- */
+
+.store-code-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.store-code {
+  margin: 10px 0 14px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--fg);
+}
+
+/* ---------- Hero: no account, signed out, locked, error, unreachable ---------- */
+
+.store-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: var(--stage-h);
+  overflow: hidden;
+}
+
+.store-hero-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-10) clamp(28px, 3.4vw, 56px);
+}
+
+.store-hero-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--accent-text);
+}
+
+.store-hero-content h2 {
+  max-width: 520px;
+  font-size: clamp(24px, 2.2vw, 32px);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.store-hero-body {
+  max-width: 480px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.store-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.store-hero-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* Why signing in is safe: small, below the actions. */
+.store-hero-trust {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 480px;
+  margin-top: var(--space-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.store-hero-trust svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.store-hero-perks {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.store-hero-perks li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.store-hero-perks svg {
+  flex: none;
+  color: var(--accent-text);
+}
+
+.store-hero-art {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+
+.store-hero-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 62% 40%;
+}
+
+/* Something is wrong (an error, no connection, a locked sign-in): the picture steps back. */
+.store-hero.is-problem .store-hero-art img {
+  opacity: 0.45;
+  filter: saturate(0.3);
+}
+
+/* ---------- Waiting for the first answer ---------- */
+
+.store-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--store-gap);
+}
+
+/* A character's outline where the preview will stand. */
+.store-stage-ghost {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-bottom: 12%;
+  opacity: 0.55;
+}
+
+.store-stage-ghost > .sk:first-child {
+  width: 20%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+}
+
+.store-stage-ghost > .sk:last-child {
+  width: 30%;
+  height: 44%;
+  border-radius: 14px;
+}
+
+.store-tile.is-skeleton {
+  pointer-events: none;
+}
+
+.store-tile.is-skeleton .store-tile-art .sk {
+  width: 40%;
+  height: 62%;
+}
+
+.store-tile.is-skeleton .store-tile-body {
+  gap: var(--space-2);
+}
+
+/* ---------- Narrow windows ---------- */
+
+@media (max-width: 1180px) {
+  .store-main {
+    grid-template-columns: clamp(260px, 32%, 340px) minmax(0, 1fr);
+  }
+
+  .store-hero {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  }
+}
+
+/* Smaller than Flint's own minimum window, or zoomed in: the stage goes above the items. */
+@media (max-width: 860px) {
+  .store-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .store-stage {
+    position: relative;
+    top: 0;
+    height: 380px;
+  }
+
+  .store-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .store-hero-art {
+    display: none;
+  }
+}
+

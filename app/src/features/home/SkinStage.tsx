@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { SkinViewer, type PlayerObject } from "skinview3d";
 import { bodyFromSkin } from "../../lib/avatar";
+import { createCapeDriver, type CapeDriver, type DisplayedCape } from "../../lib/displayedCape";
+import { useT } from "../../lib/i18n";
 import { applyTrueColor } from "../../lib/trueColor";
 import { onWindowFocus } from "../../lib/windowFocus";
 
@@ -8,7 +10,8 @@ export type StageMotion = "full" | "balanced" | "static";
 
 type Props = {
   skin: string | null;
-  cape?: string | null;
+  /** From `useDisplayedCape`: the Flint Store cape, else the Minecraft cape, else none; animated capes play. */
+  cape: DisplayedCape;
   model: "classic" | "slim";
   username: string;
   motion: StageMotion;
@@ -99,24 +102,31 @@ function pose(player: PlayerObject, rig: Rig, dt: number) {
 }
 
 export default function SkinStage({ skin, cape, model, username, motion, enabled3d, active }: Props) {
+  const t = useT();
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<SkinViewer | null>(null);
+  const capeRef = useRef<CapeDriver | null>(null);
   const rig = useRef<Rig>({ t: 0, yaw: 0, pitch: 0, target: { yaw: 0, pitch: 0 }, waveAt: null, readyAt: 0 });
   const kick = useRef<() => void>(() => {});
   const hovering = useRef(false);
   const [greeting, setGreeting] = useState(false);
   const [failed, setFailed] = useState(false);
   const [flat, setFlat] = useState<string | null>(null);
+  // Nothing of the character shows until its skin is drawn (no placeholder letter, no untextured
+  // model); then the figure, its name tag and its shadow fade in together.
+  const [ready, setReady] = useState(false);
   const use3d = enabled3d && !failed && !!skin;
 
   useEffect(() => {
     setFlat(null);
+    if (!use3d) setReady(false);
     if (skin && !use3d) void bodyFromSkin(skin, model === "slim").then(setFlat);
   }, [skin, model, use3d]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!use3d || !host) return;
+    setReady(false);
     const canvas = document.createElement("canvas");
     canvas.className = "skin-canvas";
     host.appendChild(canvas);
@@ -140,10 +150,21 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
     viewer.zoom = 0.78;
     applyTrueColor(viewer);
     viewer.playerWrapper.rotation.y = -0.1;
+    // Development previews only (`&stage=back`): the character turned to show its cape. Not in builds.
+    if (import.meta.env.DEV && new URLSearchParams(location.search).get("stage") === "back") viewer.playerWrapper.rotation.y = Math.PI - 0.55;
     viewer.animation = null;
     viewerRef.current = viewer;
     pose(viewer.playerObject, rig.current, 0);
     viewer.render();
+    // An animated cape's frame changes draw on the next display frame (one render however many ask for it).
+    let capeFrame = 0;
+    capeRef.current = createCapeDriver(viewer, () => {
+      if (!capeFrame)
+        capeFrame = requestAnimationFrame(() => {
+          capeFrame = 0;
+          if (viewerRef.current === viewer) viewer.render();
+        });
+    });
 
     const resize = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
@@ -155,6 +176,9 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
     resize.observe(host);
 
     return () => {
+      cancelAnimationFrame(capeFrame);
+      capeRef.current?.dispose();
+      capeRef.current = null;
       resize.disconnect();
       viewer.dispose();
       canvas.remove();
@@ -173,20 +197,20 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
     const viewer = viewerRef.current;
     if (!viewer || !skin) return;
     void viewer.loadSkin(skin, { model: model === "slim" ? "slim" : "default" }).then(() => {
-      if (viewerRef.current === viewer) viewer.render();
+      if (viewerRef.current !== viewer) return;
+      viewer.render();
+      setReady(true);
     });
   }, [skin, model, use3d]);
 
   useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    const done = () => viewerRef.current === viewer && viewer.render();
-    if (cape) void viewer.loadCape(cape).then(done);
-    else {
-      viewer.resetCape();
-      done();
-    }
+    capeRef.current?.show(cape);
   }, [cape, use3d]);
+
+  // An animated cape plays while Home is on screen with motion on; otherwise it holds its frame.
+  useEffect(() => {
+    capeRef.current?.setPlaying(active && motion !== "static");
+  }, [active, motion, use3d]);
 
   // Render loop. Pointer events only record coordinates; aiming happens once per rendered frame.
   useEffect(() => {
@@ -341,13 +365,13 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
 
   useEffect(() => {
     if (!greeting) return;
-    const t = window.setTimeout(() => setGreeting(false), WAVE_TOTAL * 1000 + 150);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setGreeting(false), WAVE_TOTAL * 1000 + 150);
+    return () => window.clearTimeout(timer);
   }, [greeting]);
 
   // One greeting per hover, never restarted mid-wave, and a short cooldown before the next one.
   const greet = () => {
-    if (hovering.current) return;
+    if (hovering.current || !ready) return;
     hovering.current = true;
     const state = rig.current;
     if (greeting || state.waveAt !== null || performance.now() < state.readyAt) return;
@@ -361,13 +385,13 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
   };
 
   return (
-    <div className={`skin-stage ${use3d ? "is-3d" : "is-static"}`}>
+    <div className={`skin-stage ${use3d ? "is-3d" : "is-static"} ${ready ? "is-ready" : ""}`}>
       <div className="skin-hit">
         <span
           className="skin-target"
           tabIndex={0}
           role="img"
-          aria-label={`${username}'s Minecraft character`}
+          aria-label={t("home.character.label", { name: username })}
           onPointerEnter={greet}
           onPointerLeave={() => (hovering.current = false)}
           onFocus={greet}
@@ -375,12 +399,12 @@ export default function SkinStage({ skin, cape, model, username, motion, enabled
         />
         <span className="nameplate">{username}</span>
         <span className={`skin-hi ${greeting ? "is-on" : ""}`} aria-hidden>
-          Hi!
+          {t("home.character.greeting")}
         </span>
         {use3d ? (
           <div ref={hostRef} className="skin-host" />
         ) : (
-          <div className="skin-fallback">{flat ? <img src={flat} alt="" /> : <span>{username.slice(0, 1)}</span>}</div>
+          <div className="skin-fallback">{flat && <img src={flat} alt="" onLoad={() => setReady(true)} />}</div>
         )}
       </div>
       <span className="skin-shadow" aria-hidden />

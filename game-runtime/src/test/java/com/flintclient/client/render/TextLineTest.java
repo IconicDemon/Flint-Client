@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.platform.TextEngine;
 import com.mojang.blaze3d.font.GlyphInfo;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GlyphSource;
@@ -75,22 +76,58 @@ class TextLineTest {
 	}
 
 	@Test
+	void aFractionalScaleDrawsTheFaceRasterisedAtItsSizeInPixels() {
+		FontFace exact = TextLine.atScale(FlintFonts.LABEL, 2.75F);
+		assertEquals(FlintFonts.LABEL.size * 2.75F, exact.size(), 0.05F, "the same typeface at its size in pixels");
+		assertEquals(1, exact.drawScale(1), "drawn one to one: as crisp as at a whole scale");
+		assertEquals(FlintFonts.LABEL.capHeightPx(1) * 2.75F, TextLine.capHeightPx(FlintFonts.LABEL, 2.75F), 0.1F);
+		assertEquals(FlintFonts.LABEL.capHeightPx(3), TextLine.capHeightPx(FlintFonts.LABEL, 3.0F), 0.001F, "a whole scale as before");
+		assertTrue(TextLine.whole(3.0F) && !TextLine.whole(2.25F));
+
+		CountingFont glyphs = new CountingFont();
+		TextEngine engine = TextEngine.of(new Font(glyphs));
+		TextLine line = new TextLine(FlintFonts.LABEL, "Flint");
+		line.prepare(2.25F, engine);
+		assertEquals(25, line.widthPx(), "5 glyphs of 5 pixels: the fake font's advance at one pixel per unit");
+		line.prepare(2, engine);
+		assertEquals(50, line.widthPx(), "a whole scale still multiplies");
+	}
+
+	@Test
+	void textTheFaceCantShowIsDrawnInMinecraftsFontAtTheFacesSizeNotTheGuiScale() {
+		CountingFont glyphs = new CountingFont();
+		TextEngine engine = TextEngine.of(new Font(glyphs));
+		// The 0.9.1 notes' language list: Cyrillic, Devanagari and CJK aren't in Nunito Sans.
+		TextLine line = new TextLine(FlintFonts.LABEL, "Русский, हिन्दी, 日本語");
+		line.prepare(3.6F, engine);
+		assertTrue(line.fallback());
+		float faceCap = TextLine.capHeightPx(FlintFonts.LABEL, 3.6F);
+		assertEquals(2, TextLine.fallbackScale(faceCap), "LABEL's capitals are 11.7 px at 3.6: Minecraft's at 2x are 14 px, at 4x (the GUI scale) 28");
+		assertEquals(14.0F, line.capHeightPx(3.6F), 0.001F);
+		assertTrue(Math.abs(line.capHeightPx(3.6F) - faceCap) < TextLine.MC_CAP_UNITS / 2 + 0.001F, "within half a step of the face");
+		assertEquals(1, TextLine.fallbackScale(2.0F), "never below one pixel per font pixel");
+		TextLine latin = new TextLine(FlintFonts.LABEL, "English, Español");
+		latin.prepare(3.6F, engine);
+		assertFalse(latin.fallback());
+	}
+
+	@Test
 	void measuringThenDrawingAtTheFittedWidthBuildsTheCopyOnce() {
 		CountingFont glyphs = new CountingFont();
-		Font font = new Font(glyphs);
+		TextEngine engine = TextEngine.of(new Font(glyphs));
 		TextLine line = new TextLine(FlintFonts.LABEL, "Reset to defaults");
 		// 17 characters, 5 units each, at 2 pixels per unit: 170 px, so 100 px needs an ellipsis.
-		TextLine fitted = line.fitted(2, font, 100);
+		TextLine fitted = line.fitted(2, engine, 100);
 		assertTrue(fitted.widthPx() <= 100);
 		assertTrue(fitted.text().endsWith("…"));
 		int afterBuild = glyphs.lookups;
-		assertSame(fitted, line.fitted(2, font, 100), "the same width");
-		assertSame(fitted, line.fitted(2, font, fitted.widthPx()), "the width the first call returned (a button draws at it)");
+		assertSame(fitted, line.fitted(2, engine, 100), "the same width");
+		assertSame(fitted, line.fitted(2, engine, fitted.widthPx()), "the width the first call returned (a button draws at it)");
 		assertEquals(afterBuild, glyphs.lookups, "no measuring after the first build");
 		String shown = fitted.text();
-		line.fitted(2, font, fitted.widthPx() - 1);
+		line.fitted(2, engine, fitted.widthPx() - 1);
 		assertTrue(glyphs.lookups > afterBuild, "a narrower width is a new copy");
 		assertTrue(fitted.text().length() < shown.length());
-		assertSame(line, line.fitted(2, font, 170), "a line that fits is drawn whole");
+		assertSame(line, line.fitted(2, engine, 170), "a line that fits is drawn whole");
 	}
 }

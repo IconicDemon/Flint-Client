@@ -26,6 +26,7 @@ abstract class ConnectionMixin {
 		at = @At("RETURN"))
 	private static ChannelFuture flint$socketOpening(ChannelFuture future, InetSocketAddress address, EventLoopGroupHolder group, Connection connection) {
 		NetworkHooks.socketOpening(connection, future);
+		com.flintclient.client.network.platform.NetworkTuning.socketOpening(future);
 		return future;
 	}
 

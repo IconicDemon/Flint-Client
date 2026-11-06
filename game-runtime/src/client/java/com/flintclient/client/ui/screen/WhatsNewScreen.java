@@ -50,12 +50,14 @@ public final class WhatsNewScreen extends FlintPageScreen {
 			boolean first = true;
 			for (TextLine text : point.lines(c, w - indent)) {
 				if (first) {
-					int capCenter = y - Math.round(text.capHeightPx(c.scale()) / 2.0F);
+					int capCenter = y - Math.round(text.capHeightPx(c.unitScale()) / 2.0F);
 					c.roundRect(x + c.px(1), capCenter - bullet / 2, bullet, bullet, bullet / 2, Palette.ACCENT);
 					first = false;
 				}
 				c.text(text, x + indent, y, Palette.TEXT_DIM);
-				y += line;
+				// A line in Minecraft's font (a language name in its own script) can stand taller than the face's: it never
+				// runs into the next.
+				y += text.fallback() ? Math.max(line, Math.round(text.capHeightPx(c.unitScale()) * 1.6F)) : line;
 			}
 			y += c.px(3);
 		}

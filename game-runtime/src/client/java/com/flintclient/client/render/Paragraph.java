@@ -17,7 +17,7 @@ public final class Paragraph {
 
 	/** Lines that fit {@code maxPx}; words longer than the width are left whole on their own line. */
 	public List<TextLine> lines(Canvas c, int maxPx) {
-		int key = maxPx * 31 + c.scale();
+		int key = maxPx * 31 + Float.floatToIntBits(c.unitScale());
 		if (key != wrappedFor) {
 			wrappedFor = key;
 			lines.clear();
@@ -44,6 +44,6 @@ public final class Paragraph {
 
 	/** Line height in pixels (1.5× the em). */
 	public int lineHeightPx(Canvas c) {
-		return Math.round(role.size * 1.5F * c.scale());
+		return Math.round(role.size * 1.5F * c.unitScale());
 	}
 }

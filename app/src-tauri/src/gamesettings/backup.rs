@@ -67,9 +67,10 @@ pub struct BackupInfo {
     order: u64,
 }
 
-/// The only files Auto Sync may back up, write or put back, relative to the profile folder: options.txt,
-/// files in `config/` (not Flint's per-launch performance config, nor anything sensitive by name outside
-/// Flint's own folder), and packs directly in `resourcepacks/` or `shaderpacks/`.
+/// The only files Auto Sync may back up, write or put back, relative to the profile folder: options.txt, the
+/// game's server list, saved hotbars and command history, files in `config/` (not Flint's per-launch
+/// performance config, nor anything sensitive by name outside Flint's own folder), and packs directly in
+/// `resourcepacks/` or `shaderpacks/`. Never worlds, accounts or anything else in the profile.
 pub fn allowed_path(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
     let plain = |p: &&str| !p.is_empty() && *p != "." && *p != ".." && !p.starts_with('.') && !p.contains(['\\', '\0', ':']);
@@ -77,7 +78,7 @@ pub fn allowed_path(rel: &str) -> bool {
         return false;
     }
     match parts.as_slice() {
-        ["options.txt"] => true,
+        ["options.txt" | "servers.dat" | "hotbar.nbt" | "command_history.txt"] => true,
         ["resourcepacks" | "shaderpacks", name] => packs::safe_name(name),
         ["config", "flintclient.json"] => true,
         ["config", "flintclient", ..] => parts.len() > 2,
@@ -349,7 +350,11 @@ mod tests {
         assert!(!allowed_path("config/flint-performance.json"));
         assert!(!allowed_path("config/someauth/token.json"));
         assert!(!allowed_path("saves/World/level.dat"));
-        assert!(!allowed_path("servers.dat"));
+        // The game's lists Settings → Syncing shares, at the top of the profile only; never Minecraft's own backup
+        // of the server list or its account files.
+        assert!(allowed_path("servers.dat") && allowed_path("hotbar.nbt") && allowed_path("command_history.txt"));
+        assert!(!allowed_path("saves/World/servers.dat") && !allowed_path("resourcepacks/servers.dat/x"));
+        assert!(!allowed_path("servers.dat_old") && !allowed_path("launcher_accounts.json") && !allowed_path("usercache.json"));
         assert!(!allowed_path("mods/sodium.jar"));
     }
 

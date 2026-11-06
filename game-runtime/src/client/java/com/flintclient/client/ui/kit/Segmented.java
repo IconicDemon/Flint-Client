@@ -1,11 +1,11 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Icon;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -184,14 +184,14 @@ public class Segmented extends Node {
 	}
 
 	@Override
-	public boolean keyDown(KeyEvent event) {
+	public boolean keyDown(KeyInput event) {
 		if (event.isLeft()) {
 			step(-1);
 		} else if (event.isRight()) {
 			step(1);
-		} else if (event.key() == InputConstants.KEY_HOME) {
+		} else if (event.key() == Keys.HOME) {
 			choose(0);
-		} else if (event.key() == InputConstants.KEY_END) {
+		} else if (event.key() == Keys.END) {
 			choose(labels.length - 1);
 		} else if (event.isSelection() && cycling()) {
 			step(1);

@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.flintclient.client.thirdparty.mixin",
+  "plugin": "com.flintclient.client.thirdparty.ThirdPartyMixinPlugin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "WalksyUpdateNoticeMixin",
+    "WalksyToastPlacementMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

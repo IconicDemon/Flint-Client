@@ -20,6 +20,7 @@ import c1_21_11 from "../assets/wallpapers/cards/1_21_11.jpg";
 import c26_1_1 from "../assets/wallpapers/cards/26_1_1.jpg";
 import c26_2 from "../assets/wallpapers/cards/26_2.jpg";
 import c26_3 from "../assets/wallpapers/cards/26_3.jpg";
+import { t } from "./i18n";
 
 export type VersionMeta = {
   id: string;
@@ -49,8 +50,11 @@ export const VERSIONS: VersionMeta[] = [
     wallpaper: w1_8_9,
     thumb: t1_8_9,
     card: c1_8_9,
-    fabric: false,
-    note: "Official Fabric doesn't support 1.8.9, so it runs vanilla.",
+    fabric: true,
+    // Read when shown, so it's in the interface language of that moment.
+    get note() {
+      return t("versions.notes.ornitheFabric");
+    },
   },
 ];
 
@@ -76,7 +80,7 @@ export const loaderLabel = (loader: string) => (loader === "fabric" ? "Fabric" :
  */
 export function platformBlock(id: string, info: { platform: string; arch: string }): string | null {
   if (info.platform === "macos" && info.arch === "aarch64" && versionMeta(id).java === 8) {
-    return `Minecraft ${id} isn't supported on Apple silicon Macs yet.`;
+    return t("versions.appleSilicon", { version: id });
   }
   return null;
 }

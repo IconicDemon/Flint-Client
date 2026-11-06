@@ -1,7 +1,7 @@
 package com.flintclient.client.mixin;
 
 import com.flintclient.client.FlintClient;
-import com.flintclient.client.render.FlintFonts;
+import com.flintclient.client.platform.FontSets;
 import com.flintclient.client.render.FontPreload;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.mojang.blaze3d.font.GlyphProvider;
@@ -60,7 +60,7 @@ abstract class FontManagerMixin {
 		if (found != missingFontSet || !FlintClient.MOD_ID.equals(id.getNamespace()) || fontSets.containsKey(id)) {
 			return found;
 		}
-		FlintFonts.Spec spec = FlintFonts.spec(id);
+		FontSets.Spec spec = FontSets.spec(id);
 		if (spec == null) {
 			return found;
 		}
@@ -72,7 +72,14 @@ abstract class FontManagerMixin {
 				provider = spec.load(Minecraft.getInstance().getResourceManager());
 			}
 			providersToClose.add(provider);
-			FontSet set = createFontSet(id, List.of(new GlyphProvider.Conditional(provider, FontOption.Filter.ALWAYS_PASS)), Set.of());
+			List<GlyphProvider.Conditional> providers = new java.util.ArrayList<>(2);
+			providers.add(new GlyphProvider.Conditional(provider, FontOption.Filter.ALWAYS_PASS));
+			GlyphProvider fallback = spec.loadFallback(Minecraft.getInstance().getResourceManager());
+			if (fallback != null) {
+				providersToClose.add(fallback);
+				providers.add(new GlyphProvider.Conditional(fallback, FontOption.Filter.ALWAYS_PASS));
+			}
+			FontSet set = createFontSet(id, providers, Set.of());
 			fontSets.put(id, set);
 			if (timing) {
 				FontPreload.logCreated(id, System.nanoTime() - start);

@@ -400,6 +400,18 @@
   color: var(--text);
 }
 
+.seg-count {
+  margin-left: 7px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.segmented button[aria-checked="true"] .seg-count {
+  color: var(--text-2);
+}
+
 .segmented button.is-active,
 .seg-ind {
   background: var(--surface-4);
@@ -495,6 +507,90 @@
 
 .slider.is-disabled {
   opacity: 0.45;
+}
+
+/* Memory: the slider with its value as a field to type a size in (ui/MemorySlider.tsx). */
+.memory-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.memory-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.memory-slider-row .slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-input {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  cursor: text;
+  transition: box-shadow var(--t-micro) var(--ease);
+}
+
+.memory-input:hover {
+  box-shadow: inset 0 0 0 1px var(--line-focus);
+}
+
+.memory-input:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 0 3px var(--accent-soft);
+}
+
+.memory-input.is-invalid {
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--danger-rgb), 0.6),
+    0 0 0 3px var(--danger-soft);
+}
+
+.memory-input input {
+  width: 5ch;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--fg);
+}
+
+.memory-input input:focus-visible {
+  box-shadow: none;
+}
+
+.memory-input-unit {
+  font-size: 12.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.memory-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.memory-hint.is-error {
+  color: var(--danger);
 }
 
 /* Progress */
@@ -719,6 +815,11 @@
     inset 0 0 0 1px var(--line-strong),
     var(--shadow-3);
   animation: pop-in-bottom var(--t-micro) var(--ease-out);
+}
+
+/* A popover opened from a dialog (its portal comes after the dialog's) sits above it. */
+.modal-backdrop ~ .popover {
+  z-index: 75;
 }
 
 /* Each popover grows out of its trigger: data-side is the side of the trigger it opened on. */
@@ -1007,6 +1108,10 @@
   transform: translateY(-50%);
 }
 
+.tooltip-left {
+  transform: translate(-100%, -50%);
+}
+
 /* Toasts */
 .toasts {
   position: fixed;
@@ -1063,6 +1168,115 @@
   font-size: 13px;
   white-space: pre-line;
   word-break: break-word;
+}
+
+/* Callout (controls.tsx): a note inside a page or dialog; the tone tints the icon and the edge. */
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.callout > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+
+.callout-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.callout-body strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.callout-action {
+  flex: none;
+  align-self: center;
+}
+
+.callout-warn {
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+}
+
+.callout-warn > svg {
+  color: var(--accent-text);
+}
+
+.callout-danger {
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.3);
+}
+
+.callout-danger > svg {
+  color: var(--danger);
+}
+
+/* A toast's one follow-up, as a quiet text button under its message. */
+.toast-action {
+  margin: 8px 0 0 -6px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color var(--t-micro) var(--ease);
+}
+
+.toast-action:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+/* A toast with a picture (a friend's head) and two actions side by side (Accept and Decline). */
+
+.toast-media {
+  display: grid;
+  flex: none;
+  margin-top: 1px;
+  --fdot-ring: var(--surface-3);
+}
+
+.toast-actions {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 0 -6px;
+}
+
+.toast-actions .toast-action {
+  margin: 0;
+}
+
+.toast-actions .toast-action:not(.is-primary) {
+  color: var(--text-2);
+}
+
+.toast-actions .toast-action:not(.is-primary):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.toast-action.is-primary {
+  background: rgba(var(--accent-rgb), 0.14);
+  padding: 0 10px;
+}
+
+.toast-action.is-primary:hover {
+  background: rgba(var(--accent-rgb), 0.22);
 }
 
 /* Empty state */
@@ -1350,4 +1564,26 @@
 [data-font-preview="minecraft"] :is(.font-aa, .font-line) {
   font-weight: 400;
   font-synthesis: none;
+}
+
+/* Discord's own colour, only on a Discord button or mark (Connect Discord). */
+.btn.btn-discord {
+  background: #5865f2;
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.btn.btn-discord:hover:not(:disabled) {
+  background: #4752c4;
+}
+
+.btn.btn-discord:active:not(:disabled) {
+  background: #3c45a5;
+}
+
+/* A quieter Discord action (an invite): the usual button with Discord's mark in its colour. */
+.btn.btn-discord-quiet > svg:first-child {
+  color: #7983f5;
 }

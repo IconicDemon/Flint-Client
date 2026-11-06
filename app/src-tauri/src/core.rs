@@ -15,9 +15,23 @@ pub const USER_AGENT: &str = concat!(
 
 pub struct Paths {
     pub root: PathBuf,
+    /// Each profile's folder name under `profiles/`, by id (profilefolder.rs); a profile not listed is in a folder
+    /// named by its id.
+    folders: std::sync::RwLock<HashMap<String, String>>,
 }
 
 impl Paths {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root, folders: Default::default() }
+    }
+    pub fn set_folder(&self, id: &str, folder: &str) {
+        self.folders.write().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), folder.to_owned());
+    }
+    pub fn set_folders(&self, profiles: &[crate::data::Profile]) {
+        let mut folders = self.folders.write().unwrap_or_else(|e| e.into_inner());
+        folders.clear();
+        folders.extend(profiles.iter().filter_map(|p| Some((p.id.clone(), p.folder.clone()?))));
+    }
     pub fn settings(&self) -> PathBuf {
         self.root.join("settings.json")
     }
@@ -31,7 +45,8 @@ impl Paths {
         self.root.join("profiles.json")
     }
     pub fn profile_dir(&self, id: &str) -> PathBuf {
-        self.root.join("profiles").join(id)
+        let folders = self.folders.read().unwrap_or_else(|e| e.into_inner());
+        self.root.join("profiles").join(folders.get(id).map_or(id, String::as_str))
     }
     pub fn game(&self) -> PathBuf {
         self.root.join("minecraft")
@@ -119,6 +134,12 @@ pub struct AppState {
     pub ai_cancel: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     pub modrinth: crate::modrinth::Modrinth,
     pub jobs: crate::jobs::Jobs,
+    /// The channel to the games Flint started (their account card).
+    pub game_link: crate::gamelink::GameLink,
+    /// The Flint Store: its address and this run's Store sessions (store/mod.rs).
+    pub store: crate::store::StoreState,
+    /// Friends: its server, this run's session and the last state (social.rs).
+    pub social: crate::social::Social,
 }
 
 pub type CmdResult<T> = Result<T, String>;
@@ -234,6 +255,12 @@ impl ProcessScan {
         {
             Self { commands: Ok(Vec::new()) }
         }
+    }
+
+    /// Every process's line ("pid command"), or why the list couldn't be read.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn lines(&self) -> Result<&[String], String> {
+        self.commands.as_deref().map_err(String::clone)
     }
 
     #[cfg(test)]
@@ -407,10 +434,11 @@ impl AppState {
     /// A real application state rooted in a throwaway directory, for tests.
     pub fn for_tests(root: PathBuf) -> Self {
         let (http, stream_http) = build_clients();
+        let social = crate::social::Social::new(http.clone(), None);
         Self {
             http,
             stream_http,
-            paths: Paths { root },
+            paths: Paths::new(root),
             qa: false,
             force_onboarding: false,
             keyring_service: "com.flintclient.desktop.unit-test".into(),
@@ -428,6 +456,9 @@ impl AppState {
             ai_cancel: Mutex::new(HashMap::new()),
             modrinth: crate::modrinth::Modrinth::new(false),
             jobs: crate::jobs::Jobs::default(),
+            game_link: Default::default(),
+            store: crate::store::StoreState::new(crate::store::Endpoints::production()),
+            social,
         }
     }
 }

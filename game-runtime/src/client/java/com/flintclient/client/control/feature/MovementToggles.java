@@ -13,23 +13,31 @@ public final class MovementToggles {
 	private boolean sprintDown;
 	private boolean sneakDown;
 
-	/**
-	 * One tick: the physical keys and whether each toggle is on. A press edge flips the latch; when a toggle is off its
-	 * latch clears.
-	 */
+	/** {@link #tick(boolean, boolean, boolean, boolean, boolean)} while playing. */
 	public void tick(boolean sprintKey, boolean sneakKey, boolean toggleSprint, boolean toggleSneak) {
-		sprintDown = sprintKey;
-		sneakDown = sneakKey;
+		tick(sprintKey, sneakKey, toggleSprint, toggleSneak, true);
+	}
+
+	/**
+	 * One tick: the physical keys, whether each toggle is on, and whether the player is playing (in a world, no screen
+	 * open). A press edge flips the latch, but only a press that starts while playing: a key held while a screen was open
+	 * (Shift for shift-clicks in the inventory, Ctrl for Ctrl+Q) and still held as it closes is not a tap, so it never
+	 * latches sprint or sneak on (or off) by itself. When a toggle is off its latch clears.
+	 */
+	public void tick(boolean sprintKey, boolean sneakKey, boolean toggleSprint, boolean toggleSneak, boolean playing) {
+		sprintDown = playing && sprintKey;
+		sneakDown = playing && sneakKey;
 		if (!toggleSprint) {
 			sprintLatched = false;
-		} else if (sprintKey && !sprintWasDown) {
+		} else if (playing && sprintKey && !sprintWasDown) {
 			sprintLatched = !sprintLatched;
 		}
 		if (!toggleSneak) {
 			sneakLatched = false;
-		} else if (sneakKey && !sneakWasDown) {
+		} else if (playing && sneakKey && !sneakWasDown) {
 			sneakLatched = !sneakLatched;
 		}
+		// The key's own state, screen or not: an edge needs it let go first.
 		sprintWasDown = sprintKey;
 		sneakWasDown = sneakKey;
 	}

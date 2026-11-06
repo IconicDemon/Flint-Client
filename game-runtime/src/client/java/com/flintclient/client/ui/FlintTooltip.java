@@ -1,5 +1,6 @@
 package com.flintclient.client.ui;
 
+import com.flintclient.client.platform.Frame;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
@@ -35,7 +36,7 @@ public final class FlintTooltip {
 			return;
 		}
 		graphics.nextStratum();
-		Canvas c = Canvas.begin(graphics);
+		Canvas c = Canvas.begin(Frame.of(graphics));
 		try {
 			int padX = c.px(3.4F);
 			int padY = c.px(2.6F);
@@ -65,7 +66,7 @@ public final class FlintTooltip {
 			y = Math.clamp(y, gap, Math.max(gap, sh - h - gap));
 			int border = Math.max(1, Math.round(c.scale() / 4.0F));
 			c.panel(x, y, w, h, c.px(2.2F), border, Palette.BORDER_HOVER, 0xF2181A1F);
-			int baseline = y + padY + Math.round(lines.getFirst().capHeightPx(c.scale())) + c.px(0.6F);
+			int baseline = y + padY + Math.round(lines.getFirst().capHeightPx(c.unitScale())) + c.px(0.6F);
 			for (int i = 0; i < lines.size(); i++) {
 				c.text(lines.get(i), x + padX, baseline, i == 0 ? Palette.TEXT : Palette.MUTED);
 				baseline += lineH;

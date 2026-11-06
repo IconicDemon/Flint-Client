@@ -6,6 +6,7 @@
  * project: slugs are established Modrinth projects, and Flint's resolver checks each one against
  * the profile's Minecraft version and loader (dropping any without a compatible build).
  */
+import { t, type MessageKey } from "./i18n.ts";
 
 /** The goal categories Flint AI answers with (the gateway contract); the smart search uses them too. */
 export const CATEGORIES = ["performance", "lowEnd", "pvp", "hud", "inventory", "qol", "visual", "shaders", "minimap", "building", "replay", "survival", "exploration", "ui", "other"] as const;
@@ -13,7 +14,10 @@ export type Category = (typeof CATEGORIES)[number];
 
 export type Goal = {
   id: string;
+  /** The goal's English name: the planner matches and groups by it, so it is never translated. */
   label: string;
+  /** The name players read (`label` in the interface language). */
+  labelKey: MessageKey;
   category: Category;
   pattern: RegExp;
   /** Established Modrinth project slugs. */
@@ -25,30 +29,30 @@ export type Goal = {
 };
 
 export const GOALS: Goal[] = [
-  { id: "performance", label: "Performance", category: "performance", pattern: /\b(fps|frames?|frame ?rate|performance|lag\w*|stutter\w*|smooth\w*|faster|optimi[sz]\w*|boost\w*)\b/i, projects: ["sodium", "lithium", "ferrite-core", "immediatelyfast", "entityculling"] },
-  { id: "lowEnd", label: "Low-end PC", category: "lowEnd", pattern: /\b([1-6](\.\d)?\s?gb|low[- ]?(end|ram|spec\w*|memory)|old (laptop|pc|computer|mac)|(?<!gaming )laptop|potato|lightweight|light ?weight|weak (pc|computer))\b/i, projects: ["ferrite-core", "lithium", "sodium", "dynamic-fps", "immediatelyfast"] },
-  { id: "pvp", label: "PvP", category: "pvp", pattern: /\b(pvp|combat|duels?|bed ?wars|sky ?wars|practice|hypixel|fight\w*)\b/i, projects: ["zoomify"], searches: ["toggle sprint", "keystrokes", "armor hud", "crosshair"] },
-  { id: "hud", label: "HUD", category: "hud", pattern: /\b(hud|armou?r (hud|status|durability)|toggle ?sprint|keystrokes|cps|status effects?|potion (timers?|effects?)|coordinates)\b/i, searches: ["armor hud", "toggle sprint", "status effect timer"] },
-  { id: "minimap", label: "Minimap", category: "minimap", pattern: /\b(mini ?-?maps?)\b|\bmap\b/i, projects: ["xaeros-minimap"] },
-  { id: "worldmap", label: "World map", category: "minimap", pattern: /\b(world ?map|waypoints?)\b/i, projects: ["xaeros-world-map"] },
+  { id: "performance", label: "Performance", labelKey: "ai.goal.performance", category: "performance", pattern: /\b(fps|frames?|frame ?rate|performance|lag\w*|stutter\w*|smooth\w*|faster|optimi[sz]\w*|boost\w*)\b/i, projects: ["sodium", "lithium", "ferrite-core", "immediatelyfast", "entityculling"] },
+  { id: "lowEnd", label: "Low-end PC", labelKey: "ai.goal.lowEnd", category: "lowEnd", pattern: /\b([1-6](\.\d)?\s?gb|low[- ]?(end|ram|spec\w*|memory)|old (laptop|pc|computer|mac)|(?<!gaming )laptop|potato|lightweight|light ?weight|weak (pc|computer))\b/i, projects: ["ferrite-core", "lithium", "sodium", "dynamic-fps", "immediatelyfast"] },
+  { id: "pvp", label: "PvP", labelKey: "ai.goal.pvp", category: "pvp", pattern: /\b(pvp|combat|duels?|bed ?wars|sky ?wars|practice|hypixel|fight\w*)\b/i, projects: ["zoomify"], searches: ["toggle sprint", "keystrokes", "armor hud", "crosshair"] },
+  { id: "hud", label: "HUD", labelKey: "ai.goal.hud", category: "hud", pattern: /\b(hud|armou?r (hud|status|durability)|toggle ?sprint|keystrokes|cps|status effects?|potion (timers?|effects?)|coordinates)\b/i, searches: ["armor hud", "toggle sprint", "status effect timer"] },
+  { id: "minimap", label: "Minimap", labelKey: "ai.goal.minimap", category: "minimap", pattern: /\b(mini ?-?maps?)\b|\bmap\b/i, projects: ["xaeros-minimap"] },
+  { id: "worldmap", label: "World map", labelKey: "ai.goal.worldMap", category: "minimap", pattern: /\b(world ?map|waypoints?)\b/i, projects: ["xaeros-world-map"] },
   // Shader packs, light on FPS first; Flint adds the Iris loader (and Sodium with it) as a dependency.
-  { id: "shaders", label: "Shaders", category: "shaders", kind: "shader", pattern: /\bshaders?\b|\bshader ?packs?\b/i, projects: ["complementary-reimagined", "makeup-ultra-fast-shaders", "bsl-shaders"] },
-  { id: "visual", label: "Visuals", category: "visual", pattern: /\b(visuals?|eye ?candy|graphics|connected textures?|ctm)\b/i, projects: ["continuity"], searches: ["better clouds"] },
-  { id: "inventory", label: "Inventory", category: "inventory", pattern: /\b(inventory|inventories|sort(ing)?|item scroll\w*|tweaks?)\b/i, projects: ["mouse-tweaks"], searches: ["inventory sorting"] },
-  { id: "qol", label: "Quality of life", category: "qol", pattern: /\b(quality[- ]of[- ]life|qol|convenien\w*|feels? better)\b/i, projects: ["appleskin", "jade", "mouse-tweaks"] },
-  { id: "survival", label: "Vanilla survival", category: "survival", pattern: /\b(vanilla\w*|survival)\b/i, projects: ["sodium", "lithium", "ferrite-core", "appleskin", "jade"] },
-  { id: "food", label: "Food & health", category: "qol", pattern: /\b(food|saturation|hunger|health)\b/i, projects: ["appleskin"] },
-  { id: "zoom", label: "Zoom", category: "hud", pattern: /\bzoom\w*/i, projects: ["zoomify"] },
-  { id: "lights", label: "Dynamic lights", category: "visual", pattern: /\b(dynamic light\w*|torch light\w*|hand ?held light)\b/i, projects: ["lambdynamiclights"] },
-  { id: "building", label: "Building", category: "building", pattern: /\b(build\w*|creative|world ?edit|schematics?|litematica)\b/i, projects: ["worldedit", "litematica"], searches: ["building tools"] },
-  { id: "replay", label: "Replay & cinematics", category: "replay", pattern: /\b(replays?|record\w*|cinematic\w*|camera|videos?|youtube|content creat\w*|screenshots?)\b/i, projects: ["replaymod"], searches: ["freecam", "cinematic camera"] },
-  { id: "recipes", label: "Recipes", category: "qol", pattern: /\b(recipes?|item list|jei|rei|emi)\b/i, projects: ["emi"] },
-  { id: "voice", label: "Voice chat", category: "other", pattern: /\b(voice|proximity)\b/i, projects: ["simple-voice-chat"] },
-  { id: "exploration", label: "Exploration", category: "exploration", pattern: /\b(explor\w*|adventur\w*|structures?|biomes?|compass\w*)\b/i, projects: ["xaeros-world-map", "natures-compass", "explorers-compass"] },
-  { id: "lowFire", label: "Lower fire", category: "visual", kind: "resourcepack", pattern: /\b(low(er)? fire|fire (overlay|on screen)|smaller fire)\b/i, searches: ["low fire"] },
-  { id: "smallShield", label: "Smaller shield", category: "visual", kind: "resourcepack", pattern: /\b(small(er)? shield|low(er)? shield|shield (size|smaller|lower))\b/i, searches: ["low shield"] },
-  { id: "pumpkin", label: "No pumpkin blur", category: "visual", kind: "resourcepack", pattern: /\bpumpkin (blur|overlay|view|mask)\b/i, searches: ["pumpkin overlay"] },
-  { id: "ui", label: "Interface", category: "ui", pattern: /\b(ui|interface|menus?|gui|f3|debug screen|key ?binds?)\b/i, projects: ["modmenu", "betterf3", "controlling"] },
+  { id: "shaders", label: "Shaders", labelKey: "ai.goal.shaders", category: "shaders", kind: "shader", pattern: /\bshaders?\b|\bshader ?packs?\b/i, projects: ["complementary-reimagined", "makeup-ultra-fast-shaders", "bsl-shaders"] },
+  { id: "visual", label: "Visuals", labelKey: "ai.goal.visuals", category: "visual", pattern: /\b(visuals?|eye ?candy|graphics|connected textures?|ctm)\b/i, projects: ["continuity"], searches: ["better clouds"] },
+  { id: "inventory", label: "Inventory", labelKey: "ai.goal.inventory", category: "inventory", pattern: /\b(inventory|inventories|sort(ing)?|item scroll\w*|tweaks?)\b/i, projects: ["mouse-tweaks"], searches: ["inventory sorting"] },
+  { id: "qol", label: "Quality of life", labelKey: "ai.goal.qualityOfLife", category: "qol", pattern: /\b(quality[- ]of[- ]life|qol|convenien\w*|feels? better)\b/i, projects: ["appleskin", "jade", "mouse-tweaks"] },
+  { id: "survival", label: "Vanilla survival", labelKey: "ai.goal.survival", category: "survival", pattern: /\b(vanilla\w*|survival)\b/i, projects: ["sodium", "lithium", "ferrite-core", "appleskin", "jade"] },
+  { id: "food", label: "Food & health", labelKey: "ai.goal.food", category: "qol", pattern: /\b(food|saturation|hunger|health)\b/i, projects: ["appleskin"] },
+  { id: "zoom", label: "Zoom", labelKey: "ai.goal.zoom", category: "hud", pattern: /\bzoom\w*/i, projects: ["zoomify"] },
+  { id: "lights", label: "Dynamic lights", labelKey: "ai.goal.dynamicLights", category: "visual", pattern: /\b(dynamic light\w*|torch light\w*|hand ?held light)\b/i, projects: ["lambdynamiclights"] },
+  { id: "building", label: "Building", labelKey: "ai.goal.building", category: "building", pattern: /\b(build\w*|creative|world ?edit|schematics?|litematica)\b/i, projects: ["worldedit", "litematica"], searches: ["building tools"] },
+  { id: "replay", label: "Replay & cinematics", labelKey: "ai.goal.replay", category: "replay", pattern: /\b(replays?|record\w*|cinematic\w*|camera|videos?|youtube|content creat\w*|screenshots?)\b/i, projects: ["replaymod"], searches: ["freecam", "cinematic camera"] },
+  { id: "recipes", label: "Recipes", labelKey: "ai.goal.recipes", category: "qol", pattern: /\b(recipes?|item list|jei|rei|emi)\b/i, projects: ["emi"] },
+  { id: "voice", label: "Voice chat", labelKey: "ai.goal.voiceChat", category: "other", pattern: /\b(voice|proximity)\b/i, projects: ["simple-voice-chat"] },
+  { id: "exploration", label: "Exploration", labelKey: "ai.goal.exploration", category: "exploration", pattern: /\b(explor\w*|adventur\w*|structures?|biomes?|compass\w*)\b/i, projects: ["xaeros-world-map", "natures-compass", "explorers-compass"] },
+  { id: "lowFire", label: "Lower fire", labelKey: "ai.goal.lowerFire", category: "visual", kind: "resourcepack", pattern: /\b(low(er)? fire|fire (overlay|on screen)|smaller fire)\b/i, searches: ["low fire"] },
+  { id: "smallShield", label: "Smaller shield", labelKey: "ai.goal.smallerShield", category: "visual", kind: "resourcepack", pattern: /\b(small(er)? shield|low(er)? shield|shield (size|smaller|lower))\b/i, searches: ["low shield"] },
+  { id: "pumpkin", label: "No pumpkin blur", labelKey: "ai.goal.noPumpkinBlur", category: "visual", kind: "resourcepack", pattern: /\bpumpkin (blur|overlay|view|mask)\b/i, searches: ["pumpkin overlay"] },
+  { id: "ui", label: "Interface", labelKey: "ai.goal.interface", category: "ui", pattern: /\b(ui|interface|menus?|gui|f3|debug screen|key ?binds?)\b/i, projects: ["modmenu", "betterf3", "controlling"] },
 ];
 
 /** Words that describe the request rather than name something to search for. */
@@ -143,17 +147,19 @@ export function understand(request: string): { goals: Goal[]; requests: GoalRequ
   // Goals and leftovers come only from what's wanted; "no shaders" doesn't ask for shaders.
   const { wanted: prompt, exclude } = exclusions(request);
   const goals = GOALS.filter((g) => g.pattern.test(prompt));
-  const picked = new Map<string, Set<string>>();
-  const searches = new Map<string, Set<string>>();
+  const picked = new Map<string, Set<Goal>>();
+  const searches = new Map<string, Set<Goal>>();
   for (const goal of goals) {
-    for (const p of goal.projects ?? []) (picked.get(p) ?? picked.set(p, new Set()).get(p)!).add(goal.label);
-    for (const q of goal.searches ?? []) (searches.get(q) ?? searches.set(q, new Set()).get(q)!).add(goal.label);
+    for (const p of goal.projects ?? []) (picked.get(p) ?? picked.set(p, new Set()).get(p)!).add(goal);
+    for (const q of goal.searches ?? []) (searches.get(q) ?? searches.set(q, new Set()).get(q)!).add(goal);
   }
+  /** "Performance + Low-end PC": the goals a pick serves, as players read them. */
+  const names = (served: Set<Goal>) => [...served].map((g) => t(g.labelKey)).join(" + ");
   const named = NAMED.filter((n) => n.pattern.test(prompt));
   const requests: GoalRequest[] = [
-    ...named.filter((n) => !picked.has(n.project)).map((n) => ({ project: n.project, source: "user" as const, reason: "You named it" })),
-    ...[...picked].map(([project, labels]) => ({ project, source: "user" as const, reason: `For ${[...labels].join(" + ")}` })),
-    ...[...searches].map(([query, labels]) => ({ query, source: "user" as const, reason: `For ${[...labels].join(" + ")} (Modrinth search)` })),
+    ...named.filter((n) => !picked.has(n.project)).map((n) => ({ project: n.project, source: "user" as const, reason: t("ai.reason.named") })),
+    ...[...picked].map(([project, served]) => ({ project, source: "user" as const, reason: t("ai.reason.forGoals", { goals: names(served) }) })),
+    ...[...searches].map(([query, served]) => ({ query, source: "user" as const, reason: t("ai.reason.forGoalsSearch", { goals: names(served) }) })),
   ];
   // Whatever no goal explained still gets its own search, so nothing the player asked for is dropped.
   let rest = prompt.replace(VERSION, " ").replace(AMOUNT, " ");
@@ -163,7 +169,7 @@ export function understand(request: string): { goals: Goal[]; requests: GoalRequ
   for (const part of rest.split(/,|;|\+|\band\b|\bwith\b|\bor\b|\./i)) {
     const words = part.replace(FILLER, " ").replace(/[^\p{L}\p{N}' -]/gu, " ").replace(/\s+/g, " ").trim();
     if (words.length >= 4 && !requests.some((r) => r.query === words)) {
-      requests.push({ query: words, source: "user", reason: "Modrinth search for your words" });
+      requests.push({ query: words, source: "user", reason: t("ai.reason.yourWords") });
       leftovers.push(words);
     }
   }

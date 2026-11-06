@@ -42,7 +42,7 @@ public final class NetworkCore {
 	}
 
 	/** From a hook that threw, on any thread: off for the session, and the attempt in progress is dropped. */
-	public static synchronized void fail(RuntimeException e) {
+	public static synchronized void fail(Throwable e) {
 		if (!active) {
 			return;
 		}

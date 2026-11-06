@@ -1,0 +1,25 @@
+{
+	"providers": [
+		{"type": "space", "advances": {" ": 4}},
+		{"type": "bitmap", "file": "flintclient:font/tiers/axe.png", "ascent": 8, "height": 8, "chars": ["\uE701"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/mace.png", "ascent": 8, "height": 8, "chars": ["\uE702"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/nethop.png", "ascent": 8, "height": 8, "chars": ["\uE703"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/pot.png", "ascent": 8, "height": 8, "chars": ["\uE704"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/smp.png", "ascent": 8, "height": 8, "chars": ["\uE705"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/sword.png", "ascent": 8, "height": 8, "chars": ["\uE706"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/uhc.png", "ascent": 8, "height": 8, "chars": ["\uE707"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/vanilla.png", "ascent": 8, "height": 8, "chars": ["\uE708"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/bed.png", "ascent": 8, "height": 8, "chars": ["\uE801"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/bow.png", "ascent": 8, "height": 8, "chars": ["\uE802"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/creeper.png", "ascent": 8, "height": 8, "chars": ["\uE803"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/debuff.png", "ascent": 8, "height": 8, "chars": ["\uE804"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/dia_crystal.png", "ascent": 8, "height": 8, "chars": ["\uE805"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/dia_smp.png", "ascent": 8, "height": 8, "chars": ["\uE806"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/elytra.png", "ascent": 8, "height": 8, "chars": ["\uE807"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/manhunt.png", "ascent": 8, "height": 8, "chars": ["\uE808"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/minecart.png", "ascent": 8, "height": 8, "chars": ["\uE809"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/og_vanilla.png", "ascent": 8, "height": 8, "chars": ["\uE810"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/speed.png", "ascent": 8, "height": 8, "chars": ["\uE811"]},
+		{"type": "bitmap", "file": "flintclient:font/tiers/trident.png", "ascent": 8, "height": 8, "chars": ["\uE812"]}
+	]
+}

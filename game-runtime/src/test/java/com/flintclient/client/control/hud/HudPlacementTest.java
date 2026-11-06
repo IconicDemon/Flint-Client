@@ -182,8 +182,9 @@ class HudPlacementTest {
 		assertEquals(Anchor.TOP_LEFT, placement.anchor());
 		assertEquals(0, placement.x());
 		assertEquals(0, placement.y());
-		assertEquals(1.0F, placement.scale(), "snapped to a size step");
-		assertEquals(2.0F, placement.withScale(9).scale());
+		assertEquals(1.1F, placement.scale(), "a size on the grid stays");
+		assertEquals(1.0F, new HudPlacement(null, 0, 0, 1.024F).scale(), "snapped to the nearest size");
+		assertEquals(4.0F, placement.withScale(9).scale());
 		HudPlacement edge = HudPlacement.fromAbsolute(280, 200, 40, 40, 320, 240, 1);
 		assertEquals(Anchor.BOTTOM_RIGHT, edge.anchor());
 		assertEquals(new HudPlacement(Anchor.BOTTOM_RIGHT, 0, 0, 1), edge, "no negative zero offsets");
@@ -192,25 +193,25 @@ class HudPlacementTest {
 
 	@Test
 	void scaleSteps() {
-		assertEquals(6, ScaleSteps.count());
-		assertEquals(0.5F, ScaleSteps.min());
-		assertEquals(2.0F, ScaleSteps.max());
-		assertEquals(0.75F, ScaleSteps.snap(0.8F));
-		assertEquals(1.25F, ScaleSteps.snap(1.2F));
+		assertEquals(76, ScaleSteps.count(), "0.25 to 4 in steps of 0.05");
+		assertEquals(0.25F, ScaleSteps.min());
+		assertEquals(4.0F, ScaleSteps.max());
+		assertEquals(0.8F, ScaleSteps.snap(0.8F));
+		assertEquals(1.2F, ScaleSteps.snap(1.22F));
 		assertEquals(1.0F, ScaleSteps.snap(Float.NaN));
-		assertEquals(0.5F, ScaleSteps.snap(-3));
-		assertEquals(2.0F, ScaleSteps.snap(99));
-		assertEquals(1.25F, ScaleSteps.next(1.0F));
-		assertEquals(2.0F, ScaleSteps.next(2.0F), "stops at the largest");
+		assertEquals(0.25F, ScaleSteps.snap(-3));
+		assertEquals(4.0F, ScaleSteps.snap(99));
+		assertEquals(1.25F, ScaleSteps.next(1.0F), "a wheel notch is a quarter by default");
+		assertEquals(4.0F, ScaleSteps.next(4.0F), "stops at the largest");
 		assertEquals(0.75F, ScaleSteps.previous(1.0F));
-		assertEquals(0.5F, ScaleSteps.previous(0.5F), "stops at the smallest");
-		assertEquals(1.5F, ScaleSteps.next(1.3F), "from the nearest step");
-		assertEquals(0.5F, ScaleSteps.snap(0.625F), "a tie goes to the smaller step");
+		assertEquals(0.25F, ScaleSteps.previous(0.25F), "stops at the smallest");
+		assertEquals(1.1F, ScaleSteps.next(1.0F, 0.1F), "the Scaling step game option sets the notch");
+		assertEquals(1.25F, ScaleSteps.previous(1.3F, 0.05F));
 		float scale = ScaleSteps.min();
 		for (int i = 1; i < ScaleSteps.count(); i++) {
-			float next = ScaleSteps.next(scale);
+			float next = ScaleSteps.next(scale, 0.05F);
 			assertTrue(next > scale);
-			assertEquals(scale, ScaleSteps.previous(next));
+			assertEquals(scale, ScaleSteps.previous(next, 0.05F));
 			scale = next;
 		}
 	}

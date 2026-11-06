@@ -1,0 +1,66 @@
+# Minecraft 1.8.9 (game-runtime/legacy189, see build-logic/SharedSources): the shared sources that never touch Minecraft,
+# compiled unchanged into the 1.8.9 runtime (docs/LEGACY189_SHARED_MENU_PLAN.md). 1.8.9 is a different engine (Feather
+# names, LWJGL 2, fixed-function GL), so it takes no Minecraft-facing shared file; its own code (../legacy189/src) is the
+# 1.8.9 backend of the shared model.
+#
+# These files must stay platform-free: no net.minecraft, com.mojang, org.joml or org.lwjgl, and no shared class outside
+# this list (or the platform classes 1.8.9 has its own copies of, src/mc189/java/.../platform). PlatformFreeSourcesTest
+# (src/test, run by the 26.x and 1.21.x builds) reads this file and fails the build otherwise.
+
+# Flint's log, without the 26.x entry point.
+include FlintLog.java
+# Start-up timings for the log (ControlState times its steps with it).
+include StartupTrace.java
+# Loads the Right Shift menu's classes ahead on a worker (ModMenuScreen.warmUp).
+include ClassWarmer.java
+# Packs and worlds dropped into the game's folders in a form it can't read (.rar, a pack a folder down), made readable.
+include files/**
+# The saved settings and layouts every screen reads (the same files on every line).
+include control/ControlState.java
+
+# The mod model: descriptors, settings, registry, migrations.
+include control/model/**
+# The stores: control-center.json, layouts, share codes.
+include control/store/**
+# HUD placement: anchors, placements, snapping, undo (not control/hud/render: it draws).
+include control/hud/*.java
+# The mods' shared logic (zoom, toggles, combat, waypoints...).
+include control/feature/**
+# The game link to the Flint app (Gson and a loopback socket): Music Player asks it what's playing.
+include module/account/LauncherLink.java
+# Friends and the Flint Store through the same link (the Friends and Cosmetics windows), and the credential guard.
+include module/social/**
+# The count of what Flint keeps on the GPU (the mask atlas reports its textures).
+include graphics/GpuResourceTracker.java
+# The canvas: shapes, text, the mask atlas, icons, card pictures (FontPreload prepares 26.x's TrueType fonts).
+include render/**
+skip render/FontPreload.java
+# The kit: nodes, controls, focus, scrolling, the kit screen.
+include ui/kit/**
+include ui/Motion.java
+include ui/FlintFrame.java
+# The Right Shift menu, as on every line.
+include control/rshift/**
+# Screens and panels of mods 1.8.9 doesn't have (Advancements, Keybind Search, Pack Organizer, Tier Tagger).
+skip control/rshift/AdvancementsListScreen.java
+skip control/rshift/KeybindSearchScreen.java
+skip control/rshift/PacksPanel.java
+skip control/rshift/TierTaggerPanel.java
+# The HUD, as on every line: its views and renderer, the HUD editor and the HUD page on it (src/mc189/java/.../platform has
+# 1.8.9's HudData, HudEffects, ItemPainter and HudMaps), the guard a failing path turns itself off with, and the frame times
+# FPS reads.
+include control/hud/render/**
+include control/editor/**
+include control/platform/HookGuard.java
+include perf/FrameStats.java
+# Motion Blur's rules (Natural Motion Blur's timing, passes and samples), the same on every line: legacy/mods/MotionBlur draws them.
+include control/fx/NmbTiming.java
+
+# Gson: Minecraft 1.8.9 ships Gson 2.2.4; the shared code is written against a modern Gson (26.3's), built into the 1.8.9 jar
+# under Flint's own package (legacy189/build.gradle relocateGson) so it never meets Minecraft's.
+replace com.google.gson. com.flintclient.shaded.gson.
+
+# Logging: 1.8.9 has log4j 2.0 and no slf4j. log4j's Logger takes the same {} placeholders and trailing exception.
+replace org.slf4j.LoggerFactory org.apache.logging.log4j.LogManager
+replace org.slf4j.Logger org.apache.logging.log4j.Logger
+word LoggerFactory LogManager

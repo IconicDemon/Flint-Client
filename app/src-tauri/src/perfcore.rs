@@ -124,8 +124,14 @@ const COMPACT_HEADERS_JAVA: u64 = 25;
 ///
 /// `hardware` isn't used by any rule yet: the measurements come from a single machine, which is no
 /// evidence for hardware-specific choices.
-pub fn choose_policy(automatic: bool, _hardware: &HardwareInfo, version_json: &Value) -> JvmPolicy {
-    let java = version_json["javaVersion"]["majorVersion"].as_u64();
+#[cfg(test)]
+pub fn choose_policy(automatic: bool, hardware: &HardwareInfo, version_json: &Value) -> JvmPolicy {
+    choose_policy_for_java(automatic, hardware, version_json["javaVersion"]["majorVersion"].as_u64())
+}
+
+/// `choose_policy` for the Java the game will run on (its major version), which for Flint's lines before 26.x is Java 25
+/// rather than the version file's (`runtime::JAVA_FOR_LINE`).
+pub fn choose_policy_for_java(automatic: bool, _hardware: &HardwareInfo, java: Option<u64>) -> JvmPolicy {
     if automatic && java.is_some_and(|major| major >= COMPACT_HEADERS_JAVA) {
         JvmPolicy::CompactHeaders
     } else {
@@ -152,9 +158,54 @@ fn gc_args() -> Vec<String> {
     .to_vec()
 }
 
+/// The policy a launch on `java` (the major version of the Java actually started; None: unknown) may use: compact headers
+/// only on a Java that knows them (an older Java refuses to start with the flag).
+pub fn policy_for_java(policy: JvmPolicy, java: Option<u64>) -> JvmPolicy {
+    if policy == JvmPolicy::CompactHeaders && !java.is_some_and(|major| major >= COMPACT_HEADERS_JAVA) {
+        JvmPolicy::Legacy
+    } else {
+        policy
+    }
+}
+
+/// Options Java 24 and newer wants for Minecraft and its libraries, which older Minecraft versions' launch files don't
+/// pass (26.x's pass the first): native code (LWJGL, the audio and window libraries) may be loaded without a warning per
+/// library (JEP 472), and `sun.misc.Unsafe`'s memory access, which Netty, LWJGL and many mods use, is allowed as before
+/// instead of warned about (JEP 498). Nothing for an older Java, which wouldn't know the second option.
+pub fn modern_java_args(java: Option<u64>, already: &[String]) -> Vec<String> {
+    if !java.is_some_and(|major| major >= 24) {
+        return Vec::new();
+    }
+    ["--enable-native-access=ALL-UNNAMED", "--sun-misc-unsafe-memory-access=allow"]
+        .into_iter()
+        .filter(|flag| {
+            let name = flag.split('=').next().unwrap_or(flag);
+            !already.iter().any(|a| a.split('=').next() == Some(name))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The policy's Java flags, apart from the heap size (see `heap_args`).
 pub fn tuning_args(policy: JvmPolicy) -> Vec<String> {
-    let mut args = gc_args();
+    tuning_args_with(policy, &[])
+}
+
+/// The garbage collectors the player can choose instead of G1 in Settings → Java and memory's extra arguments,
+/// by the flag that selects each. Java refuses to start with two collectors ("Multiple garbage collectors
+/// selected", checked with Java 25.0.4), so a launch where the player chose one leaves `gc_args` out.
+pub const OTHER_COLLECTORS: &[(&str, &str)] =
+    &[("-XX:+UseZGC", "ZGC"), ("-XX:+UseShenandoahGC", "Shenandoah"), ("-XX:+UseParallelGC", "the Parallel collector"), ("-XX:+UseSerialGC", "the Serial collector")];
+
+/// The collector the player's extra Java arguments choose instead of G1, if any (its name).
+pub fn chosen_collector(extra: &[String]) -> Option<&'static str> {
+    OTHER_COLLECTORS.iter().find(|(flag, _)| extra.iter().any(|a| a == flag)).map(|(_, name)| *name)
+}
+
+/// `tuning_args` for a launch with the player's extra Java arguments: Flint's G1 settings are left out when those
+/// choose another collector. Compact object headers stay (they work with every collector).
+pub fn tuning_args_with(policy: JvmPolicy, extra: &[String]) -> Vec<String> {
+    let mut args = if chosen_collector(extra).is_some() { Vec::new() } else { gc_args() };
     if policy == JvmPolicy::CompactHeaders {
         args.push(COMPACT_HEADERS.to_owned());
     }
@@ -234,10 +285,12 @@ pub fn sync_runtime_config(game_dir: &Path, config: Option<&Value>) -> CmdResult
 // ---------- mod audit ----------
 
 /// What a jar in the `mods` folder declares in its `fabric.mod.json`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ModJar {
     pub file: String,
     pub id: String,
+    /// Its display name (`name`), or its id.
+    pub name: String,
     pub version: String,
     /// Other mod ids this jar stands in for.
     pub provides: Vec<String>,
@@ -245,6 +298,10 @@ pub struct ModJar {
     pub breaks: BTreeMap<String, Value>,
     /// The `depends.minecraft` predicate (a string or a list of them), if any.
     pub minecraft: Value,
+    /// The other mods it requires (`depends`), by id, leaving out what Fabric Loader itself provides.
+    pub depends: Vec<String>,
+    /// Mod ids the jars bundled inside it provide (Fabric API is about 70 of them): Fabric loads those too.
+    pub nested: Vec<String>,
 }
 
 impl ModJar {
@@ -266,23 +323,73 @@ pub fn scan_mods(dir: &Path) -> Vec<ModJar> {
     names.sort();
     names
         .into_iter()
-        .filter(|name| dir.join(name).is_file())
-        .filter_map(|name| read_mod_json(&dir.join(&name)).and_then(|bytes| parse_mod_json(name, &bytes)))
+        .filter_map(|name| {
+            let path = dir.join(&name);
+            let meta = std::fs::metadata(&path).ok().filter(std::fs::Metadata::is_file)?;
+            let stamp = (meta.len(), meta.modified().ok());
+            if let Some(known) = SCANNED.lock().unwrap_or_else(|e| e.into_inner()).get(&path).filter(|(seen, _)| *seen == stamp) {
+                return known.1.clone();
+            }
+            let jar = read_jar(&path, name);
+            // Only a stamp that can tell a later change is worth remembering by.
+            if stamp.1.is_some() {
+                SCANNED.lock().unwrap_or_else(|e| e.into_inner()).insert(path, (stamp, jar.clone()));
+            }
+            jar
+        })
         .collect()
 }
 
-fn read_mod_json(jar: &Path) -> Option<Vec<u8>> {
+/// What each jar scanned so far declares, by path, with the size and modification time it had: a launch checks the
+/// mods folder twice and Home checks it again, and a jar is only opened again once it changed.
+static SCANNED: std::sync::LazyLock<std::sync::Mutex<HashMap<std::path::PathBuf, JarStamp>>> = std::sync::LazyLock::new(Default::default);
+type JarStamp = ((u64, Option<std::time::SystemTime>), Option<ModJar>);
+
+/// Ids Fabric Loader provides itself: never missing.
+const BUILT_IN: [&str; 5] = ["minecraft", "java", "fabricloader", "fabric-loader", "mixinextras"];
+/// The largest bundled jar read for its ids, and how many bundled jars one mod may contribute.
+const MAX_NESTED_JAR: u64 = 32 * 1024 * 1024;
+const MAX_NESTED: usize = 400;
+
+fn read_entry<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, name: &str, max: u64) -> Option<Vec<u8>> {
     use std::io::Read;
-    let file = std::fs::File::open(jar).ok()?;
-    let mut archive = zip::ZipArchive::new(file).ok()?;
-    let entry = archive.by_name("fabric.mod.json").ok()?;
-    if entry.size() > MAX_MOD_JSON {
+    let entry = archive.by_name(name).ok()?;
+    if entry.size() > max {
         return None;
     }
     let mut bytes = Vec::new();
     // The declared size can lie; never read past the limit.
-    entry.take(MAX_MOD_JSON + 1).read_to_end(&mut bytes).ok()?;
-    (bytes.len() as u64 <= MAX_MOD_JSON).then_some(bytes)
+    entry.take(max + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= max).then_some(bytes)
+}
+
+/// A mod jar's metadata, with the ids of the jars bundled in it (Fabric's jar-in-jar), followed a few levels deep.
+fn read_jar(path: &Path, file: String) -> Option<ModJar> {
+    let archive = std::fs::File::open(path).ok()?;
+    // Buffered: reading a jar's index unbuffered is one system call per entry.
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(archive)).ok()?;
+    let bytes = read_entry(&mut archive, "fabric.mod.json", MAX_MOD_JSON)?;
+    let mut jar = parse_mod_json(file, &bytes)?;
+    let mut nested = Vec::new();
+    bundled_ids(&mut archive, &bytes, 0, &mut nested);
+    jar.nested = nested;
+    Some(jar)
+}
+
+fn bundled_ids<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, mod_json: &[u8], depth: usize, out: &mut Vec<String>) {
+    let Ok(json) = serde_json::from_slice::<Value>(mod_json.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(mod_json)) else { return };
+    for file in json["jars"].as_array().into_iter().flatten().filter_map(|j| j["file"].as_str()) {
+        if depth >= 3 || out.len() >= MAX_NESTED {
+            return;
+        }
+        let Some(inner) = read_entry(archive, file, MAX_NESTED_JAR) else { continue };
+        let Ok(mut inner) = zip::ZipArchive::new(std::io::Cursor::new(inner)) else { continue };
+        let Some(inner_json) = read_entry(&mut inner, "fabric.mod.json", MAX_MOD_JSON) else { continue };
+        if let Some(inner_jar) = parse_mod_json(String::new(), &inner_json) {
+            out.extend(inner_jar.ids().map(str::to_owned));
+        }
+        bundled_ids(&mut inner, &inner_json, depth + 1, out);
+    }
 }
 
 fn parse_mod_json(file: String, bytes: &[u8]) -> Option<ModJar> {
@@ -292,13 +399,17 @@ fn parse_mod_json(file: String, bytes: &[u8]) -> Option<ModJar> {
     if json["environment"] == "server" {
         return None;
     }
+    let id = json["id"].as_str().filter(|id| !id.is_empty())?.to_owned();
     Some(ModJar {
         file,
-        id: json["id"].as_str().filter(|id| !id.is_empty())?.to_owned(),
+        name: json["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&id).to_owned(),
+        id,
         version: json["version"].as_str().unwrap_or_default().to_owned(),
         provides: json["provides"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect(),
         breaks: json["breaks"].as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default(),
         minecraft: json["depends"]["minecraft"].clone(),
+        depends: json["depends"].as_object().map(|o| o.keys().filter(|k| !BUILT_IN.contains(&k.as_str())).cloned().collect()).unwrap_or_default(),
+        nested: Vec::new(),
     })
 }
 
@@ -360,6 +471,34 @@ pub fn duplicate_mods(mods: &[ModJar]) -> Vec<String> {
         }
     }
     duplicates
+}
+
+/// A mod id some jars require that no jar provides (directly, through `provides`, or bundled inside another), with
+/// the names of the mods that need it. Fabric refuses to start then, so this stops a launch it would refuse anyway.
+#[derive(Debug, PartialEq)]
+pub struct Missing {
+    pub id: String,
+    pub needed_by: Vec<String>,
+}
+
+pub fn missing_dependencies(mods: &[ModJar]) -> Vec<Missing> {
+    let present: HashSet<&str> = mods.iter().flat_map(|m| m.ids().chain(m.nested.iter().map(String::as_str))).collect();
+    let mut missing: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for jar in mods {
+        for id in jar.depends.iter().filter(|id| !present.contains(id.as_str())) {
+            let names = missing.entry(id).or_default();
+            if !names.contains(&jar.name) {
+                names.push(jar.name.clone());
+            }
+        }
+    }
+    missing
+        .into_iter()
+        .map(|(id, mut needed_by)| {
+            needed_by.sort();
+            Missing { id: id.to_owned(), needed_by }
+        })
+        .collect()
 }
 
 /// Mods that can't run together, as messages for the player: a mod whose `breaks` names another
@@ -496,6 +635,30 @@ mod tests {
     }
 
     #[test]
+    fn compact_headers_follow_the_java_actually_started() {
+        let hardware = HardwareInfo::default();
+        // 1.21.x on Flint's Java 25 gets them; its own Java 21 (or an unknown custom Java) doesn't.
+        assert_eq!(choose_policy_for_java(true, &hardware, Some(25)), JvmPolicy::CompactHeaders);
+        assert_eq!(choose_policy_for_java(true, &hardware, Some(21)), JvmPolicy::Legacy);
+        assert_eq!(choose_policy_for_java(false, &hardware, Some(25)), JvmPolicy::Legacy, "Automatic Optimization off");
+        assert_eq!(policy_for_java(JvmPolicy::CompactHeaders, Some(21)), JvmPolicy::Legacy, "Java 21 would refuse the flag");
+        assert_eq!(policy_for_java(JvmPolicy::CompactHeaders, None), JvmPolicy::Legacy);
+        assert_eq!(policy_for_java(JvmPolicy::CompactHeaders, Some(25)), JvmPolicy::CompactHeaders);
+        assert_eq!(policy_for_java(JvmPolicy::Legacy, Some(25)), JvmPolicy::Legacy);
+    }
+
+    #[test]
+    fn java_24_and_newer_gets_its_native_and_unsafe_options_once() {
+        assert!(modern_java_args(Some(21), &[]).is_empty(), "Java 21 doesn't know the Unsafe option");
+        assert!(modern_java_args(None, &[]).is_empty());
+        assert_eq!(modern_java_args(Some(25), &[]), ["--enable-native-access=ALL-UNNAMED", "--sun-misc-unsafe-memory-access=allow"]);
+        let from_26_x = ["-Xmx4G".to_owned(), "--enable-native-access=ALL-UNNAMED".to_owned()];
+        assert_eq!(modern_java_args(Some(25), &from_26_x), ["--sun-misc-unsafe-memory-access=allow"], "26.x passes the first itself");
+        let player = ["--sun-misc-unsafe-memory-access=warn".to_owned()];
+        assert_eq!(modern_java_args(Some(25), &player), ["--enable-native-access=ALL-UNNAMED"], "the player's own choice stands");
+    }
+
+    #[test]
     fn the_heap_flag_is_flints_maximum() {
         assert_eq!(heap_args(4096), ["-Xmx4096M"], "as Flint 0.4.0");
         assert_eq!(heap_args(1024), ["-Xmx1024M"]);
@@ -569,6 +732,32 @@ mod tests {
     }
 
     #[test]
+    fn a_jar_is_read_again_once_it_changed() {
+        use std::io::Write;
+        let dir = TestDir::new();
+        // Stored, not compressed, so the id can be changed in place below.
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.0.join("a.jar")).unwrap());
+        zip.start_file("fabric.mod.json", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored)).unwrap();
+        zip.write_all(br#"{"id":"first","version":"1"}"#).unwrap();
+        zip.finish().unwrap();
+        assert_eq!(scan_mods(&dir.0)[0].id, "first");
+        // Kept: the same jar isn't opened again (proved by damaging it with its stamp unchanged).
+        let path = dir.0.join("a.jar");
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let at = bytes.windows(5).position(|w| w == b"first").unwrap();
+        bytes[at..at + 5].copy_from_slice(b"FIRST");
+        std::fs::write(&path, &bytes).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
+        assert_eq!(scan_mods(&dir.0)[0].id, "first");
+        // Replaced (another size or time): read again.
+        test_jar(&dir.0, "a.jar", r#"{"id":"second","version":"22"}"#);
+        assert_eq!(scan_mods(&dir.0)[0].id, "second");
+        std::fs::remove_file(&path).unwrap();
+        assert!(scan_mods(&dir.0).is_empty());
+    }
+
+    #[test]
     fn only_jars_fabric_would_load_are_scanned() {
         let dir = TestDir::new();
         let json = |id: &str| format!(r#"{{"id":"{id}","version":"1"}}"#);
@@ -598,10 +787,11 @@ mod tests {
         ModJar {
             file: file.into(),
             id: id.into(),
+            name: id.into(),
             version: "1.0".into(),
             provides: provides.iter().map(|p| p.to_string()).collect(),
             breaks: breaks.as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default(),
-            minecraft: Value::Null,
+            ..Default::default()
         }
     }
 
@@ -617,6 +807,55 @@ mod tests {
         }
         let mods = [built_for(json!("~26.1")), ModJar { file: "lithium.jar".into(), ..built_for(json!("~26.3")) }.with_id("lithium")];
         assert_eq!(mod_ids_for(&mods, "26.3"), ["lithium".to_owned()].into());
+    }
+
+    /// A jar with `mod_json` and, inside it, bundled jars (each a `fabric.mod.json`), as Fabric API ships its modules.
+    fn bundle(dir: &Path, name: &str, mod_json: &str, inner: &[(&str, &str)]) {
+        use std::io::Write;
+        std::fs::create_dir_all(dir).unwrap();
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.join(name)).unwrap());
+        zip.start_file("fabric.mod.json", zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(mod_json.as_bytes()).unwrap();
+        for (file, json) in inner {
+            let mut bytes = Vec::new();
+            let mut nested = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            nested.start_file("fabric.mod.json", zip::write::SimpleFileOptions::default()).unwrap();
+            nested.write_all(json.as_bytes()).unwrap();
+            nested.finish().unwrap();
+            zip.start_file(*file, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(&bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn a_missing_requirement_is_named_and_bundled_mods_count_as_present() {
+        let dir = TestDir::new();
+        let mods = dir.0.join("mods");
+        test_jar(&mods, "apple.jar", r#"{"id":"appleskin","name":"AppleSkin","depends":{"fabric-api":"*","minecraft":"~26.3","fabricloader":">=0.16","java":">=21"}}"#);
+        test_jar(&mods, "map.jar", r#"{"id":"minimap","name":"Minimap","depends":{"fabric-resource-loader-v0":"*","cloth-config2":"*"}}"#);
+        let missing = missing_dependencies(&scan_mods(&mods));
+        let ids: Vec<&str> = missing.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["cloth-config2", "fabric-api", "fabric-resource-loader-v0"], "Fabric Loader's own ids never count as missing");
+        assert_eq!(missing[1].needed_by, ["AppleSkin"]);
+        // Fabric API provides its modules as bundled jars, and Cloth Config its old id through `provides`.
+        bundle(&mods, "fabric-api.jar", r#"{"id":"fabric-api","provides":["fabric"],"jars":[{"file":"META-INF/jars/loader.jar"}]}"#, &[("META-INF/jars/loader.jar", r#"{"id":"fabric-resource-loader-v0"}"#)]);
+        test_jar(&mods, "cloth.jar", r#"{"id":"cloth-config","provides":["cloth-config2"]}"#);
+        assert_eq!(missing_dependencies(&scan_mods(&mods)), []);
+        // A switched-off library is missing too: Fabric doesn't load `.disabled` files.
+        std::fs::rename(mods.join("cloth.jar"), mods.join("cloth.jar.disabled")).unwrap();
+        assert_eq!(missing_dependencies(&scan_mods(&mods)).iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["cloth-config2"]);
+    }
+
+    /// Reads real mods folders named in FLINT_MODS_DIRS (separated by ';'), read only: what each would be missing.
+    #[test]
+    #[ignore]
+    fn real_mods_folders() {
+        for dir in std::env::var("FLINT_MODS_DIRS").unwrap_or_default().split(';').filter(|d| !d.is_empty()) {
+            let jars = scan_mods(Path::new(dir));
+            let missing = missing_dependencies(&jars);
+            println!("{dir}: {} mods, missing {:?}", jars.len(), missing.iter().map(|m| (m.id.as_str(), m.needed_by.len())).collect::<Vec<_>>());
+        }
     }
 
     impl ModJar {

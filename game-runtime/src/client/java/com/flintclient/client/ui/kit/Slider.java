@@ -1,11 +1,11 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.DigitRun;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -164,20 +164,20 @@ public class Slider extends Node {
 	}
 
 	@Override
-	public boolean keyDown(KeyEvent event) {
+	public boolean keyDown(KeyInput event) {
 		int steps = event.hasShiftDown() ? 10 : 1;
 		int key = event.key();
 		if (event.isLeft()) {
 			set(model.stepped(value, -steps), true);
 		} else if (event.isRight()) {
 			set(model.stepped(value, steps), true);
-		} else if (key == InputConstants.KEY_HOME) {
+		} else if (key == Keys.HOME) {
 			set(model.min(), true);
-		} else if (key == InputConstants.KEY_END) {
+		} else if (key == Keys.END) {
 			set(model.max(), true);
-		} else if (key == InputConstants.KEY_PAGEDOWN) {
+		} else if (key == Keys.PAGE_DOWN) {
 			set(model.stepped(value, -10), true);
-		} else if (key == InputConstants.KEY_PAGEUP) {
+		} else if (key == Keys.PAGE_UP) {
 			set(model.stepped(value, 10), true);
 		} else {
 			return false;

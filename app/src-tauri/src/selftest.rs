@@ -367,14 +367,14 @@ fn discord_lifecycle(app: AppHandle) {
         let set = |enabled: bool, details: bool| presence.configure(&json!({ "discordPresence": enabled, "discordDetails": details }));
         say("1 start (no game)");
         let a = game("600");
-        presence.started(Session { id: "A".into(), pid: a.id(), version: "26.3".into(), loader: "fabric".into(), started_at: now() - 90 });
+        presence.started(Session { id: "A".into(), pid: a.id(), version: "26.3".into(), loader: "fabric".into(), started_at: now() - 90, game_dir: None });
         pause(1);
         say("2 game A started, before settling (expect idle, nothing published)");
         pause(6);
         say("3 game A settled (expect Minecraft 26.3, Fabric)");
         pause(12);
         let mut b = game("600");
-        presence.started(Session { id: "B".into(), pid: b.id(), version: "1.21.11".into(), loader: "vanilla".into(), started_at: now() });
+        presence.started(Session { id: "B".into(), pid: b.id(), version: "1.21.11".into(), loader: "vanilla".into(), started_at: now(), game_dir: None });
         pause(7);
         say("4 game B started (newest wins: Minecraft 1.21.11, Vanilla)");
         pause(12);
@@ -412,7 +412,7 @@ fn discord_watch(app: AppHandle, secs: u64, with_game: bool, keep: bool) {
         let game = with_game.then(|| std::process::Command::new("sleep").arg("600").spawn().unwrap());
         if let Some(g) = &game {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-            presence.started(Session { id: "W".into(), pid: g.id(), version: "26.3".into(), loader: "fabric".into(), started_at: now });
+            presence.started(Session { id: "W".into(), pid: g.id(), version: "26.3".into(), loader: "fabric".into(), started_at: now, game_dir: None });
             println!("[selftest] discord-watch game pid {}", g.id());
         }
         let start = Instant::now();
@@ -433,7 +433,64 @@ fn discord_watch(app: AppHandle, secs: u64, with_game: bool, keep: bool) {
     });
 }
 
+/// `FLINT_SELFTEST=gamelink:<dir>:<seconds>` (QA data only): the game link with test identities, for a game the QA runner
+/// starts. Flint's accounts become the QA identity the runner plays as (FlintQA); the link's address and a secret for one
+/// game go to `<dir>/link.env` (QA tooling only: a real launch hands them to the game's environment and nowhere else).
+/// When `<dir>/add-second` appears, a second test identity is added (as a finished sign-in would). Every `accounts-changed`
+/// event and every change of the active account is printed.
+fn game_link(app: AppHandle, dir: String, seconds: u64) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if !state.qa {
+            println!("[selftest] gamelink needs FLINT_QA=1");
+            app.exit(1);
+            return;
+        }
+        let first = auth::StoredAccount { uuid: "f1e7a00000004000800000000000f1a7".into(), username: "FlintQA".into(), qa: true, ..Default::default() };
+        let file = auth::AccountsFile { active: Some(first.uuid.clone()), accounts: vec![first] };
+        crate::core::write_json(&state.paths.accounts(), &file).unwrap();
+        app.listen_any("accounts-changed", |event| println!("[selftest] event accounts-changed {}", event.payload()));
+        let address = match state.game_link.address(|| crate::gamelink::AppBackend { app: app.clone() }).await {
+            Ok(address) => address,
+            Err(e) => {
+                println!("[selftest] link: {e}");
+                app.exit(1);
+                return;
+            }
+        };
+        let secret = state.game_link.registry.register("qa", "");
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::write(dir.join("link.env"), format!("{}={address}\n{}={secret}\n", crate::gamelink::ENV_ADDRESS, crate::gamelink::ENV_SECRET)).unwrap();
+        println!("[selftest] link up at {address}");
+        let mut active = auth::load_accounts(&state).active;
+        let mut added = false;
+        for _ in 0..seconds * 4 {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if !added && dir.join("add-second").exists() {
+                added = true;
+                let mut file = auth::load_accounts(&state);
+                file.accounts.push(auth::StoredAccount { uuid: "f1e7a00000004000800000000002f1a7".into(), username: "FlintQA2".into(), qa: true, ..Default::default() });
+                crate::core::write_json(&state.paths.accounts(), &file).unwrap();
+                println!("[selftest] added FlintQA2");
+            }
+            let now = auth::load_accounts(&state).active;
+            if now != active {
+                println!("[selftest] active account {:?} -> {:?}", active, now);
+                active = now;
+            }
+        }
+        state.game_link.registry.unregister(&secret);
+        println!("[selftest] done");
+        app.exit(0);
+    });
+}
+
 pub fn run(app: AppHandle, spec: String) {
+    if let Some(rest) = spec.strip_prefix("gamelink:") {
+        if let Some((dir, seconds)) = rest.rsplit_once(':') {
+            return game_link(app, dir.to_owned(), seconds.parse().unwrap_or(600));
+        }
+    }
     if spec == "discord" {
         return discord_lifecycle(app);
     }
@@ -487,15 +544,21 @@ pub fn run(app: AppHandle, spec: String) {
             }
         };
         report("create", json!(profile.id));
+        // `nocheck` (with `reuse`, on an installed profile): straight to Play, as a click right after Flint opens.
+        let nocheck = parts.contains(&"nocheck") && profile.installed;
         let started = Instant::now();
-        let timed = Instant::now();
-        let check = game::profile_check(app.clone(), app.state(), profile.id.clone(), None).await.unwrap_or_else(|e| json!(e));
-        report("check", json!({ "result": check, "ms": timed.elapsed().as_millis() as u64 }));
-        let install = game::profile_install(app.clone(), app.state(), profile.id.clone(), None).await;
-        report("install", json!({ "ok": install.is_ok(), "error": install.err(), "seconds": started.elapsed().as_secs() }));
-        let timed = Instant::now();
-        let recheck = game::profile_check(app.clone(), app.state(), profile.id.clone(), None).await.unwrap_or_else(|e| json!(e));
-        report("recheck", json!({ "result": recheck, "ms": timed.elapsed().as_millis() as u64 }));
+        if nocheck {
+            println!("[selftest] skipping the checks");
+        } else {
+            let timed = Instant::now();
+            let check = game::profile_check(app.clone(), app.state(), profile.id.clone(), None).await.unwrap_or_else(|e| json!(e));
+            report("check", json!({ "result": check, "ms": timed.elapsed().as_millis() as u64 }));
+            let install = game::profile_install(app.clone(), app.state(), profile.id.clone(), None).await;
+            report("install", json!({ "ok": install.is_ok(), "error": install.err(), "seconds": started.elapsed().as_secs() }));
+            let timed = Instant::now();
+            let recheck = game::profile_check(app.clone(), app.state(), profile.id.clone(), None).await.unwrap_or_else(|e| json!(e));
+            report("recheck", json!({ "result": recheck, "ms": timed.elapsed().as_millis() as u64 }));
+        }
 
         // `bare`: install and launch only, skipping the content checks.
         let bare = parts.contains(&"bare");
@@ -538,7 +601,7 @@ pub fn run(app: AppHandle, spec: String) {
                 report("enable", json!(content::content_set_enabled(app.state(), profile.id.clone(), vec![first], true).await.err()));
                 report("preflight", json!(content::launch_preflight(&state, &profile.id).err()));
             }
-            report("updates", content::content_updates(app.state(), profile.id.clone()).await.unwrap_or_else(|e| json!(e)));
+            report("updates", content::updates::content_updates(app.state(), profile.id.clone()).await.unwrap_or_else(|e| json!(e)));
             report("files", content::profile_files(app.state(), profile.id.clone()).await.unwrap_or_else(|e| json!(e)));
         }
 
@@ -560,6 +623,33 @@ pub fn run(app: AppHandle, spec: String) {
             report("profiles_after_pack", json!(data::load_profiles(&state).profiles.iter().map(|p| json!([p.name, p.game_version, p.loader_version, p.modpack.is_some()])).collect::<Vec<_>>()));
         }
 
+        // `quick`: Play, measure, stop after a few seconds (no Discord or hold checks); `again=<n>` then plays n more
+        // times in the same app session (a second Play is warm: sign-in, link and caches are already up).
+        if launch && state.qa && parts.contains(&"quick") {
+            report("qa_account", json!(auth::auth_qa_account(app.state()).map(|a| a.username)));
+            let again = parts.iter().find_map(|p| p.strip_prefix("again=")).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let log = state.paths.profile_dir(&profile.id).join("logs/flint-launch.log");
+            for round in 0..=again {
+                let timed = Instant::now();
+                let launched = game::profile_launch(app.clone(), app.state(), profile.id.clone()).await;
+                let ms = timed.elapsed().as_secs_f64() * 1000.0;
+                let steps = std::fs::read_to_string(&log).ok().and_then(|t| t.lines().next().map(str::to_owned)).unwrap_or_default();
+                report("launch", json!({ "round": round, "ok": launched.is_ok(), "error": launched.err(), "msToSpawn": (ms * 10.0).round() / 10.0, "steps": steps }));
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                game::profile_stop(app.state(), profile.id.clone());
+                for _ in 0..100 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if !state.running.lock().unwrap().contains_key(&profile.id) {
+                        break;
+                    }
+                }
+                // Lets the exit's own work (Auto Sync's record) finish before the next Play.
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+            println!("[selftest] done");
+            app.exit(0);
+            return;
+        }
         if launch && state.qa {
             report("qa_account", json!(auth::auth_qa_account(app.state()).map(|a| a.username)));
             let timed = Instant::now();
@@ -582,6 +672,8 @@ pub fn run(app: AppHandle, spec: String) {
             }
             let still_running = state.running.lock().unwrap().contains_key(&profile.id);
             report("running_after_wait", json!(still_running));
+            // The game opened maximized (unless its options ask for fullscreen) and Flint stepped aside.
+            report("windows", crate::gamewindow::report(&app));
             let played = data::find_profile(&state, &profile.id).ok().and_then(|p| p.last_played);
             report("last_played_recorded", json!(played.is_some()));
             let log = state.paths.profile_dir(&profile.id).join("logs/flint-launch.log");

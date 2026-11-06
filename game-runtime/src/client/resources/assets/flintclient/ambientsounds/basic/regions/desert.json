@@ -1,0 +1,55 @@
+{
+	"name": "desert",
+	"variants": [
+		{
+			"features": [
+				"sand"
+			]
+		},
+		{
+			"biomes": [
+				"gravel_desert"
+			]
+		}
+	],
+	"bad-regions": [
+		"beach"
+	],
+	"biomes": [
+		"desert",
+		"quagmire",
+		"petrified forest",
+		"menelaus",
+		"dry scrub",
+		"sands",
+		"drylands"
+	],
+	"bad-biomes": [
+		"lush desert",
+		"ocean"
+	],
+	"sound-collections": [
+		"wind"
+	],
+	"sounds": [
+		{
+			"name": "cicadas-desert",
+			"files": [
+				"minecraft:block.deadbush.idle",
+				"minecraft:block.sand.idle"
+			],
+			"category": "cicadas",
+			"special-biomes": {
+				"temperature": {
+					"min": 0.8
+				}
+			},
+			"time": "day",
+			"pause": {
+				"min": 60,
+				"max": 300
+			},
+			"volume": 0.5
+		}
+	]
+}

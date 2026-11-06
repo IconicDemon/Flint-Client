@@ -160,9 +160,13 @@ public final class ModuleState {
 		return store(index(setting), setting.defaultValue());
 	}
 
-	/** Back to the module's default position and size. */
+	/** Back to the module's default position and size (Armor: back against the hotbar, where its own anchor puts it). */
 	public boolean resetPlacement() {
-		return setPlacement(descriptor.defaultPlacement());
+		boolean changed = setPlacement(descriptor.defaultPlacement());
+		if (ModuleId.ARMOR.equals(id())) {
+			changed |= ModuleSettings.Armor.placeHome(this);
+		}
+		return changed;
 	}
 
 	/** Grows by one with every real change; never goes back. */

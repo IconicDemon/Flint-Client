@@ -1,9 +1,9 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.Clock;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.Motion;
-import net.minecraft.util.Util;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -123,7 +123,7 @@ public class ScrollView extends Node {
 			return false;
 		}
 		model.scrollBy((float) (-amount * (flatThumb != 0 ? flatWheel : WHEEL)));
-		scrolledAt = Util.getMillis();
+		scrolledAt = Clock.millis();
 		return true;
 	}
 
@@ -136,7 +136,7 @@ public class ScrollView extends Node {
 		float before = model.target();
 		model.ensureVisible(top, top + descendant.height(), 6);
 		if (model.target() != before) {
-			scrolledAt = Util.getMillis();
+			scrolledAt = Clock.millis();
 		}
 	}
 
@@ -181,7 +181,7 @@ public class ScrollView extends Node {
 	public void mouseDrag(float mx, float my) {
 		if (draggingThumb) {
 			model.scrollTo(model.offsetForThumb(my - trackTop() - grabOffset, trackLength(), MIN_THUMB), true);
-			scrolledAt = Util.getMillis();
+			scrolledAt = Clock.millis();
 		}
 	}
 
@@ -250,7 +250,7 @@ public class ScrollView extends Node {
 			c.roundRectCorners(tx, ty, tw, th, c.px(1.5F), flatThumb);
 			return;
 		}
-		boolean recent = Util.getMillis() - scrolledAt < BAR_LINGER_MILLIS;
+		boolean recent = Clock.millis() - scrolledAt < BAR_LINGER_MILLIS;
 		barAlpha = Kit.approach(barAlpha, pointerIn || recent || draggingThumb ? 1 : 0, 0.12F);
 		if (barAlpha <= 0.01F) {
 			return;

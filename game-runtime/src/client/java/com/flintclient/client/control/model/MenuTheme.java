@@ -1,46 +1,113 @@
 package com.flintclient.client.control.model;
 
-import java.util.List;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Right Shift menu's theme: its accent colour, the surface family its panels are drawn in, how round its corners
- * are, and how strong its window shadow and the dim behind it are. Saved in Flint's settings (the same in every profile);
- * the menu derives every colour it draws from it (see {@code MenuStyle}). Version-neutral; immutable.
+ * The Right Shift menu's theme: one of the Flint app's own looks (Ember, Flint's own, then the launcher's themes, with its colours)
+ * and the menu's font. Saved in Flint's settings (the same in every profile); the menu derives every colour it draws from
+ * the look (see {@code MenuStyle}). Version-neutral; immutable.
  *
- * @param accentRgb the accent ({@code 0xRRGGBB}): selected things, primary buttons, focus
- * @param surface the panels' colour family
- * @param roundness corner radius, percent of Flint's own (40..160)
- * @param dim how dark the game gets behind the window, percent (20..90)
+ * @param look the colours: Flint (Dawn's slate black, white and orange, Flint's own), or one of the launcher's themes
+ * @param font Flint's typeface, or Minecraft's own font
  */
-public record MenuTheme(int accentRgb, Surface surface, int roundness, int dim) {
-	public static final int MIN_ROUNDNESS = 40;
-	public static final int MAX_ROUNDNESS = 160;
-	public static final int MIN_DIM = 20;
-	public static final int MAX_DIM = 90;
+public record MenuTheme(Look look, Font font) {
+	/** The launcher's themes, colour for colour (app/src/styles/tokens.css). */
+	public enum Look implements Labelled {
+		/**
+		 * Shown as "Ember". Its id stays {@code flint} so saved choices keep it; the older, near-identical Ember look was
+		 * folded into it ({@link #byId} reads {@code ember} as this one).
+		 */
+		FLINT("Ember", "Slate black, white and orange", 0x0D0F12, 0x0A0C0E, 0x0F1215, 0x171B20, 0x1E2329, 0x2C3033, 0xEDEDED, 0xF97316, 0xFA8A3C,
+			0xDB6410, 0xFFFFFF, 0xFB923C),
+		OBSIDIAN("Obsidian", "Graphite, neutral", 0x080809, 0x040405, 0x0F0F11, 0x151517, 0x1B1B1E, 0x242427, 0xD6D7DC, 0xA8ABB6, 0xB8BBC4, 0x8F929C,
+			0x0C0C0E, 0xC4C7CF),
+		MOSS("Moss", "Forest and sage", 0x0B0C0B, 0x060706, 0x121412, 0x171A17, 0x1D211D, 0x262B26, 0xE4EAE0, 0x76986A, 0x87A979, 0x61815A, 0x0B130A,
+			0xA5C196),
+		BLOODSTONE("Bloodstone", "Deep crimson", 0x0D0A0A, 0x070505, 0x141010, 0x1A1515, 0x211B1B, 0x2B2323, 0xF0E5E3, 0xAC383E, 0xBF4A50, 0x93303A,
+			0xFFF4F2, 0xDC7F82),
+		DUSK("Dusk", "Plum violet", 0x0B0A0E, 0x060509, 0x131119, 0x19161F, 0x1F1B27, 0x292432, 0xE8E4F0, 0x9276BA, 0xA287C7, 0x7A619F, 0x120D1C,
+			0xB9A3DC);
 
-	/** The panels' colour family. CHARCOAL is Flint's own warm charcoal; the others re-tint the same light levels. */
-	public enum Surface implements Labelled {
-		CHARCOAL("Charcoal", 1.00F, 1.00F, 1.00F, 1.00F),
-		GRAPHITE("Graphite", 1.00F, 1.00F, 1.00F, 0.97F),
-		MIDNIGHT("Midnight", 0.90F, 0.97F, 1.12F, 0.92F),
-		ONYX("Onyx", 1.00F, 0.99F, 0.98F, 0.74F);
+		/** The id of the Ember look that was removed (it matched Flint's own); read as {@link #FLINT}. */
+		private static final String REMOVED_EMBER = "ember";
 
 		private final String label;
-		/** Red, green and blue weights for a grey of a given light level (1 = neutral). */
-		public final float red;
-		public final float green;
-		public final float blue;
-		/** How light the dark surfaces are, against Flint's own (text keeps its light level). */
-		public final float depth;
+		private final String note;
+		/** The page behind everything, and the darkest rail. */
+		public final int background;
+		public final int rail;
+		/** Four raised surfaces, darkest first. */
+		public final int surface1;
+		public final int surface2;
+		public final int surface3;
+		public final int surface4;
+		/** Text. */
+		public final int ink;
+		/** The accent, with its hover and pressed shades, the text drawn on it, and its legible tint for text. */
+		public final int accent;
+		public final int accentHover;
+		public final int accentPress;
+		public final int accentInk;
+		public final int accentText;
 
-		Surface(String label, float red, float green, float blue, float depth) {
+		Look(String label, String note, int background, int rail, int surface1, int surface2, int surface3, int surface4, int ink, int accent,
+			int accentHover, int accentPress, int accentInk, int accentText) {
 			this.label = label;
-			this.red = red;
-			this.green = green;
-			this.blue = blue;
-			this.depth = depth;
+			this.note = note;
+			this.background = background;
+			this.rail = rail;
+			this.surface1 = surface1;
+			this.surface2 = surface2;
+			this.surface3 = surface3;
+			this.surface4 = surface4;
+			this.ink = ink;
+			this.accent = accent;
+			this.accentHover = accentHover;
+			this.accentPress = accentPress;
+			this.accentInk = accentInk;
+			this.accentText = accentText;
+		}
+
+		@Override
+		public String label() {
+			return label;
+		}
+
+		/** A few words on it, under its name on the Theme page. */
+		public String note() {
+			return note;
+		}
+
+		public String id() {
+			return name().toLowerCase(Locale.ROOT);
+		}
+
+		static @Nullable Look byId(@Nullable String id) {
+			if (REMOVED_EMBER.equals(id)) {
+				return FLINT;
+			}
+			for (Look l : values()) {
+				if (l.id().equals(id)) {
+					return l;
+				}
+			}
+			return null;
+		}
+	}
+
+	/**
+	 * The menu's typeface as saved by earlier versions: Flint's own (Nunito Sans) or Minecraft's pixel font. Kept so
+	 * saved settings still read; the menu now always draws in Minecraft's font.
+	 */
+	public enum Font implements Labelled {
+		DEFAULT("Default"),
+		MINECRAFT("Minecraft");
+
+		private final String label;
+
+		Font(String label) {
+			this.label = label;
 		}
 
 		@Override
@@ -52,99 +119,45 @@ public record MenuTheme(int accentRgb, Surface surface, int roundness, int dim) 
 			return name().toLowerCase(Locale.ROOT);
 		}
 
-		static @Nullable Surface byId(@Nullable String id) {
-			for (Surface s : values()) {
-				if (s.id().equals(id)) {
-					return s;
+		static @Nullable Font byId(@Nullable String id) {
+			for (Font f : values()) {
+				if (f.id().equals(id)) {
+					return f;
 				}
 			}
 			return null;
 		}
 	}
 
-	/** A named starting point in the Themes page. */
-	public record Preset(String id, String name, MenuTheme theme) {
-	}
-
-	/** Flint's own look: ember on warm charcoal. */
-	public static final MenuTheme FLINT = new MenuTheme(0xFF8139, Surface.CHARCOAL, 100, 55);
-
-	public static final List<Preset> PRESETS = List.of(
-		new Preset("flint", "Flint", FLINT),
-		new Preset("graphite", "Graphite", new MenuTheme(0xFF8139, Surface.GRAPHITE, 100, 55)),
-		new Preset("onyx", "Onyx", new MenuTheme(0xF0782F, Surface.ONYX, 70, 65)),
-		new Preset("midnight", "Midnight", new MenuTheme(0xFF9A5C, Surface.MIDNIGHT, 100, 60)),
-		new Preset("ember", "Ember", new MenuTheme(0xFF6A2B, Surface.CHARCOAL, 125, 55)),
-		new Preset("sand", "Sand", new MenuTheme(0xE3B46A, Surface.GRAPHITE, 100, 50)));
+	/** Flint's own look: Dawn's slate black, white and orange. */
+	public static final MenuTheme FLINT = new MenuTheme(Look.FLINT, Font.DEFAULT);
 
 	public MenuTheme {
-		accentRgb &= 0xFFFFFF;
-		if (surface == null) {
-			surface = Surface.CHARCOAL;
+		if (look == null) {
+			look = Look.FLINT;
 		}
-		roundness = Math.clamp(roundness, MIN_ROUNDNESS, MAX_ROUNDNESS);
-		dim = Math.clamp(dim, MIN_DIM, MAX_DIM);
-	}
-
-	public MenuTheme withAccent(int rgb) {
-		return new MenuTheme(rgb, surface, roundness, dim);
-	}
-
-	public MenuTheme withSurface(Surface value) {
-		return new MenuTheme(accentRgb, value, roundness, dim);
-	}
-
-	public MenuTheme withRoundness(int value) {
-		return new MenuTheme(accentRgb, surface, value, dim);
-	}
-
-	public MenuTheme withDim(int value) {
-		return new MenuTheme(accentRgb, surface, roundness, value);
-	}
-
-	/** The preset this theme is exactly, or null for a custom one. */
-	public @Nullable Preset preset() {
-		for (Preset preset : PRESETS) {
-			if (preset.theme().equals(this)) {
-				return preset;
-			}
+		if (font == null) {
+			font = Font.DEFAULT;
 		}
-		return null;
 	}
 
-	/**
-	 * {@code base} (an ARGB colour of Flint's charcoal family) in this theme's surface family: the same light level,
-	 * re-tinted; dark surfaces take the family's depth, light text keeps its level. Charcoal returns {@code base}.
-	 */
-	public int tint(int base) {
-		if (surface == Surface.CHARCOAL) {
-			return base;
-		}
-		int alpha = base >>> 24;
-		float light = 0.299F * (base >> 16 & 0xFF) + 0.587F * (base >> 8 & 0xFF) + 0.114F * (base & 0xFF);
-		float level = light * (light < 128 ? surface.depth : 1.0F);
-		int r = Math.clamp(Math.round(level * surface.red), 0, 255);
-		int g = Math.clamp(Math.round(level * surface.green), 0, 255);
-		int b = Math.clamp(Math.round(level * surface.blue), 0, 255);
-		return alpha << 24 | r << 16 | g << 8 | b;
+	public MenuTheme withLook(Look value) {
+		return new MenuTheme(value, font);
 	}
 
-	/** {@code #RRGGBB} for files. */
-	public String accentHex() {
-		return String.format(Locale.ROOT, "#%06X", accentRgb);
+	public MenuTheme withFont(Font value) {
+		return new MenuTheme(look, value);
 	}
 
-	/** A theme read from its saved parts; anything missing or unusable falls back to Flint's own. */
-	public static MenuTheme read(@Nullable String accentHex, @Nullable String surfaceId, @Nullable Integer roundness, @Nullable Integer dim) {
-		int accent = FLINT.accentRgb;
-		if (accentHex != null) {
-			int parsed = RgbSetting.parseHex(accentHex);
-			if (parsed >= 0) {
-				accent = parsed;
-			}
-		}
-		Surface surface = Surface.byId(surfaceId);
-		return new MenuTheme(accent, surface == null ? FLINT.surface : surface, roundness == null ? FLINT.roundness : roundness,
-			dim == null ? FLINT.dim : dim);
+	/** The accent ({@code 0xRRGGBB}). */
+	public int accentRgb() {
+		return look.accent;
+	}
+
+	/** A theme read from its saved parts; anything missing or unknown falls back to Flint's own. */
+	public static MenuTheme read(@Nullable String lookId, @Nullable String fontId) {
+		Look look = Look.byId(lookId);
+		Font font = Font.byId(fontId);
+		return new MenuTheme(look == null ? FLINT.look : look, font == null ? FLINT.font : font);
 	}
 }

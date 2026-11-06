@@ -1,0 +1,28 @@
+{
+	"name": "mesa",
+	"biomes": [
+		"#is_badlands",
+		"mesa",
+		"badlands",
+		"lush desert",
+		"outback",
+		"wasteland",
+		"steppe",
+		"arid highland",
+		"canyon"
+	],
+	"sounds": [
+		{
+			"name": "wind-mesa",
+			"files": [
+				"minecraft:block.dry_grass.ambient"
+			],
+			"category": "wind",
+			"pause": {
+				"min": 10,
+				"max": 60
+			},
+			"volume": 0.6
+		}
+	]
+}

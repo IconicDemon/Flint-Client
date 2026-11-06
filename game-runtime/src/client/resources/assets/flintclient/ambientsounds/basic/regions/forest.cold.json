@@ -1,0 +1,17 @@
+{
+	"name": "forest.cold",
+	"features": [
+		"tree"
+	],
+	"bad-regions": [
+		"rain",
+		"pale-garden"
+	],
+	"regions": [
+		"surface"
+	],
+	"temperature": {
+		"max": 0.5
+	},
+	"sounds": []
+}

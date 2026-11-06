@@ -9,7 +9,8 @@ import java.util.function.Supplier;
  * swapped in place without anything shifting.
  */
 public enum FilledIcon {
-	STAR(() -> Sdf.Polygon.of(Icon.starPoints()));
+	STAR(() -> Sdf.Polygon.of(Icon.starPoints())),
+	HEART(() -> Sdf.Polygon.of(Icon.heartPoints()));
 
 	private final Supplier<Sdf.Polygon> shape;
 	private Sdf.Polygon polygon;

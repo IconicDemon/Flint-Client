@@ -7,7 +7,7 @@
 // Every build gets a build number from the UTC time it was made (YYYY.MMDD.HHMM), which always
 // increases and fits macOS's CFBundleVersion format (up to three integers). The marketing version
 // stays in tauri.conf.json. The app shows both, plus the git commit, in Settings → About Flint.
-// It builds game-runtime/ first (the in-game menu jar the app embeds).
+// It builds game-runtime/ first (the in-game menu jars the app embeds, one per Minecraft line).
 // Set APPLE_SIGNING_IDENTITY to sign with a stable identity instead of the ad-hoc "-" (see
 // docs/INSTALL_WORKFLOW.md); Tauri reads it directly.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -32,20 +32,31 @@ console.log(`Flint release build ${build} (${commit})`);
 
 const windows = process.platform === "win32";
 
-// Flint's in-game runtime (game-runtime/) is embedded in the app, so it is built first; the release
-// fails rather than ship an app that silently lacks it. (Windows runs the batch wrappers through its shell.)
-const runtime = spawnSync(windows ? ".\\gradlew.bat" : "./gradlew", ["build", "--quiet"], { cwd: "../game-runtime", stdio: "inherit", shell: windows });
-if (runtime.status !== 0) {
-  console.error("The in-game runtime (game-runtime/) failed to build.");
-  process.exit(runtime.status ?? 1);
-}
-// The app embeds the jar of its own version (src-tauri/build.rs); without it the build would quietly ship
-// without Flint's in-game menu, so a missing jar stops the release.
+// Flint's in-game runtime (game-runtime/) is embedded in the app, so it is built first, once per Minecraft
+// line it supports (26.3 is the main build; src-tauri/build.rs's RUNTIME_LINES lists them all); the release
+// fails rather than ship an app that silently lacks one. (Windows runs the batch wrappers through its shell.)
 const version = JSON.parse(readFileSync("package.json", "utf8")).version;
-const jar = `../game-runtime/build/libs/flint-game-runtime-${version}.jar`;
-if (!existsSync(jar)) {
-  console.error(`The in-game runtime for ${version} is missing (${jar}).`);
-  process.exit(1);
+// Each line with the Minecraft version it compiles against (one 26.1 jar, built against 26.1.2, serves every 26.1 release;
+// the obfuscated 1.21.x lines are game-runtime/legacy's build, 1.8.9 is game-runtime/legacy189's own code base). 26.3 comes first: its clean empties game-runtime/build.
+for (const [line, minecraft] of [["26.3", "26.3"], ["26.2", "26.2"], ["26.1", "26.1.2"], ["1.21.11", "1.21.11"], ["1.21.10", "1.21.10"], ["1.21.1", "1.21.1"], ["1.8.9", "1.8.9"]]) {
+  const main = line === "26.3";
+  const project = minecraft === "1.8.9" ? ["-p", "legacy189"] : minecraft.startsWith("1.") ? ["-p", "legacy"] : [];
+  // A clean build each time: an incremental one can keep classes of deleted sources in the jar.
+  const gradle = [...project, "clean", "build", "--quiet", ...(main || minecraft === "1.8.9" ? [] : [`-Pminecraft_version=${minecraft}`])];
+  const runtime = spawnSync(windows ? ".\\gradlew.bat" : "./gradlew", gradle, { cwd: "../game-runtime", stdio: "inherit", shell: windows });
+  if (runtime.status !== 0) {
+    console.error(`The in-game runtime (game-runtime/) failed to build for Minecraft ${line}.`);
+    process.exit(runtime.status ?? 1);
+  }
+  // The app embeds the jars of its own version (src-tauri/build.rs); without one the build would quietly ship
+  // without Flint's in-game menu on that line, so a missing jar stops the release.
+  const jar = main
+    ? `../game-runtime/build/libs/flint-game-runtime-${version}.jar`
+    : `../game-runtime/build/mc-${line}/libs/flint-game-runtime-${version}+${line}.jar`;
+  if (!existsSync(jar)) {
+    console.error(`The in-game runtime ${version} for Minecraft ${line} is missing (${jar}).`);
+    process.exit(1);
+  }
 }
 
 // Signed update archives (the files installed copies update from) need the updater signing key
@@ -60,6 +71,13 @@ const extra = process.argv.slice(2);
 const bundles = extra.includes("--bundles") ? [] : ["--bundles", windows ? "nsis" : "app"];
 // The build number goes into the macOS bundle version (Windows installers take the marketing version).
 const config = windows ? [] : ["--config", JSON.stringify({ bundle: { macOS: { bundleVersion: build } } })];
+// A staging test build (FLINT_CHANNEL=staging; src-tauri/src/channel.rs) installs beside the real Flint as "Flint Client
+// Staging", with its own data folder, sign-ins and update channel (one nothing is published to), and no .flintpack files.
+// build.rs refuses it without every staging address.
+if (process.env.FLINT_CHANNEL === "staging") {
+  console.log(`STAGING build: Flint's staging project and Store (${process.env.FLINT_STORE_URL ?? "no FLINT_STORE_URL"}), installed as "Flint Client Staging".`);
+  config.push("--config", "src-tauri/tauri.staging.conf.json");
+}
 if (!signing) {
   // A file (relative, inside the ignored build folder) rather than inline JSON, which Windows' shell would mangle.
   mkdirSync("src-tauri/target.noindex", { recursive: true });
@@ -83,7 +101,7 @@ const result = spawnSync(
     },
   },
 );
-if (result.status === 0 && !windows) reportSigning();
+if (result.status === 0 && process.platform === "darwin" && !extra.includes("--target")) reportSigning();
 process.exit(result.status ?? 1);
 
 // Prints how the built app is signed. macOS ties Keychain access to the designated requirement: an

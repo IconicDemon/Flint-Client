@@ -93,12 +93,4 @@ class LayoutNamesTest {
 		String full = "y".repeat(32);
 		assertEquals("y".repeat(30) + " 2", LayoutNames.uniqueName(full, List.of(full)), "stays within 32");
 	}
-
-	@Test
-	void onboardingShowsOnlyForANewPlayer() {
-		assertTrue(OnboardingDecision.shouldShow(false, false));
-		assertFalse(OnboardingDecision.shouldShow(true, false), "finished or skipped");
-		assertFalse(OnboardingDecision.shouldShow(false, true), "already has layouts");
-		assertFalse(OnboardingDecision.shouldShow(true, true));
-	}
 }

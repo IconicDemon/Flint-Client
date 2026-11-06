@@ -1,10 +1,9 @@
 package com.flintclient.client.render;
 
-import com.flintclient.client.FlintClient;
+import com.flintclient.client.FlintLog;
+import com.flintclient.client.platform.FontRef;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.network.chat.FontDescription;
-import net.minecraft.resources.Identifier;
 
 /**
  * One of Flint's bundled typefaces at a size of the caller's choosing, for text that scales in steps
@@ -35,7 +34,7 @@ public final class ScaledFont implements FontFace {
 	private final float size;
 	private final float capHeight;
 	private final FlintFonts.Coverage coverage;
-	private final FontDescription.Resource[] perScale = new FontDescription.Resource[FlintFonts.MAX_SCALE + 1];
+	private final FontRef[] perScale = new FontRef[FlintFonts.MAX_SCALE + 1];
 
 	private ScaledFont(String file, int hundredths, float capHeight, FlintFonts.Coverage coverage) {
 		this.file = file;
@@ -48,11 +47,33 @@ public final class ScaledFont implements FontFace {
 
 	/** {@code like}'s typeface (file, cap height, character coverage) at {@code size} units. */
 	public static ScaledFont of(FlintFonts like, float size) {
+		return of(like.file(), like.capHeight, like.coverage(), size);
+	}
+
+	/**
+	 * {@code like}'s typeface at exactly {@code size} units, even once {@link #MAX_FACES} faces exist: text drawn at a
+	 * fractional scale (TextLine#atScale) must be its own size to line up with what it was laid out for. Those sizes are few
+	 * (a quarter-step menu scale times the menu's roles), so this stays bounded.
+	 */
+	public static ScaledFont exact(FlintFonts like, float size) {
+		return of(like.file(), like.capHeight, like.coverage(), size, false);
+	}
+
+	/** This face's typeface at exactly {@code size} units (as {@link #exact}). */
+	public ScaledFont resized(float size) {
+		return of(file, capHeight, coverage, size, false);
+	}
+
+	private static ScaledFont of(String file, float capHeight, FlintFonts.Coverage coverage, float size) {
+		return of(file, capHeight, coverage, size, true);
+	}
+
+	private static ScaledFont of(String file, float capHeight, FlintFonts.Coverage coverage, float size, boolean capped) {
 		int hundredths = quantise(size);
 		ScaledFont nearest = null;
 		for (int i = 0; i < FACES.size(); i++) {
 			ScaledFont face = FACES.get(i);
-			if (face.file.equals(like.file())) {
+			if (face.file.equals(file)) {
 				if (face.hundredths == hundredths) {
 					return face;
 				}
@@ -61,14 +82,14 @@ public final class ScaledFont implements FontFace {
 				}
 			}
 		}
-		if (FACES.size() >= MAX_FACES && nearest != null) {
+		if (capped && FACES.size() >= MAX_FACES && nearest != null) {
 			if (!warnedFull) {
 				warnedFull = true;
-				FlintClient.LOGGER.warn("Flint has {} scaled font sizes already; reusing the nearest size from now on", MAX_FACES);
+				FlintLog.LOGGER.warn("Flint has {} scaled font sizes already; reusing the nearest size from now on", MAX_FACES);
 			}
 			return nearest;
 		}
-		ScaledFont face = new ScaledFont(like.file(), hundredths, like.capHeight, like.coverage());
+		ScaledFont face = new ScaledFont(file, hundredths, capHeight, coverage);
 		FACES.add(face);
 		return face;
 	}
@@ -84,22 +105,20 @@ public final class ScaledFont implements FontFace {
 		return Math.round(clamped * STEPS_PER_UNIT) * (100 / STEPS_PER_UNIT);
 	}
 
-	/** The font name for one pixel scale, as registered for FontManagerMixin. */
+	/** The font name for one pixel scale ({@link FontRef#bundled}). */
 	static String name(String stem, int hundredths, int scale) {
 		return "scaled_" + stem + "_" + hundredths + "_" + scale;
 	}
 
 	@Override
-	public FontDescription forScale(int scale) {
+	public FontRef forScale(int scale) {
 		int s = Math.clamp(scale, 1, FlintFonts.MAX_SCALE);
-		FontDescription.Resource resource = perScale[s];
-		if (resource == null) {
-			Identifier id = Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, name(stem, hundredths, s));
-			FlintFonts.register(id, new FlintFonts.Spec(file, size, s));
-			resource = new FontDescription.Resource(id);
-			perScale[s] = resource;
+		FontRef font = perScale[s];
+		if (font == null) {
+			font = FontRef.bundled(name(stem, hundredths, s), file, size, s);
+			perScale[s] = font;
 		}
-		return resource;
+		return font;
 	}
 
 	@Override

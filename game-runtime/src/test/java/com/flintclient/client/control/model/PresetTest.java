@@ -30,7 +30,6 @@ class PresetTest {
 		assertEquals(HudThemeId.MINIMAL, layout.appearance().theme());
 		assertEquals(HudPlacement.of(Anchor.TOP_LEFT, 4, 4), layout.module(ModuleId.FPS).placement());
 		assertEquals(HudPlacement.of(Anchor.TOP_LEFT, 4, 19), layout.module(ModuleId.COORDINATES).placement());
-		assertEquals("FPS · Coordinates", Preset.MINIMAL.summary());
 	}
 
 	@Test
@@ -38,7 +37,7 @@ class PresetTest {
 		Layout layout = Preset.BALANCED.create("balanced", "Balanced", HudThemeId.FLINT);
 		assertEquals(List.of("fps", "ping", "coordinates", "direction", "armor", "effects"), enabled(layout));
 		assertEquals(HudThemeId.FLINT, Preset.BALANCED.theme());
-		assertEquals(HudPlacement.of(Anchor.LEFT, 4, 0), layout.module(ModuleId.EFFECTS).placement());
+		assertEquals(HudPlacement.of(Anchor.TOP_RIGHT, 1, 1), layout.module(ModuleId.EFFECTS).placement());
 		assertEquals(HudPlacement.of(Anchor.BOTTOM_RIGHT, 4, 4), layout.module(ModuleId.ARMOR).placement());
 		assertTrue(layout.module(ModuleId.EFFECTS).bool(ModuleSettings.Effects.HIDE_VANILLA_EFFECTS));
 	}
@@ -73,6 +72,7 @@ class PresetTest {
 			Layout layout = preset.create("p", "P", preset.theme());
 			for (float[] screen : ModuleRegistryTest.SCREENS) {
 				List<HudRect> rects = new ArrayList<>();
+				HudRect ping = null;
 				for (ModuleState module : layout.modules()) {
 					if (!module.enabled()) {
 						continue;
@@ -80,7 +80,11 @@ class PresetTest {
 					float[] size = ModuleRegistryTest.SIZES.get(module.id());
 					HudRect rect = module.placement().toAbsolute(screen[0], screen[1], size[0], size[1]);
 					assertTrue(rect.within(screen[0], screen[1]), preset + " " + module.id() + " fits " + screen[0] + "x" + screen[1]);
-					rects.add(rect);
+					if (module.id().equals(ModuleId.PING)) {
+						ping = rect;
+					}
+					// Ping comes before Effects, as the HUD draws them: at its default corner Effects steps under Ping's readout.
+					rects.add(module.id().equals(ModuleId.EFFECTS) ? ModuleRegistryTest.underPing(rect, ping) : rect);
 				}
 				ModuleRegistryTest.assertNoOverlap(rects, screen);
 			}

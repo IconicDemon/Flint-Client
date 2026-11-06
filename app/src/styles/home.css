@@ -543,16 +543,27 @@
   filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
 }
 
-.skin-fallback span {
-  display: grid;
-  place-items: center;
-  align-self: center;
-  width: 140px;
-  height: 140px;
-  border-radius: 20px;
-  background: var(--surface-3);
-  font-size: 48px;
-  color: var(--text-2);
+/* Until the skin is drawn the stage stays empty; the figure, name tag and shadow then fade in. */
+.skin-host,
+.skin-fallback img,
+.skin-stage .nameplate,
+.skin-shadow {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.skin-stage.is-ready .skin-host,
+.skin-stage.is-ready .skin-fallback img,
+.skin-stage.is-ready .nameplate,
+.skin-stage.is-ready .skin-shadow {
+  opacity: 1;
+}
+
+[data-motion="reduced"] .skin-host,
+[data-motion="reduced"] .skin-fallback img,
+[data-motion="reduced"] .skin-stage .nameplate,
+[data-motion="reduced"] .skin-shadow {
+  transition: none;
 }
 
 .home-signin {
@@ -577,10 +588,16 @@
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   width: clamp(240px, 22vw, 316px);
   min-width: 0;
   animation: launch-in var(--t-page) 60ms var(--ease-out) both;
+}
+
+/* Friends and Discord sit a little lower than the launch row's baseline, under the featured partner. */
+.home-side > .side-friends {
+  margin-top: 2px;
+  margin-bottom: calc(var(--baseline) * -0.3);
 }
 
 .side-news {
@@ -617,20 +634,60 @@
 }
 
 .news-item {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 11px;
+  width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-sm);
+  text-align: left;
 }
 
-.news-item img,
+/* A news item with a page to open: a button, with hover and press feedback and the keyboard focus ring. */
+.news-item.is-link {
+  cursor: pointer;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    transform var(--t-micro) var(--ease);
+}
+
+.news-item.is-link:hover {
+  background: rgba(var(--ink-rgb), 0.06);
+}
+
+.news-item.is-link:active {
+  transform: scale(0.985);
+  transition-duration: var(--t-press);
+}
+
+.news-item.is-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.news-go {
+  position: absolute;
+  top: 9px;
+  right: 8px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.news-item.is-link:hover .news-go,
+.news-item.is-link:focus-visible .news-go {
+  opacity: 1;
+}
+
+.news-item > img,
 .news-badge {
-  width: 44px;
-  height: 30px;
+  width: 46px;
+  height: 46px;
   flex: none;
-  border-radius: 6px;
+  border-radius: 9px;
   object-fit: cover;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
 }
 
 .news-badge {
@@ -645,23 +702,108 @@
   color: var(--accent-text);
 }
 
-.news-item > span {
-  display: flex;
+/* Flint's own news: sparks off a fire with the Flint flame over its dark side, the size of Mojang's pictures. */
+.news-item > .news-art {
+  position: relative;
+  display: block;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #120a05;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+}
+
+.news-item .news-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  object-fit: cover;
+}
+
+/* The photo's left side darkened, so the flame reads against it. */
+.news-item > .news-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 5, 3, 0.82) 0%, rgba(8, 5, 3, 0.45) 46%, rgba(8, 5, 3, 0) 80%);
+}
+
+.news-item .news-art .news-art-mark {
+  position: absolute;
+  z-index: 1;
+  left: 5px;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+  object-fit: contain;
+  filter: drop-shadow(0 0 3px rgba(255, 140, 60, 0.35)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+/* A release's own banner (1.0.1): the panel's full width above the text, always whole at 16:9 (never cropped, dimmed or
+   covered: its logo is top left and its text runs down the left half), framed by a hairline on every theme. */
+.news-item.is-featured {
   flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.news-item.is-featured > .news-art.is-banner {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  box-shadow: none;
+}
+
+.news-item .news-art.is-banner img {
+  object-fit: contain;
+}
+
+.news-item > .news-art.is-banner::after {
+  background: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  pointer-events: none;
+}
+
+/* The open-in-browser arrow stays by the text, off the banner. */
+.news-item.is-featured .news-go {
+  top: auto;
+  bottom: 9px;
+}
+
+.news-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
+  padding-right: 10px;
   line-height: 1.3;
 }
 
+/* Long headlines: two lines, then an ellipsis (the full title is the item's tooltip). */
 .news-item strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 12.5px;
   font-weight: 550;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
-.news-item .faint {
+.news-meta {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.news-desc {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -695,6 +837,27 @@
   gap: 8px;
   min-width: 0;
   white-space: nowrap;
+}
+
+.side-friends-open {
+  height: 30px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  color: inherit;
+  transition:
+    background-color var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease);
+}
+
+.side-friends-open:hover {
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--fg);
+}
+
+.side-friends-open:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .side-link {
@@ -734,9 +897,43 @@
   }
 }
 
+/* Windows under 880px tall have no room above the news for the full banner (the side column would pass the top bar):
+   it sits beside the text like the other pictures, still whole at 16:9, and every news picture takes the same 16:9
+   width so the text lines up. */
+@media (max-height: 880px) {
+  .news-item.is-featured {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 11px;
+  }
+  .news-item.is-flint > .news-art,
+  .news-item.is-featured > .news-art.is-banner {
+    width: calc(46px * 16 / 9);
+    height: 46px;
+  }
+  .news-item.is-featured .news-go {
+    top: 9px;
+    bottom: auto;
+  }
+}
+
 @media (max-height: 780px) {
   .home-layout {
     padding-top: 60px;
+  }
+  .news-desc {
+    display: none;
+  }
+  .news-item > img,
+  .news-badge,
+  .news-item > .news-art {
+    width: 40px;
+    height: 40px;
+  }
+  .news-item.is-flint > .news-art,
+  .news-item.is-featured > .news-art.is-banner {
+    width: calc(40px * 16 / 9);
+    height: 40px;
   }
   .launch-title {
     font-size: clamp(32px, 3vw, 46px);

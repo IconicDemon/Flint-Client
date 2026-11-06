@@ -9,13 +9,11 @@ import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import javax.sound.sampled.AudioFormat;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.resources.sounds.AbstractSoundInstance;
 import net.minecraft.client.resources.sounds.Sound;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.resources.Identifier;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.Util;
 import net.minecraft.util.valueproviders.ConstantFloat;
@@ -99,7 +97,7 @@ public final class UiSounds {
 		if (playing != null) {
 			sounds.stop(playing);
 		}
-		Instance instance = new Instance(cue, Math.min(volume, 1.0F));
+		UiSoundInstance instance = new UiSoundInstance(cue.sound, cue.event, Math.min(volume, 1.0F), RANDOM);
 		playing = instance;
 		sounds.play(instance);
 	}
@@ -135,23 +133,4 @@ public final class UiSounds {
 		}
 	}
 
-	/** An interface sound like vanilla's button click: UI category, heard at the listener, no distance falloff. */
-	private static final class Instance extends AbstractSoundInstance {
-		private final Cue cue;
-
-		Instance(Cue cue, float volume) {
-			super(cue.sound.getLocation(), SoundSource.UI, RANDOM);
-			this.cue = cue;
-			this.volume = volume;
-			this.attenuation = SoundInstance.Attenuation.NONE;
-			this.relative = true;
-		}
-
-		@Override
-		public WeighedSoundEvents getOrResolve(SoundManager soundManager) {
-			sound = cue.sound;
-			soundEvent = cue.event;
-			return cue.event;
-		}
-	}
 }

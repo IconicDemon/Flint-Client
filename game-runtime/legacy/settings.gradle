@@ -1,0 +1,15 @@
+// The game runtime for obfuscated Minecraft lines (1.21.x), from the same sources as the 26.x build (../src). A build of its
+// own because those lines need Loom's remap plugin, so the 26.x build stays exactly as it is.
+// Build from game-runtime with: ./gradlew -p legacy build -Pminecraft_version=1.21.11
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = "flint-game-runtime"

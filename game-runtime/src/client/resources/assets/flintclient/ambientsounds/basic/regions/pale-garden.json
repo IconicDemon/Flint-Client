@@ -1,0 +1,36 @@
+{
+	"name": "forest",
+	"features": [
+		"tree"
+	],
+	"biomes": [
+		"pale*garden"
+	],
+	"sounds": [
+		{
+			"name": "pale-garden-ambience",
+			"files": [
+				"minecraft:block.pale_hanging_moss.idle",
+				"minecraft:block.creaking_heart.idle"
+			],
+			"category": "suspense",
+			"pause": {
+				"min": 40,
+				"max": 200
+			},
+			"volume": 0.6
+		},
+		{
+			"name": "eyeblossom",
+			"files": [
+				"minecraft:block.eyeblossom.idle"
+			],
+			"pause": {
+				"min": 100,
+				"max": 600
+			},
+			"category": "bird_night",
+			"volume": 0.5
+		}
+	]
+}

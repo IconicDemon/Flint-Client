@@ -148,7 +148,8 @@ final class FpsView extends ModuleView {
 		FpsSizing sizing = state.choice(ModuleSettings.Fps.BACKGROUND_TYPE);
 		box.layout(textW, textH, p.s.u, mode, state.bool(ModuleSettings.Fps.BACKGROUND), sizing, state.integer(ModuleSettings.Fps.WIDTH),
 			state.integer(ModuleSettings.Fps.HEIGHT), state.bool(ModuleSettings.Fps.BORDER), state.integer(ModuleSettings.Fps.BORDER_THICKNESS),
-			state.integer(ModuleSettings.Fps.CORNER_RADIUS), state.choice(ModuleSettings.Fps.ALIGN));
+			state.integer(ModuleSettings.Fps.CORNER_RADIUS), state.choice(ModuleSettings.Fps.ALIGN),
+			state.integer(ModuleSettings.Fps.STYLE.horizontalPadding), state.integer(ModuleSettings.Fps.STYLE.verticalPadding));
 		if (box.box && sizing == FpsSizing.DYNAMIC) {
 			int held = hold.width(box.width, now);
 			if (held > box.width) {

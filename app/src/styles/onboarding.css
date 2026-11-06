@@ -1,6 +1,8 @@
 .ob {
   position: relative;
   display: grid;
+  /* One column, exactly the window's width: a wide footer can't stretch the page past it. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 56px 2px minmax(0, 1fr) auto;
   height: 100%;
   overflow: hidden;
@@ -705,11 +707,15 @@
   height: auto;
   margin-bottom: 10px;
   image-rendering: pixelated;
+  animation: ob-figure-in 0.4s ease both;
 }
 
-.ob-reveal-figure .avatar {
-  margin-bottom: 30px;
+@keyframes ob-figure-in {
+  from {
+    opacity: 0;
+  }
 }
+
 
 .ob-reveal-text {
   display: flex;
@@ -1291,40 +1297,10 @@
   margin-top: 2px;
 }
 
-/* Startup / Community */
+/* Startup / Start choice */
 .ob-yesno {
   display: grid;
   gap: 10px;
-}
-
-.ob-community {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 18px;
-}
-
-.ob-community > div {
-  flex: 1;
-}
-
-.ob-community strong {
-  color: var(--fg);
-}
-
-.ob-community-logo {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 50px;
-  height: 50px;
-  border-radius: 14px;
-  background: #5865f2;
-  color: #fff;
-}
-
-[data-theme="mono"] .ob-community-logo {
-  background: var(--surface-4);
 }
 
 /* Appearance */

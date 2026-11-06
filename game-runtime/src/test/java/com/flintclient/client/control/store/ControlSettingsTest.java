@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.control.model.GameOptions;
 import com.flintclient.client.control.model.InterfaceSize;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -51,7 +52,6 @@ class ControlSettingsTest {
 		assertFalse(settings.showHudWithDebugScreen());
 		assertEquals(List.of(), settings.favorites());
 		assertEquals(List.of(), settings.recents());
-		assertFalse(settings.onboardingCompleted());
 		assertFalse(settings.hintShown());
 		assertNull(settings.activeLayout());
 	}
@@ -80,7 +80,6 @@ class ControlSettingsTest {
 		settings.setFavorite("armor", true);
 		settings.recordChange("cps");
 		settings.recordChange("ping");
-		settings.setOnboardingCompleted(true);
 		settings.setHintShown(true);
 		settings.setActiveLayout("pvp-2");
 		assertTrue(settings.dirty());
@@ -98,7 +97,6 @@ class ControlSettingsTest {
 		assertTrue(read.showHudWithDebugScreen());
 		assertEquals(List.of("fps", "armor"), read.favorites());
 		assertEquals(List.of("ping", "cps"), read.recents());
-		assertTrue(read.onboardingCompleted());
 		assertTrue(read.hintShown());
 		assertEquals("pvp-2", read.activeLayout());
 
@@ -111,6 +109,40 @@ class ControlSettingsTest {
 	}
 
 	@Test
+	void gameOptionsRoundTripAndAreWrittenOnlyOnceChanged() throws IOException {
+		ControlSettings settings = settings();
+		assertFalse(settings.gameBool(GameOptions.NO_HOTBAR_LOOPING));
+		assertEquals(30, settings.gameInt(GameOptions.INACTIVE_FPS));
+		assertTrue(settings.save());
+		assertFalse(Files.exists(file()), "nothing changed: nothing written");
+		settings.setFavorite("fps", true);
+		assertTrue(settings.save());
+		assertFalse(saved().has("game"), "game options all at their defaults: no game section");
+
+		assertTrue(settings.setGame(GameOptions.NO_HOTBAR_LOOPING, true));
+		assertFalse(settings.setGame(GameOptions.NO_HOTBAR_LOOPING, true), "same value again");
+		assertTrue(settings.setGame(GameOptions.INACTIVE_FPS, 500), "clamped to the range");
+		assertTrue(settings.setGame(GameOptions.LEAVE_KEY, "key.keyboard.l"));
+		assertTrue(settings.save());
+
+		ControlSettings read = settings();
+		assertTrue(read.gameBool(GameOptions.NO_HOTBAR_LOOPING));
+		assertEquals(120, read.gameInt(GameOptions.INACTIVE_FPS));
+		assertEquals("key.keyboard.l", read.game(GameOptions.LEAVE_KEY));
+		assertFalse(read.gameBool(GameOptions.CLOCK_24H), "untouched options keep their defaults (a 12-hour menu clock)");
+		assertEquals(120, saved().getAsJsonObject("game").get("inactiveFps").getAsInt());
+		assertThrows(IllegalArgumentException.class, () -> read.game(ControlSettings.SOUNDS), "not a game option");
+	}
+
+	@Test
+	void idleTimeIsAtLeastASecond() {
+		assertEquals(300_000, GameOptions.idleMillis(5, 0));
+		assertEquals(1000, GameOptions.idleMillis(0, 0));
+		assertEquals("Only with Limit when idle on", GameOptions.inactiveReason(GameOptions.IDLE_MINUTES, b -> false));
+		assertNull(GameOptions.inactiveReason(GameOptions.INACTIVE_FPS, b -> b == GameOptions.LIMIT_UNFOCUSED));
+	}
+
+	@Test
 	void eachBadValueFallsBackOnItsOwn() throws IOException {
 		write("""
 			{"schema": 1,
@@ -119,7 +151,7 @@ class ControlSettingsTest {
 			 "accessibility": {"interfaceSize": "huge", "highContrast": true},
 			 "hud": [],
 			 "library": {"favorites": ["fps", 3, null, "fps", "ping"], "recents": ["a", "b", "c", "d", "e", ""]},
-			 "onboarding": {"completed": "true", "hintShown": true},
+			 "onboarding": {"hintShown": true},
 			 "activeLayout": "Not An Id!"}
 			""");
 		ControlSettings settings = settings();
@@ -133,7 +165,6 @@ class ControlSettingsTest {
 		assertFalse(settings.showHudWithDebugScreen(), "wrong container: default");
 		assertEquals(List.of("fps", "ping"), settings.favorites(), "non-strings and repeats dropped");
 		assertEquals(List.of("a", "b", "c", "d"), settings.recents(), "at most four");
-		assertFalse(settings.onboardingCompleted());
 		assertTrue(settings.hintShown());
 		assertNull(settings.activeLayout(), "not a layout id");
 		assertNull(settings.notice(), "bad values aren't a damaged file");
@@ -169,11 +200,11 @@ class ControlSettingsTest {
 
 	@Test
 	void aNewerFileIsUsedButNeverWritten() throws IOException {
-		String newer = "{\"schema\": 3, \"sounds\": {\"enabled\": false}, \"onboarding\": {\"completed\": true}}";
+		String newer = "{\"schema\": 3, \"sounds\": {\"enabled\": false}, \"onboarding\": {\"hintShown\": true}}";
 		write(newer);
 		ControlSettings settings = settings();
 		assertFalse(settings.soundsEnabled(), "understood values are used");
-		assertTrue(settings.onboardingCompleted());
+		assertTrue(settings.hintShown());
 		assertTrue(settings.readOnly());
 		assertEquals("Saved by a newer Flint version; changes won't be saved.", settings.notice());
 		settings.setHighContrast(true);
@@ -218,9 +249,9 @@ class ControlSettingsTest {
 		assertFalse(settings.readOnly(), "not stuck read-only");
 		assertEquals("control-center.json couldn't be read. Flint saved a copy as control-center.damaged-20261015-101500.json and is "
 			+ "using defaults.", settings.notice());
-		settings.setOnboardingCompleted(true);
-		assertTrue(settings.save(), "skipping setup is remembered");
-		assertTrue(settings().onboardingCompleted());
+		settings.setHintShown(true);
+		assertTrue(settings.save(), "the hint being shown is remembered");
+		assertTrue(settings().hintShown());
 		assertNull(settings.notice());
 		assertArrayEquals(latin1, Files.readAllBytes(file().resolveSibling("control-center.damaged-20261015-101500.json")));
 	}
@@ -291,7 +322,7 @@ class ControlSettingsTest {
 	void theMenuThemeCompactViewAndFoldedSectionsSurviveARestart(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
 		ControlSettings first = new ControlSettings(dir, JsonStoreTest.CLOCK);
 		com.flintclient.client.control.model.MenuTheme theme = com.flintclient.client.control.model.MenuTheme.FLINT
-			.withAccent(0x3366FF).withSurface(com.flintclient.client.control.model.MenuTheme.Surface.ONYX).withRoundness(60).withDim(80);
+			.withLook(com.flintclient.client.control.model.MenuTheme.Look.BLOODSTONE).withFont(com.flintclient.client.control.model.MenuTheme.Font.MINECRAFT);
 		first.setMenuTheme(theme);
 		first.setCompactView(true);
 		first.setSectionCollapsed("zoom/Smooth", true);
@@ -306,10 +337,40 @@ class ControlSettingsTest {
 	}
 
 	@Test
+	void aTwentyFourHourClockSavedBeforeTheTwelveHourDefaultIsNotAChoice() throws IOException {
+		write("{\"schema\": 1, \"game\": {\"clock24h\": true, \"inactiveFps\": 60}}");
+		ControlSettings old = settings();
+		assertFalse(old.gameBool(GameOptions.CLOCK_24H), "written as the old default, not chosen");
+		assertEquals(60, old.gameInt(GameOptions.INACTIVE_FPS), "the other options are kept");
+		assertTrue(old.setGame(GameOptions.CLOCK_24H, true));
+		assertTrue(old.save());
+		assertTrue(saved().getAsJsonObject("game").get("clock12hDefault").getAsBoolean());
+		assertTrue(settings().gameBool(GameOptions.CLOCK_24H), "chosen since: kept");
+	}
+
+	@Test
 	void aMissingMenuSectionMeansFlintsOwnLook(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
 		ControlSettings settings = new ControlSettings(dir, JsonStoreTest.CLOCK);
 		assertEquals(com.flintclient.client.control.model.MenuTheme.FLINT, settings.menuTheme());
 		assertFalse(settings.compactView());
 		assertFalse(settings.dirty());
+	}
+
+	@Test
+	void theColourPickersRecentColoursAreNewestFirstEightAtMostAndKept() throws IOException {
+		ControlSettings settings = settings();
+		assertEquals(0, settings.recentColors().length);
+		for (int rgb = 1; rgb <= 9; rgb++) {
+			settings.addRecentColor(rgb * 0x111111);
+		}
+		settings.addRecentColor(0x333333);
+		assertTrue(settings.save());
+		int[] kept = settings().recentColors();
+		assertEquals(ControlSettings.MAX_RECENT_COLORS, kept.length, "the oldest fell off");
+		assertEquals(0x333333, kept[0], "used again: first, and once");
+		assertEquals(0x999999, kept[1]);
+		assertEquals(0x222222, kept[kept.length - 1]);
+		write("{\"schema\": 1, \"menu\": {\"recentColors\": [\"#abcdef\", \"red\", \"#ABCDEF\", 5, \"#12345\", \"#00ff00\"]}}");
+		assertArrayEquals(new int[] {0xABCDEF, 0x00FF00}, settings().recentColors(), "bad and repeated entries are dropped");
 	}
 }

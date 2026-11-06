@@ -2,10 +2,12 @@ package com.flintclient.client.control.store;
 
 import com.flintclient.client.control.model.BoolSetting;
 import com.flintclient.client.control.model.ChoiceSetting;
+import com.flintclient.client.control.model.GameOptions;
 import com.flintclient.client.control.model.IntSetting;
 import com.flintclient.client.control.model.InterfaceSize;
 import com.flintclient.client.control.model.LayoutNames;
 import com.flintclient.client.control.model.LibraryQuery;
+import com.flintclient.client.control.model.SettingDescriptor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -17,12 +19,12 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The Control Center's own settings, in {@code config/flintclient/control-center.json}: sounds, motion,
- * accessibility, the HUD's debug-screen rule, the library's favourites and recents, first-time setup and the
+ * accessibility, the HUD's debug-screen rule, the library's favourites and recents, the first-world hint and the
  * active layout. Key bindings are not here: they are Minecraft key mappings, saved in {@code options.txt}.
  *
  * <p>Read once, on first use (or by {@link #load()}, which the Control Center calls at client start so the first
  * HUD frame doesn't do it). Setters change memory and mark the file dirty; {@link #save()} writes it, and is
- * called only at the moments the Control Center decides (closing, Save, layout actions, finishing setup), never
+ * called only at the moments the Control Center decides (closing, Save, layout actions), never
  * per frame or per slider step. Getters are allocation-free.
  */
 public final class ControlSettings {
@@ -39,8 +41,8 @@ public final class ControlSettings {
 	public static final BoolSetting ANIMATIONS = new BoolSetting("animations", "Animations", true);
 	public static final BoolSetting FOLLOW_REDUCED_MOTION = new BoolSetting("followMinecraftReducedMotion",
 		"Follow Minecraft's reduced motion", "When the panorama speed is 0 in Minecraft's Accessibility settings", true);
-	public static final BoolSetting TRANSITION_BLUR = new BoolSetting("transitionBlur", "Motion blur",
-		"A brief directional blur on panel edges while they move", true);
+	public static final BoolSetting TRANSITION_BLUR = new BoolSetting("transitionBlur", "Blur behind menus",
+		"Blurs the game behind Flint's menus (with Minecraft's Menu Background Blur above 0)", true);
 	public static final BoolSetting GAMEPLAY_BLUR = new BoolSetting("gameplayBlur", "Gameplay motion blur",
 		"Blends recent frames while the camera moves. Costs some frame time.", false);
 	public static final IntSetting GAMEPLAY_BLUR_STRENGTH = new IntSetting("gameplayBlurStrength", "Strength", null, 50, 5, 100, 5, "%");
@@ -70,7 +72,6 @@ public final class ControlSettings {
 	private boolean showWithDebugScreen;
 	private List<String> favorites = List.of();
 	private List<String> recents = List.of();
-	private boolean onboardingCompleted;
 	private boolean hintShown;
 	private @Nullable String activeLayout;
 	private com.flintclient.client.control.model.MenuTheme menuTheme = com.flintclient.client.control.model.MenuTheme.FLINT;
@@ -78,6 +79,10 @@ public final class ControlSettings {
 	private boolean compactView;
 	/** Settings sections the player folded away, as {@code "moduleId/Section title"}. */
 	private List<String> collapsed = List.of();
+	/** The colour picker's recent colours, newest first, as {@code "#RRGGBB"} (at most {@link #MAX_RECENT_COLORS}). */
+	private List<String> recentColors = List.of();
+	/** {@link GameOptions}' values, by option, in {@link GameOptions#ALL}'s order. */
+	private final Object[] game = new Object[GameOptions.ALL.size()];
 
 	/** Settings under {@code configDir} (Fabric's config folder): {@code configDir/flintclient/control-center.json}. */
 	public ControlSettings(Path configDir) {
@@ -117,25 +122,24 @@ public final class ControlSettings {
 		favorites = ids(JsonFields.strings(library, "favorites"), Integer.MAX_VALUE);
 		recents = ids(JsonFields.strings(library, "recents"), LibraryQuery.MAX_RECENTS);
 		JsonObject onboarding = JsonFields.object(root, "onboarding");
-		onboardingCompleted = Boolean.TRUE.equals(JsonFields.bool(onboarding, "completed"));
 		hintShown = Boolean.TRUE.equals(JsonFields.bool(onboarding, "hintShown"));
 		String active = JsonFields.string(root, "activeLayout");
 		activeLayout = LayoutNames.validId(active) ? active : null;
 		JsonObject menu = JsonFields.object(root, "menu");
 		JsonObject theme = JsonFields.object(menu, "theme");
-		menuTheme = com.flintclient.client.control.model.MenuTheme.read(JsonFields.string(theme, "accent"), JsonFields.string(theme, "surface"),
-			integer(theme, "roundness"), integer(theme, "dim"));
+		menuTheme = com.flintclient.client.control.model.MenuTheme.read(JsonFields.string(theme, "look"), JsonFields.string(theme, "font"));
 		compactView = Boolean.TRUE.equals(JsonFields.bool(menu, "compactView"));
 		collapsed = keys(JsonFields.strings(menu, "collapsed"));
-	}
-
-	private static @Nullable Integer integer(@Nullable JsonObject parent, String key) {
-		JsonElement e = parent == null ? null : parent.get(key);
-		if (e == null || !e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber()) {
-			return null;
+		recentColors = colors(JsonFields.strings(menu, "recentColors"));
+		JsonObject gameObject = JsonFields.object(root, "game");
+		// The menu's clock was 24-hour by default, and every game option was written once any one changed, so a saved
+		// 24-hour clock from before the 12-hour default is not a choice: it is read only from a file that has the marker.
+		boolean clockChosen = Boolean.TRUE.equals(JsonFields.bool(gameObject, CLOCK_MARKER));
+		for (int i = 0; i < game.length; i++) {
+			SettingDescriptor<?> option = GameOptions.ALL.get(i);
+			boolean stale = option == GameOptions.CLOCK_24H && !clockChosen;
+			game[i] = option.parse(gameObject == null || stale ? null : gameObject.get(option.id()));
 		}
-		double v = e.getAsDouble();
-		return Double.isFinite(v) ? (int) Math.round(Math.clamp(v, -1_000_000, 1_000_000)) : null;
 	}
 
 	/** Section keys: short, distinct, at most 512 of them. */
@@ -147,6 +151,21 @@ public final class ControlSettings {
 		for (String key : raw) {
 			if (key != null && !key.isEmpty() && key.length() <= 160 && !out.contains(key) && out.size() < 512) {
 				out.add(key);
+			}
+		}
+		return List.copyOf(out);
+	}
+
+	/** Recent colours: {@code #RRGGBB}, uppercase, distinct, at most {@link #MAX_RECENT_COLORS}. */
+	private static List<String> colors(@Nullable List<String> raw) {
+		if (raw == null) {
+			return List.of();
+		}
+		List<String> out = new ArrayList<>();
+		for (String color : raw) {
+			String upper = color == null ? "" : color.toUpperCase(java.util.Locale.ROOT);
+			if (upper.matches("#[0-9A-F]{6}") && !out.contains(upper) && out.size() < MAX_RECENT_COLORS) {
+				out.add(upper);
 			}
 		}
 		return List.copyOf(out);
@@ -178,22 +197,35 @@ public final class ControlSettings {
 		library.add("favorites", JsonFields.array(favorites));
 		library.add("recents", JsonFields.array(recents));
 		JsonObject onboarding = JsonFields.child(root, "onboarding");
-		onboarding.addProperty("completed", onboardingCompleted);
 		onboarding.addProperty("hintShown", hintShown);
 		if (activeLayout != null) {
 			root.addProperty("activeLayout", activeLayout);
 		}
 		// The menu's look and view: written once something differs from Flint's defaults (or the file has them already).
-		boolean menuDefaults = menuTheme.equals(com.flintclient.client.control.model.MenuTheme.FLINT) && !compactView && collapsed.isEmpty();
+		boolean menuDefaults = menuTheme.equals(com.flintclient.client.control.model.MenuTheme.FLINT) && !compactView && collapsed.isEmpty()
+			&& recentColors.isEmpty();
 		if (!menuDefaults || root.has("menu")) {
 			JsonObject menu = JsonFields.child(root, "menu");
+			// A file from before the menu used the app's themes keeps no colours of its own.
+			menu.remove("theme");
 			JsonObject theme = JsonFields.child(menu, "theme");
-			theme.addProperty("accent", menuTheme.accentHex());
-			theme.addProperty("surface", menuTheme.surface().id());
-			theme.addProperty("roundness", menuTheme.roundness());
-			theme.addProperty("dim", menuTheme.dim());
+			theme.addProperty("look", menuTheme.look().id());
+			theme.addProperty("font", menuTheme.font().id());
 			menu.addProperty("compactView", compactView);
 			menu.add("collapsed", JsonFields.array(collapsed));
+			menu.add("recentColors", JsonFields.array(recentColors));
+		}
+		// The game options: written once one differs from its default (or the file has them already).
+		boolean gameDefaults = true;
+		for (int i = 0; i < game.length; i++) {
+			gameDefaults &= GameOptions.ALL.get(i).defaultValue().equals(game[i]);
+		}
+		if (!gameDefaults || root.has("game")) {
+			JsonObject gameObject = JsonFields.child(root, "game");
+			for (int i = 0; i < game.length; i++) {
+				putGame(gameObject, GameOptions.ALL.get(i), game[i]);
+			}
+			gameObject.addProperty(CLOCK_MARKER, true);
 		}
 		store.markDirty();
 		if (store.save()) {
@@ -201,6 +233,48 @@ public final class ControlSettings {
 			return true;
 		}
 		return false;
+	}
+
+	/** Written beside the game options since the menu's clock became 12-hour by default (see {@link #load()}). */
+	private static final String CLOCK_MARKER = "clock12hDefault";
+
+	private static <T> void putGame(JsonObject parent, SettingDescriptor<T> option, Object value) {
+		JsonFields.put(parent, option.id(), option, option.coerce(value));
+	}
+
+	/** A game option's value ({@link GameOptions}). Allocation-free. */
+	public <T> T game(SettingDescriptor<T> option) {
+		load();
+		return option.type().cast(game[gameIndex(option)]);
+	}
+
+	public boolean gameBool(BoolSetting option) {
+		return game(option);
+	}
+
+	public int gameInt(IntSetting option) {
+		return game(option);
+	}
+
+	/** Sets a game option (clamped to its range); false when it already had that value. */
+	public <T> boolean setGame(SettingDescriptor<T> option, T value) {
+		load();
+		int i = gameIndex(option);
+		T clamped = option.clamp(value);
+		if (clamped.equals(game[i])) {
+			return false;
+		}
+		game[i] = clamped;
+		dirty = true;
+		return true;
+	}
+
+	private static int gameIndex(SettingDescriptor<?> option) {
+		int i = GameOptions.ALL.indexOf(option);
+		if (i < 0) {
+			throw new IllegalArgumentException("not a game option: " + option.id());
+		}
+		return i;
 	}
 
 	public boolean dirty() {
@@ -395,6 +469,21 @@ public final class ControlSettings {
 		dirty = true;
 	}
 
+	/**
+	 * Puts {@code moduleId} among the favourites at {@code index} (making it one if it wasn't): the order the mods grid shows
+	 * them in. Dropping a card on another's place moves it there.
+	 */
+	public void moveFavorite(String moduleId, int index) {
+		load();
+		List<String> next = new ArrayList<>(favorites);
+		next.remove(moduleId);
+		next.add(Math.clamp(index, 0, next.size()), moduleId);
+		if (!next.equals(favorites)) {
+			favorites = List.copyOf(next);
+			dirty = true;
+		}
+	}
+
 	/** Flips a favourite; returns the new state. */
 	public boolean toggleFavorite(String moduleId) {
 		boolean favorite = !isFavorite(moduleId);
@@ -414,19 +503,6 @@ public final class ControlSettings {
 		List<String> next = LibraryQuery.withRecent(recents, moduleId);
 		if (!next.equals(recents)) {
 			recents = next;
-			dirty = true;
-		}
-	}
-
-	public boolean onboardingCompleted() {
-		load();
-		return onboardingCompleted;
-	}
-
-	public void setOnboardingCompleted(boolean value) {
-		load();
-		if (onboardingCompleted != value) {
-			onboardingCompleted = value;
 			dirty = true;
 		}
 	}
@@ -471,6 +547,37 @@ public final class ControlSettings {
 			compactView = value;
 			dirty = true;
 		}
+	}
+
+	/** How many recent colours the colour picker keeps. */
+	public static final int MAX_RECENT_COLORS = 8;
+
+	/** The colour picker's recent colours, newest first, as {@code 0xRRGGBB}. */
+	public int[] recentColors() {
+		load();
+		int[] out = new int[recentColors.size()];
+		for (int i = 0; i < out.length; i++) {
+			out[i] = Integer.parseInt(recentColors.get(i).substring(1), 16);
+		}
+		return out;
+	}
+
+	/** Puts {@code rgb} first among the recent colours (once; the oldest falls off past {@link #MAX_RECENT_COLORS}). */
+	public void addRecentColor(int rgb) {
+		load();
+		String color = String.format(java.util.Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+		if (!recentColors.isEmpty() && recentColors.get(0).equals(color)) {
+			return;
+		}
+		List<String> next = new ArrayList<>(MAX_RECENT_COLORS);
+		next.add(color);
+		for (String old : recentColors) {
+			if (!old.equals(color) && next.size() < MAX_RECENT_COLORS) {
+				next.add(old);
+			}
+		}
+		recentColors = List.copyOf(next);
+		dirty = true;
 	}
 
 	/** Whether the settings section {@code key} ({@code "moduleId/Title"}) is folded away. */

@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { api, errorText, type Profile, type ProfileFiles } from "../../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, errorText, type Profile, type ProfileFiles, type RunState } from "../../lib/api";
 import { neighbourAfterRemoval } from "../../lib/carousel";
+import { takePendingPack } from "../../lib/flintpack";
 import { bytes, relativeTime, shortDate } from "../../lib/format";
+import { t, useT, type MessageKey, type Translate } from "../../lib/i18n";
+import { useSettings } from "../../lib/settings";
+import { sound } from "../../lib/sound";
 import { useStoreSelect } from "../../lib/store";
 import { defaultProfileName, platformBlock, versionMeta, VERSIONS } from "../../lib/versions";
 import { Button, EmptyState, IconButton, Segmented, Spinner, TextField } from "../../ui/controls";
@@ -9,21 +13,35 @@ import { Icon } from "../../ui/Icon";
 import { Menu, Modal, Popover, useToast } from "../../ui/overlays";
 import { PageHeader } from "../pages/PageHeader";
 import type { Navigate } from "../shell/Shell";
+import { EditProfile } from "./EditProfile";
 import { ProfileCarousel } from "./ProfileCarousel";
+import { ProfileGrid } from "./ProfileGrid";
+import { ExportProfile, ImportProfile } from "./ProfilePack";
+import { usePinToggle } from "./usePinToggle";
 import { Workspace, type WorkspaceTab } from "./Workspace";
 
-export const STATE_LABEL: Record<string, string> = {
-  uninstalled: "Not installed",
-  checking: "Checking",
-  downloading: "Downloading",
-  installing: "Installing",
-  ready: "Ready",
-  launching: "Launching",
-  running: "Running",
-  error: "Needs attention",
+const STATE_KEY: Record<RunState, MessageKey> = {
+  uninstalled: "profiles.state.uninstalled",
+  checking: "profiles.state.checking",
+  downloading: "profiles.state.downloading",
+  installing: "profiles.state.installing",
+  ready: "profiles.state.ready",
+  launching: "profiles.state.launching",
+  running: "profiles.state.running",
+  error: "profiles.state.error",
 };
 
-export default function ProfilesPage({ navigate, target }: { navigate: Navigate; target?: string }) {
+/**
+ * Each profile state's name, for its status pill. Every read gives the name in the current language, so
+ * `STATE_LABEL[state]` works in a render like a plain table (the component re-renders through `useT`).
+ */
+export const STATE_LABEL = Object.defineProperties(
+  {},
+  Object.fromEntries(Object.entries(STATE_KEY).map(([state, key]) => [state, { get: () => t(key), enumerable: true }])),
+) as Readonly<Record<RunState, string>>;
+
+export default function ProfilesPage({ navigate, target, onOpenChange }: { navigate: Navigate; target?: string; onOpenChange?: (id: string | null) => void }) {
+  const t = useT();
   const store = useStoreSelect((s) => ({ profiles: s.profiles, selectedId: s.selectedId, info: s.info, selectProfile: s.selectProfile }));
   const [targetId, targetTab] = (target ?? "").split(":");
   const [openId, setOpenId] = useState<string | null>(targetId && targetId !== "new" ? targetId : null);
@@ -32,28 +50,48 @@ export default function ProfilesPage({ navigate, target }: { navigate: Navigate;
   const [renaming, setRenaming] = useState<Profile | null>(null);
   const [duplicating, setDuplicating] = useState<Profile | null>(null);
   const [deleting, setDeleting] = useState<Profile | null>(null);
+  const [exporting, setExporting] = useState<Profile | null>(null);
+  // A .flintpack Flint was opened with (double-click) opens its import preview straight away.
+  const [importPath, setImportPath] = useState<string | null>(() => takePendingPack());
+  const { settings, update } = useSettings();
+  const view = settings.profilesView;
   // Which card the carousel centres. Only kept in memory: it starts on the profile selected for Play
   // and falls back to it whenever the focused profile disappears.
   const [focusId, setFocusId] = useState<string | null>(targetId && targetId !== "new" ? targetId : null);
   const toast = useToast();
   const open = store.profiles.find((p) => p.id === openId) ?? null;
+  // The sidebar marks the profile open here (it changes without navigating).
+  const openNow = open?.id ?? null;
+  useEffect(() => onOpenChange?.(openNow), [openNow, onOpenChange]);
   const ids = store.profiles.map((p) => p.id);
   const focusAt = focusId ? ids.indexOf(focusId) : -1;
   const focusIndex = Math.max(0, focusAt >= 0 ? focusAt : ids.indexOf(store.selectedId ?? ""));
   const focused = store.profiles[focusIndex] ?? null;
 
-  const actions = { rename: setRenaming, duplicate: setDuplicating, remove: setDeleting };
+  const actions = { rename: setRenaming, duplicate: setDuplicating, remove: setDeleting, export: setExporting };
 
-  const openProfile = (id: string, t: WorkspaceTab) => {
+  const pickImport = async () => {
+    try {
+      const path = await api.packPickOpen();
+      if (path) setImportPath(path);
+    } catch (e) {
+      toast({ tone: "danger", title: t("profiles.page.openFileFailed"), body: errorText(e) });
+    }
+  };
+  const closeImport = useCallback(() => setImportPath(null), []);
+  const closeExport = useCallback(() => setExporting(null), []);
+  const imported = useCallback((id: string) => setFocusId(id), []);
+
+  const openProfile = (id: string, at: WorkspaceTab) => {
     setFocusId(id);
-    setTab(t);
+    setTab(at);
     setOpenId(id);
   };
 
   const select = (p: Profile) => {
     if (p.id === store.selectedId) return;
     // The store shows the new selection at once and puts the old one back if saving fails.
-    store.selectProfile(p.id).catch((e) => toast({ tone: "danger", title: "Couldn't select the profile", body: errorText(e) }));
+    store.selectProfile(p.id).catch((e) => toast({ tone: "danger", title: t("profiles.page.selectFailed"), body: errorText(e) }));
   };
 
   /**
@@ -69,31 +107,51 @@ export default function ProfilesPage({ navigate, target }: { navigate: Navigate;
   };
 
   return (
-    <div className={`page-body profiles ${open ? "" : "is-gallery"}`}>
+    <div className={`page-body profiles ${open ? "" : `is-gallery is-${view}`}`}>
       {open ? (
         <Workspace profile={open} tab={tab} onTab={setTab} onBack={() => setOpenId(null)} navigate={navigate} actions={actions} />
       ) : (
         <>
           <PageHeader
-            title="Profiles"
-            subtitle="Each profile keeps its own Minecraft version, mods, worlds and settings."
+            title={t("profiles.page.title")}
+            subtitle={t("profiles.page.subtitle")}
             actions={
-              <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
-                New profile
-              </Button>
+              <>
+                {store.profiles.length > 0 && (
+                  <Segmented
+                    label={t("profiles.page.viewLabel")}
+                    value={view}
+                    onChange={(v) => update({ profilesView: v })}
+                    options={[
+                      { value: "deck", label: t("profiles.page.viewDeck") },
+                      { value: "grid", label: t("profiles.page.viewGrid") },
+                    ]}
+                  />
+                )}
+                <NewProfileButton onNew={() => setCreating(true)} onImport={() => void pickImport()} />
+              </>
             }
           />
           {store.profiles.length === 0 ? (
             <EmptyState
               icon="layers"
-              title="No profiles yet"
-              body="Create one to choose a Minecraft version."
+              title={t("profiles.empty.title")}
+              body={t("profiles.empty.body")}
               action={
-                <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
-                  New profile
-                </Button>
+                <div className="empty-actions">
+                  <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
+                    {t("profiles.add.new")}
+                  </Button>
+                  <Button icon="download" onClick={() => void pickImport()}>
+                    {t("profiles.add.import")}
+                  </Button>
+                </div>
               }
             />
+          ) : view === "grid" ? (
+            <div className="pg-area">
+              <ProfileGrid profiles={store.profiles} selectedId={store.selectedId} navigate={navigate} actions={actions} onSelect={select} onOpen={(p) => openProfile(p.id, "content")} />
+            </div>
           ) : (
             <div className="pc-area">
               <ProfileCarousel profiles={store.profiles} focusIndex={focusIndex} selectedId={store.selectedId} onFocus={setFocusId} onActivate={activate} />
@@ -110,7 +168,9 @@ export default function ProfilesPage({ navigate, target }: { navigate: Navigate;
           setOpenId(id);
         }}
       />
-      <RenameProfile profile={renaming} onClose={() => setRenaming(null)} />
+      <ExportProfile profile={exporting} onClose={closeExport} />
+      <ImportProfile path={importPath} onClose={closeImport} onImported={imported} onPickAnother={() => void pickImport()} />
+      <EditProfile profile={renaming} onClose={() => setRenaming(null)} />
       <DuplicateProfile profile={duplicating} onClose={() => setDuplicating(null)} />
       <DeleteProfile
         profile={deleting}
@@ -130,30 +190,72 @@ export type ProfileActions = {
   rename: (p: Profile) => void;
   duplicate: (p: Profile) => void;
   remove: (p: Profile) => void;
+  export: (p: Profile) => void;
 };
+
+/** "New profile", with a menu beside it for the other way to add one: importing a .flintpack. */
+function NewProfileButton({ onNew, onImport }: { onNew: () => void; onImport: () => void }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <div className="split-btn">
+      <Button variant="primary" icon="plus" onClick={onNew}>
+        {t("profiles.add.new")}
+      </Button>
+      <button
+        ref={anchor}
+        type="button"
+        className="btn btn-primary btn-md split-btn-more"
+        aria-label={t("profiles.add.more")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => {
+          sound.play("tap");
+          setOpen((o) => !o);
+        }}
+      >
+        <Icon name="chevronDown" size={16} />
+      </button>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label={t("profiles.add.menuLabel")}>
+        <Menu
+          onClose={() => setOpen(false)}
+          items={[
+            { label: t("profiles.add.new"), hint: t("profiles.add.newHint"), icon: <Icon name="plus" size={15} />, onSelect: onNew },
+            { label: t("profiles.add.import"), hint: ".flintpack", icon: <Icon name="download" size={15} />, onSelect: onImport },
+          ]}
+        />
+      </Popover>
+    </div>
+  );
+}
 
 /** Timestamps are Unix seconds. Dates before 2020 can only come from a missing or corrupt record, so they aren't shown. */
 const sane = (seconds: number | null | undefined) => (seconds && seconds > 1_577_836_800 ? seconds : null);
 
-function historyLine(p: Profile) {
+function historyLine(p: Profile, t: Translate) {
   const played = sane(p.lastPlayed);
   const created = sane(p.createdAt);
-  if (played) return `Played ${relativeTime(played)}`;
-  return created ? `Created ${shortDate(created)}` : "Never played";
+  if (played) return t("profiles.history.played", { when: relativeTime(played) });
+  return created ? t("profiles.history.created", { date: shortDate(created) }) : t("profiles.history.never");
 }
 
-function ProfileMenu({ profile: p, navigate, actions, anchor, open, onClose }: { profile: Profile; navigate: Navigate; actions: ProfileActions; anchor: React.RefObject<HTMLButtonElement | null>; open: boolean; onClose: () => void }) {
+export function ProfileMenu({ profile: p, navigate, actions, anchor, open, onClose }: { profile: Profile; navigate: Navigate; actions: ProfileActions; anchor: React.RefObject<HTMLButtonElement | null>; open: boolean; onClose: () => void }) {
+  const t = useT();
+  const pin = usePinToggle();
   return (
-    <Popover anchor={anchor} open={open} onClose={onClose} placement="bottom-end" label="Profile actions">
+    <Popover anchor={anchor} open={open} onClose={onClose} placement="bottom-end" label={t("profiles.menu.label")}>
       <Menu
         onClose={onClose}
         items={[
-          { label: "Add content", icon: <Icon name="library" size={15} />, onSelect: () => navigate("library", p.id) },
-          { label: "Rename", icon: <Icon name="edit" size={15} />, onSelect: () => actions.rename(p) },
-          { label: "Duplicate", icon: <Icon name="copy" size={15} />, onSelect: () => actions.duplicate(p) },
-          { label: "Open folder", icon: <Icon name="folder" size={15} />, onSelect: () => void api.revealFolder("profile", p.id) },
+          { label: t("profiles.menu.addContent"), icon: <Icon name="library" size={15} />, onSelect: () => navigate("library", p.id) },
+          { label: t("profiles.menu.edit"), hint: t("profiles.menu.editHint"), icon: <Icon name="edit" size={15} />, onSelect: () => actions.rename(p) },
+          { label: t(p.pinnedAt ? "profiles.menu.unpin" : "profiles.menu.pin"), icon: <Icon name="star" size={15} />, onSelect: () => pin(p) },
+          { label: t("profiles.menu.duplicate"), icon: <Icon name="copy" size={15} />, onSelect: () => actions.duplicate(p) },
+          { label: t("profiles.menu.export"), hint: ".flintpack", icon: <Icon name="upload" size={15} />, onSelect: () => actions.export(p) },
+          { label: t("profiles.menu.openFolder"), icon: <Icon name="folder" size={15} />, onSelect: () => void api.revealFolder("profile", p.id) },
           { type: "separator" },
-          { label: "Delete…", icon: <Icon name="trash" size={15} />, danger: true, onSelect: () => actions.remove(p) },
+          { label: t("profiles.menu.delete"), icon: <Icon name="trash" size={15} />, danger: true, onSelect: () => actions.remove(p) },
         ]}
       />
     </Popover>
@@ -165,29 +267,30 @@ function ProfileMenu({ profile: p, navigate, actions, anchor, open, onClose }: {
  * version and state, so this only offers the next step and a single line of context.
  */
 function ProfileBar({ profile: p, onSelect, onOpen, navigate, actions }: { profile: Profile; onSelect: () => void; onOpen: () => void; navigate: Navigate; actions: ProfileActions }) {
+  const t = useT();
   const store = useStoreSelect((s) => ({ info: s.info, selectedId: s.selectedId, selected: s.selected }));
   const [menu, setMenu] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const blocked = platformBlock(p.gameVersion, store.info);
   const selected = p.id === store.selectedId;
-  const note = blocked ?? (!selected && store.selected ? `${store.selected.name} stays selected for Play until you choose this one.` : historyLine(p));
+  const note = blocked ?? (!selected && store.selected ? t("profiles.bar.otherSelected", { name: store.selected.name }) : historyLine(p, t));
 
   return (
-    <section className="pc-bar" aria-label={`${p.name} actions`}>
+    <section className="pc-bar" aria-label={t("profiles.bar.label", { name: p.name })}>
       <div className="pc-bar-actions">
         {selected ? (
           <Button variant="primary" icon="play" className="pc-bar-play" onClick={() => navigate("play")} disabled={!!blocked}>
-            Go to Play
+            {t("profiles.action.goToPlay")}
           </Button>
         ) : (
           <Button variant="primary" icon="check" className="pc-bar-play" onClick={onSelect} disabled={!!blocked}>
-            Select for Play
+            {t("profiles.action.selectForPlay")}
           </Button>
         )}
         <Button icon="layers" onClick={onOpen}>
-          Open profile
+          {t("profiles.bar.open")}
         </Button>
-        <IconButton ref={anchor} icon="more" label="More actions" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} />
+        <IconButton ref={anchor} icon="more" label={t("profiles.bar.more")} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} />
         <ProfileMenu profile={p} navigate={navigate} actions={actions} anchor={anchor} open={menu} onClose={() => setMenu(false)} />
       </div>
       <p className={`pc-bar-note ${blocked ? "is-danger" : ""}`} title={note}>
@@ -198,6 +301,7 @@ function ProfileBar({ profile: p, onSelect, onOpen, navigate, actions }: { profi
 }
 
 function CreateProfile({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
+  const t = useT();
   const store = useStoreSelect((s) => ({ info: s.info, reloadProfiles: s.reloadProfiles }));
   const toast = useToast();
   const [version, setVersion] = useState(VERSIONS[0].id);
@@ -220,11 +324,11 @@ function CreateProfile({ open, onClose, onCreated }: { open: boolean; onClose: (
     try {
       const profile = await api.createProfile(name.trim() || defaultProfileName(version), version, effectiveLoader, true);
       await store.reloadProfiles();
-      toast({ tone: "success", title: `Created ${profile.name}`, body: "Install it from Play, or add content first." });
+      toast({ tone: "success", title: t("profiles.create.done", { name: profile.name }), body: t("profiles.create.doneBody") });
       onClose();
       onCreated(profile.id);
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't create the profile", body: errorText(e) });
+      toast({ tone: "danger", title: t("profiles.create.failed"), body: errorText(e) });
     } finally {
       setBusy(false);
     }
@@ -234,20 +338,20 @@ function CreateProfile({ open, onClose, onCreated }: { open: boolean; onClose: (
     <Modal
       open={open}
       onClose={onClose}
-      title="New profile"
+      title={t("profiles.create.title")}
       width={680}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" onClick={() => void create()} loading={busy}>
-            Create profile
+            {t("profiles.create.submit")}
           </Button>
         </>
       }
     >
-      <div className="version-pick" role="radiogroup" aria-label="Minecraft version">
+      <div className="version-pick" role="radiogroup" aria-label={t("profiles.create.versionLabel")}>
         {VERSIONS.map((v) => {
           const blocked = platformBlock(v.id, store.info);
           return (
@@ -264,7 +368,7 @@ function CreateProfile({ open, onClose, onCreated }: { open: boolean; onClose: (
               <img src={v.thumb} alt="" />
               <span>
                 <strong>{v.id}</strong>
-                <span className="faint">{blocked ? "Not on Apple silicon yet" : v.drop ?? (v.fabric ? "Fabric or Vanilla" : "Vanilla only")}</span>
+                <span className="faint">{blocked ? t("profiles.create.appleSilicon") : v.drop ?? t(v.fabric ? "profiles.create.fabricOrVanilla" : "profiles.create.vanillaOnly")}</span>
               </span>
               {v.id === version && <Icon name="check" size={15} className="version-chip-check" />}
             </button>
@@ -272,79 +376,51 @@ function CreateProfile({ open, onClose, onCreated }: { open: boolean; onClose: (
         })}
       </div>
       <div className="modal-row">
-        <span className="modal-label">Loader</span>
+        <span className="modal-label">{t("profiles.create.loader")}</span>
         {meta.fabric ? (
           <Segmented
-            label="Loader"
+            label={t("profiles.create.loader")}
             value={loader}
             onChange={setLoader}
             options={[
               { value: "fabric", label: "Fabric" },
-              { value: "vanilla", label: "Vanilla" },
+              { value: "vanilla", label: t("profiles.create.vanilla") },
             ]}
           />
         ) : (
-          <span className="muted">{meta.note ?? "Fabric isn't available for this version."}</span>
+          <span className="muted">{meta.note ?? t("profiles.create.noFabric")}</span>
         )}
       </div>
-      <TextField label="Profile name" placeholder={defaultProfileName(version)} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void create()} hint={`Java ${meta.java} is downloaded automatically.`} />
-    </Modal>
-  );
-}
-
-function RenameProfile({ profile, onClose }: { profile: Profile | null; onClose: () => void }) {
-  const store = useStoreSelect((s) => ({ reloadProfiles: s.reloadProfiles }));
-  const toast = useToast();
-  const [name, setName] = useState("");
-  useEffect(() => setName(profile?.name ?? ""), [profile]);
-  const save = async () => {
-    if (!profile || !name.trim()) return;
-    try {
-      await api.renameProfile(profile.id, name.trim());
-      await store.reloadProfiles();
-      onClose();
-    } catch (e) {
-      toast({ tone: "danger", title: "Couldn't rename", body: errorText(e) });
-    }
-  };
-  return (
-    <Modal
-      open={!!profile}
-      onClose={onClose}
-      title="Rename profile"
-      width={420}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={() => void save()} disabled={!name.trim()}>
-            Save
-          </Button>
-        </>
-      }
-    >
-      <TextField label="Profile name" value={name} maxLength={40} data-autofocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} />
+      <TextField
+        label={t("profiles.field.name")}
+        placeholder={defaultProfileName(version)}
+        value={name}
+        maxLength={40}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && void create()}
+        hint={t("profiles.create.javaHint", { version: meta.java })}
+      />
     </Modal>
   );
 }
 
 function DuplicateProfile({ profile, onClose }: { profile: Profile | null; onClose: () => void }) {
+  const t = useT();
   const store = useStoreSelect((s) => ({ reloadProfiles: s.reloadProfiles }));
   const toast = useToast();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => setName(profile ? `${profile.name} copy`.slice(0, 40) : ""), [profile]);
+  useEffect(() => setName(profile ? t("profiles.duplicate.defaultName", { name: profile.name }).slice(0, 40) : ""), [profile, t]);
   const run = async () => {
     if (!profile || !name.trim()) return;
     setBusy(true);
     try {
       const copy = await api.duplicateProfile(profile.id, name.trim());
       await store.reloadProfiles();
-      toast({ tone: "success", title: `Created ${copy.name}`, body: "Worlds, mods and settings were copied. The original wasn't changed." });
+      toast({ tone: "success", title: t("profiles.duplicate.done", { name: copy.name }), body: t("profiles.duplicate.doneBody") });
       onClose();
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't duplicate", body: errorText(e) });
+      toast({ tone: "danger", title: t("profiles.duplicate.failed"), body: errorText(e) });
     } finally {
       setBusy(false);
     }
@@ -353,46 +429,52 @@ function DuplicateProfile({ profile, onClose }: { profile: Profile | null; onClo
     <Modal
       open={!!profile}
       onClose={onClose}
-      title="Duplicate profile"
+      title={t("profiles.duplicate.title")}
       width={460}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" icon="copy" onClick={() => void run()} loading={busy} disabled={!name.trim()}>
-            Duplicate
+            {t("profiles.duplicate.submit")}
           </Button>
         </>
       }
     >
-      <p className="muted modal-copy">Copies worlds, mods, packs and settings into a new profile. Logs and crash reports aren't copied.</p>
-      <TextField label="New profile name" value={name} maxLength={40} data-autofocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void run()} />
+      <p className="muted modal-copy">{t("profiles.duplicate.body")}</p>
+      <TextField label={t("profiles.duplicate.name")} value={name} maxLength={40} data-autofocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void run()} />
     </Modal>
   );
 }
 
+/** The folders the delete dialog lists, in its order, by their folder name on disk. */
+const FOLDER_KEY = {
+  saves: "profiles.delete.folder.saves",
+  screenshots: "profiles.delete.folder.screenshots",
+  mods: "profiles.delete.folder.mods",
+  resourcepacks: "profiles.delete.folder.resourcepacks",
+  shaderpacks: "profiles.delete.folder.shaderpacks",
+} as const satisfies Record<string, MessageKey>;
+
 function DeleteProfile({ profile, onClose, onDeleted }: { profile: Profile | null; onClose: () => void; onDeleted: (id: string) => void }) {
+  const t = useT();
   const store = useStoreSelect((s) => ({ reloadProfiles: s.reloadProfiles }));
   const toast = useToast();
   const [mode, setMode] = useState<"record" | "files">("record");
-  const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState<ProfileFiles | null>(null);
   useEffect(() => {
     setMode("record");
-    setConfirm("");
     setFiles(null);
     if (profile) void api.profileFiles(profile.id).then(setFiles).catch(() => {});
   }, [profile]);
   const folder = (id: string) => files?.folders.find((f) => f.id === id && f.exists);
-  const contents = (["saves", "screenshots", "mods", "resourcepacks", "shaderpacks"] as const)
+  const contents = (Object.keys(FOLDER_KEY) as (keyof typeof FOLDER_KEY)[])
     .map((id) => ({ id, info: folder(id) }))
     .filter((x) => x.info && x.info.count > 0);
-  const FOLDER_NAME: Record<string, string> = { saves: "Worlds", screenshots: "Screenshots", mods: "Mods", resourcepacks: "Resource packs", shaderpacks: "Shader packs" };
-  const ready = mode === "record" || confirm.trim() === profile?.name;
   const run = async () => {
-    if (!profile || !ready) return;
+    if (!profile) return;
     setBusy(true);
     try {
       const result = await api.deleteProfile(profile.id, mode === "files");
@@ -400,12 +482,12 @@ function DeleteProfile({ profile, onClose, onDeleted }: { profile: Profile | nul
       onDeleted(profile.id);
       toast({
         tone: "success",
-        title: `Removed ${profile.name}`,
-        body: result.keptFolder ? "Its folder, worlds and mods were kept on disk." : "Its folder was deleted.",
+        title: t("profiles.delete.done", { name: profile.name }),
+        body: t(result.keptFolder ? "profiles.delete.keptBody" : "profiles.delete.deletedBody"),
       });
       onClose();
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't remove the profile", body: errorText(e) });
+      toast({ tone: "danger", title: t("profiles.delete.failed"), body: errorText(e) });
     } finally {
       setBusy(false);
     }
@@ -414,42 +496,42 @@ function DeleteProfile({ profile, onClose, onDeleted }: { profile: Profile | nul
     <Modal
       open={!!profile}
       onClose={onClose}
-      title={`Delete ${profile?.name ?? "profile"}?`}
+      title={profile ? t("profiles.delete.title", { name: profile.name }) : t("profiles.delete.titleNoName")}
       width={520}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button variant="danger" icon="trash" onClick={() => void run()} loading={busy} disabled={!ready}>
-            {mode === "files" ? "Delete profile and files" : "Remove from Flint"}
+          <Button variant="danger" icon="trash" onClick={() => void run()} loading={busy} disabled={!profile}>
+            {t(mode === "files" ? "profiles.delete.submitFiles" : "profiles.delete.submitRecord")}
           </Button>
         </>
       }
     >
-      <div className="delete-options" role="radiogroup" aria-label="What to delete">
+      <div className="delete-options" role="radiogroup" aria-label={t("profiles.delete.choiceLabel")}>
         <button type="button" role="radio" aria-checked={mode === "record"} className={`delete-option ${mode === "record" ? "is-selected" : ""}`} onClick={() => setMode("record")}>
-          <strong>Remove from Flint only</strong>
-          <span className="muted">The profile disappears from Flint. Its folder with worlds, mods and screenshots stays on disk.</span>
+          <strong>{t("profiles.delete.recordTitle")}</strong>
+          <span className="muted">{t("profiles.delete.recordBody")}</span>
         </button>
         <button type="button" role="radio" aria-checked={mode === "files"} className={`delete-option is-danger ${mode === "files" ? "is-selected" : ""}`} onClick={() => setMode("files")}>
-          <strong>Also delete its folder</strong>
-          <span className="muted">Permanently deletes this profile's worlds, mods, resource packs, settings and screenshots. This can't be undone.</span>
+          <strong>{t("profiles.delete.filesTitle")}</strong>
+          <span className="muted">{t("profiles.delete.filesBody")}</span>
         </button>
       </div>
       {mode === "files" && profile && (
         <>
           <div className="delete-contents">
-            <span className="eyebrow">This folder contains</span>
+            <span className="eyebrow">{t("profiles.delete.contains")}</span>
             {files === null ? (
               <Spinner size={14} />
             ) : contents.length === 0 ? (
-              <span className="muted">No worlds, screenshots or content. {bytes(files.total)} in total.</span>
+              <span className="muted">{t("profiles.delete.nothing", { size: bytes(files.total) })}</span>
             ) : (
               <ul>
                 {contents.map(({ id, info }) => (
                   <li key={id} className={id === "saves" || id === "screenshots" ? "is-precious" : ""}>
-                    <strong>{FOLDER_NAME[id]}</strong>
+                    <strong>{t(FOLDER_KEY[id])}</strong>
                     <span className="faint">
                       {info!.count} · {bytes(info!.size)}
                     </span>
@@ -458,7 +540,6 @@ function DeleteProfile({ profile, onClose, onDeleted }: { profile: Profile | nul
               </ul>
             )}
           </div>
-          <TextField label={`Type “${profile.name}” to confirm`} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" spellCheck={false} />
         </>
       )}
     </Modal>

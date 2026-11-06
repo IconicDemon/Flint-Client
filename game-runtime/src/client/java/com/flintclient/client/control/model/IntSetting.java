@@ -10,6 +10,8 @@ public final class IntSetting extends SettingDescriptor<Integer> {
 	private final int max;
 	private final int step;
 	private final String unit;
+	/** Values shown by a name instead of a number ("Auto", "Unlimited"); set while the descriptor is made. */
+	private java.util.Map<Integer, String> names = java.util.Map.of();
 
 	public IntSetting(String id, String label, @Nullable String description, int defaultValue, int min, int max, int step, String unit) {
 		super(id, label, description, defaultValue);
@@ -32,6 +34,28 @@ public final class IntSetting extends SettingDescriptor<Integer> {
 
 	public int step() {
 		return step;
+	}
+
+	/**
+	 * Shows {@code value} as {@code name} ("Auto" for 0) instead of the number and unit. Only while the descriptor is made:
+	 * {@code new IntSetting(...).named(0, "Auto")}.
+	 */
+	public IntSetting named(int value, String name) {
+		java.util.Map<Integer, String> next = new java.util.HashMap<>(names);
+		next.put(value, name);
+		names = java.util.Map.copyOf(next);
+		return this;
+	}
+
+	/** Whether some values are shown by a name. */
+	public boolean hasNames() {
+		return !names.isEmpty();
+	}
+
+	/** {@code value} as a slider shows it: its name, else the number and the unit ("12 chunks"). */
+	public String format(int value) {
+		String name = names.get(value);
+		return name != null ? name : value + unit;
 	}
 
 	/** Shown after the value ({@code "%"}, {@code "px"}), or empty. */

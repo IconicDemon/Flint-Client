@@ -49,7 +49,7 @@ public final class Mc263Sounds {
 				CACHE.put(id, cached);
 			}
 			return cached;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			return 1;
 		}

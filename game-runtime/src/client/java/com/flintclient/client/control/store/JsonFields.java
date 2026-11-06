@@ -67,6 +67,22 @@ final class JsonFields {
 		return fallback;
 	}
 
+	/** The whole number at {@code key} (within ±2^53, no fraction), or null when it is missing or isn't one. */
+	static @Nullable Long integer(@Nullable JsonObject parent, String key) {
+		if (parent == null) {
+			return null;
+		}
+		JsonElement value = parent.get(key);
+		if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+			return null;
+		}
+		double number = value.getAsDouble();
+		if (!Double.isFinite(number) || number != Math.rint(number) || Math.abs(number) > 9.007199254740992E15) {
+			return null;
+		}
+		return (long) number;
+	}
+
 	/** The strings in the array at {@code key} (other entries skipped), or an empty list. */
 	static List<String> strings(@Nullable JsonObject parent, String key) {
 		List<String> result = new ArrayList<>();

@@ -1,7 +1,6 @@
 package com.flintclient.client.control.hud.render;
 
 import com.flintclient.client.control.ControlState;
-import com.flintclient.client.control.HudEditorScreen;
 import com.flintclient.client.control.hud.HudPlacement;
 import com.flintclient.client.control.hud.ScaleSteps;
 import com.flintclient.client.control.hud.VanillaAreas;
@@ -14,8 +13,10 @@ import com.flintclient.client.control.model.ModuleSettings;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.mods.HudMods;
 import com.flintclient.client.control.model.mods.PlayerMods;
-import com.flintclient.client.control.platform.Mc263ControlPlatform;
-import com.flintclient.client.control.platform.Mc263HudData;
+import com.flintclient.client.control.rshift.HudPageScreen;
+import com.flintclient.client.platform.Frame;
+import com.flintclient.client.platform.HostScreen;
+import com.flintclient.client.platform.HudData;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.FlintFrame;
@@ -23,10 +24,6 @@ import com.flintclient.client.ui.kit.Kit;
 import com.flintclient.client.ui.kit.KitScreen;
 import com.flintclient.client.ui.kit.Tokens;
 import java.lang.ref.WeakReference;
-import net.minecraft.client.DeltaTracker;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.multiplayer.ClientLevel;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -58,12 +55,34 @@ import org.jspecify.annotations.Nullable;
 public final class HudRenderer {
 	private static final int MODULES = ModuleRegistry.size();
 	private static final int EFFECTS = ModuleRegistry.indexOf(ModuleId.EFFECTS);
+	private static final int PING = ModuleRegistry.indexOf(ModuleId.PING);
+	private static final int MINIMAP = ModuleRegistry.indexOf(com.flintclient.client.control.model.mods.MapMods.Minimap.ID);
+	private static final int MUSIC = ModuleRegistry.indexOf(com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID);
+	/** Each HUD or editor pass over the modules, and where Ping was drawn in the latest one (GUI units), for Effects to step under it. */
+	private static long pass;
+	private static long pingPass = -1;
+	private static float pingLeft;
+	private static float pingTop;
+	private static float pingRight;
+	private static float pingBottom;
+	/** Between Ping's readout and the effect tiles stepping under it. */
+	private static final float UNDER_PING_GAP = 2;
+	/** Where the effect tiles were drawn in the latest pass (GUI units), for the minimap to step under them. */
+	private static long effectsPass = -1;
+	private static float effectsLeft;
+	private static float effectsTop;
+	private static float effectsRight;
+	private static float effectsBottom;
+	/** The bottom of Minecraft's own second (harmful) line of effect icons: 1 + 26 + 24 units, and a unit of air. */
+	private static final float VANILLA_HARMFUL_BOTTOM = 52;
 	private static final @Nullable ModuleView[] HUD_VIEWS = views(HudText.HUD);
 	private static final @Nullable ModuleView[] PREVIEW_VIEWS = views(HudText.PREVIEW);
 	private static final HudPen HUD_PEN = new HudPen(HudText.HUD);
 	private static final HudPen PREVIEW_PEN = new HudPen(HudText.PREVIEW);
 	private static final HudStyle[] HUD_STYLES = styles();
 	private static final HudStyle PREVIEW_STYLE = new HudStyle();
+	/** A view's own spot ({@link ModuleView#ownSpot}), GUI units. */
+	private static final float[] SPOT = new float[2];
 	/** Registry indices of the enabled modules, in registry order (the order they are drawn in). */
 	private static final int[] ENABLED = new int[MODULES];
 
@@ -105,7 +124,7 @@ public final class HudRenderer {
 	private static final long PREVIEW_ALONE_NANOS = 100_000_000L;
 
 	/** The world and pause state last seen: joining a world or resuming restarts the 1% low's window. */
-	private static @Nullable WeakReference<ClientLevel> lastLevel;
+	private static @Nullable WeakReference<Object> lastLevel;
 	private static boolean wasPausing;
 
 	private HudRenderer() {
@@ -127,23 +146,41 @@ public final class HudRenderer {
 				case ModuleId.KEYSTROKES -> new KeystrokesView(surface);
 				case ModuleId.COORDINATES -> new CoordinatesView(surface);
 				case ModuleId.DIRECTION -> new DirectionView(surface);
-				case ModuleId.ARMOR -> new ArmorView(surface);
 				case ModuleId.EFFECTS -> new EffectsView(surface);
+				case ModuleId.ARMOR -> new ArmorView(surface);
 				case HudMods.MemoryUsage.ID -> new InfoViews.MemoryView(surface);
-				case HudMods.Playtime.ID -> new InfoViews.PlaytimeView(surface);
-				case HudMods.DayCounter.ID -> new InfoViews.DayView(surface);
+				case HudMods.Playtime.ID -> new OriginalViews.PlaytimeView(surface);
+				case HudMods.DayCounter.ID -> new OriginalViews.DayView(surface);
 				case HudMods.ViewAngles.ID -> new InfoViews.AnglesView(surface);
 				case HudMods.HeightLimit.ID -> new InfoViews.HeightView(surface);
 				case HudMods.Saturation.ID -> new InfoViews.SaturationView(surface);
-				case HudMods.PotionCounter.ID -> new InfoViews.PotionCountView(surface);
-				case HudMods.ReachDisplay.ID -> new InfoViews.ReachView(surface);
+				case HudMods.PotionCounter.ID -> new OriginalViews.PotionView(surface);
+				case HudMods.ReachDisplay.ID -> new OriginalViews.ReachView(surface);
 				case HudMods.ComboCounter.ID -> new InfoViews.ComboView(surface);
 				case HudMods.HorseStats.ID -> new InfoViews.HorseView(surface);
+				case HudMods.Clock.ID -> new InfoViews.ClockView(surface);
+				case HudMods.Tps.ID -> new InfoViews.TpsView(surface);
+				case HudMods.ServerAddress.ID -> new InfoViews.ServerAddressView(surface);
+				case HudMods.Stopwatch.ID -> new InfoViews.StopwatchView(surface);
 				case HudMods.Cooldowns.ID -> new ItemViews.CooldownView(surface);
 				case HudMods.ItemCounter.ID -> new ItemViews.CounterView(surface);
 				case PlayerMods.ToggleSprint.ID -> new InfoViews.SprintView(surface);
 				case com.flintclient.client.control.model.mods.VisualMods.Momentum.ID -> new InfoViews.MomentumView(surface);
 				case com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID -> new InventoryView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.ID -> new MoreViews.BlockView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.DamageIndicator.ID -> new MoreViews.TargetView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.PlayerModel.ID -> new MoreViews.PlayerView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.PackDisplay.ID -> new OriginalViews.PackView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.Mousestrokes.ID -> new MoreViews.MouseView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.JumpReset.ID -> new MoreViews.JumpView(surface);
+				case com.flintclient.client.control.model.mods.MoreHudMods.ItemInfo.ID -> new MoreViews.HeldView(surface);
+				case com.flintclient.client.control.model.mods.LookMods.TeamTracker.ID -> new MoreViews.CompassView(surface);
+				case com.flintclient.client.control.model.mods.MapMods.Minimap.ID -> new MinimapView(surface);
+				case com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID -> new MoreViews.VanillaSpotView(
+					com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID, surface, true);
+				case com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID -> new MoreViews.VanillaSpotView(
+					com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID, surface, false);
+				case com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID -> new MusicPlayerView(surface);
 				default -> throw new IllegalStateException("No renderer for HUD module " + id);
 			};
 		}
@@ -161,51 +198,62 @@ public final class HudRenderer {
 	// ---------- the HUD ----------
 
 	/** Every frame the HUD is drawn (not with F1 or under the loading screen); allocates nothing of Flint's own. */
-	public static void render(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
+	public static void render(Frame frame) {
 		try {
-			draw(graphics);
-		} catch (RuntimeException e) {
+			draw(frame);
+		} catch (RuntimeException | LinkageError e) {
 			// The facade logs it and turns the HUD off; from now on Minecraft's effect icons are left alone.
 			failed = true;
 			throw e;
 		}
 	}
 
-	private static void draw(GuiGraphicsExtractor graphics) {
+	private static void draw(Frame frame) {
 		long now = System.nanoTime();
 		hudFrame++;
 		hudFrameAt = now;
 		FpsMeter.maintain(now);
 		observeSession(now);
 		guardPreview(now);
-		if (Mc263ControlPlatform.currentScreen() instanceof HudEditorScreen) {
+		pass++;
+		if (HostScreen.current() instanceof HudPageScreen) {
 			return;
 		}
-		if (Mc263HudData.debugOverlayOpen() && !ControlState.settings().showHudWithDebugScreen()) {
+		if (HudData.debugOverlayOpen() && !ControlState.settings().showHudWithDebugScreen()) {
 			return;
 		}
 		Layout layout = shownLayout();
-		int guiScale = Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
+		int guiScale = Frame.windowGuiScale();
 		bind(layout);
 		if (boundScale != guiScale || stylesStale) {
 			boundScale = guiScale;
 			resolveStyles(layout, guiScale);
 		}
-		if (enabledCount == 0) {
+		// Subtitles' Nearby Sound Activity: drawn over the modules, in the same pass (nothing to do while its list is empty).
+		boolean sounds = SoundActivityView.wanted();
+		if (enabledCount == 0 && !sounds) {
 			return;
 		}
 		holdsWorld = true;
-		FlintFrame.begin(graphics);
-		Canvas c = Canvas.begin(graphics);
+		FlintFrame.begin(frame.target());
+		Canvas c = Canvas.begin(frame);
 		try {
-			float screenW = graphics.guiWidth();
-			float screenH = graphics.guiHeight();
+			float screenW = frame.guiWidth();
+			float screenH = frame.guiHeight();
 			for (int k = 0; k < enabledCount; k++) {
 				int i = ENABLED[k];
 				ModuleState state = layout.modules().get(i);
 				ModuleView view = HUD_VIEWS[i];
 				view.update(state, ModuleView.HUD, now);
+				// Each module in its own GUI stratum: Minecraft then checks a new piece for overlaps only against that
+				// module's pieces, not every piece of the HUD so far (with many modules on, that check cost a quarter of
+				// the frame). Modules don't overlap one another's drawing order in a way this changes.
+				frame.nextLayer();
 				drawPlaced(c, HUD_PEN.on(c, HUD_STYLES[i]), view, state, screenW, screenH, guiScale, null, i, true);
+			}
+			if (sounds) {
+				frame.nextLayer();
+				SoundActivityView.draw(c, screenW, screenH, guiScale, now);
 			}
 		} finally {
 			c.end();
@@ -225,7 +273,7 @@ public final class HudRenderer {
 		if (!effectsHideVanilla) {
 			return false;
 		}
-		return !Mc263HudData.debugOverlayOpen() || ControlState.settings().showHudWithDebugScreen();
+		return !HudData.debugOverlayOpen() || ControlState.settings().showHudWithDebugScreen();
 	}
 
 	/**
@@ -238,7 +286,7 @@ public final class HudRenderer {
 		FpsMeter.maintain(now);
 		observeSession(now);
 		if (previewLayout != null) {
-			if (Mc263ControlPlatform.currentScreen() instanceof KitScreen) {
+			if (HostScreen.current() instanceof KitScreen) {
 				previewTicksAlone = 0;
 				previewScreenSeenAt = now;
 			} else if (++previewTicksAlone > 1) {
@@ -246,7 +294,7 @@ public final class HudRenderer {
 				previewLayout = null;
 			}
 		}
-		if (holdsWorld && Mc263HudData.player() == null) {
+		if (holdsWorld && HudData.player() == null) {
 			forgetWorld();
 		}
 	}
@@ -262,7 +310,7 @@ public final class HudRenderer {
 		if (previewLayout == null) {
 			return;
 		}
-		if (Mc263ControlPlatform.currentScreen() instanceof KitScreen) {
+		if (HostScreen.current() instanceof KitScreen) {
 			previewScreenSeenAt = now;
 		} else if (now - previewScreenSeenAt > PREVIEW_ALONE_NANOS) {
 			previewLayout = null;
@@ -274,15 +322,15 @@ public final class HudRenderer {
 	 * pause menu aren't gameplay). Field reads; allocates only when the world changes.
 	 */
 	private static void observeSession(long now) {
-		ClientLevel level = Mc263HudData.level();
-		ClientLevel last = lastLevel == null ? null : lastLevel.get();
+		Object level = HudData.level();
+		Object last = lastLevel == null ? null : lastLevel.get();
 		if (level != last) {
 			lastLevel = level == null ? null : new WeakReference<>(level);
 			if (level != null) {
 				FpsMeter.restartWindow(now);
 			}
 		}
-		boolean pausing = level != null && Mc263HudData.pausing();
+		boolean pausing = level != null && HudData.pausing();
 		if (wasPausing && !pausing) {
 			FpsMeter.restartWindow(now);
 		}
@@ -292,6 +340,8 @@ public final class HudRenderer {
 	/** Every module view drops what it read from the world (the views are static and outlive it). */
 	private static void forgetWorld() {
 		holdsWorld = false;
+		// The sounds heard in that world (their places mean nothing in the next).
+		com.flintclient.client.control.feature.SoundActivity.get().clear();
 		for (int i = 0; i < MODULES; i++) {
 			if (HUD_VIEWS[i] != null) {
 				HUD_VIEWS[i].forget();
@@ -334,12 +384,17 @@ public final class HudRenderer {
 		boundSwitches = switches;
 		enabledCount = 0;
 		for (int i = 0; i < MODULES; i++) {
-			if (HUD_VIEWS[i] != null && layout.modules().get(i).enabled() && layout.modules().get(i).descriptor().status().usable()) {
+			// A module this line doesn't run (a profile from another line on 1.8.9) stays off the HUD.
+			// A module that draws itself from its own hook (Armor) is the editor's only.
+			if (HUD_VIEWS[i] != null && !HUD_VIEWS[i].editorOnly() && layout.modules().get(i).enabled() && layout.modules().get(i).descriptor().status().usable()
+				&& com.flintclient.client.control.rshift.Catalog.runs(layout.modules().get(i).descriptor())) {
 				ENABLED[enabledCount++] = i;
 			}
 		}
 		ModuleState effects = layout.modules().get(EFFECTS);
-		effectsHideVanilla = effects.enabled() && effects.bool(ModuleSettings.Effects.HIDE_VANILLA_EFFECTS);
+		// The tiles take the place of Minecraft's icons (never both); the List hides them only with its setting.
+		effectsHideVanilla = effects.enabled() && (effects.option(ModuleSettings.Effects.VIEW) == ModuleSettings.Effects.TILES
+			|| effects.bool(ModuleSettings.Effects.HIDE_VANILLA_EFFECTS));
 		if (boundScale > 0) {
 			resolveStyles(layout, boundScale);
 		}
@@ -374,10 +429,32 @@ public final class HudRenderer {
 		HudPlacement placement = state.placement();
 		float left = placement.clampedLeft(screenW, drawnW);
 		float top = placement.clampedTop(screenH, drawnH);
+		if (index == PING) {
+			pingPass = pass;
+			pingLeft = left;
+			pingTop = top;
+			pingRight = left + drawnW;
+			pingBottom = top + drawnH;
+		} else if (index == EFFECTS) {
+			top = effectsTop(c, state, left, top, drawnW, drawnH, screenH);
+			effectsPass = pass;
+			effectsLeft = left;
+			effectsTop = top;
+			effectsRight = left + drawnW;
+			effectsBottom = top + drawnH;
+		} else if (index == MINIMAP) {
+			top = minimapTop(state, left, top, drawnW, drawnH, screenH);
+		}
+		// A module its own settings place (Armor against the hotbar) is where they put it.
+		boolean own = view.ownSpot(SPOT);
+		if (own) {
+			left = SPOT[0];
+			top = SPOT[1];
+		}
 		int x = Math.round(left * guiScale);
 		int y = Math.round(top * guiScale);
 		if (scene != null) {
-			scene.set(index, HudScene.SHOWN, (float) x / guiScale, (float) y / guiScale, drawnW, drawnH, null);
+			scene.set(index, HudScene.SHOWN, (float) x / guiScale, (float) y / guiScale, drawnW, drawnH, null, own);
 		}
 		if (hud) {
 			RECTS[4 * index] = (float) x / guiScale;
@@ -386,11 +463,60 @@ public final class HudRenderer {
 			RECTS[4 * index + 3] = drawnH;
 			RECT_FRAME[index] = hudFrame;
 		}
-		if (view.panelled()) {
-			pen.panel(x, y, w, h);
+		float opacity = hud ? view.opacity() : 1;
+		float before = c.opacity();
+		if (opacity < 1) {
+			c.setOpacity(before * opacity);
 		}
-		view.draw(pen, state, x + padX, y + padY);
+		try {
+			if (view.panelled()) {
+				pen.panel(x, y, w, h);
+			}
+			view.draw(pen, state, x + padX, y + padY);
+		} finally {
+			c.setOpacity(before);
+		}
 		return true;
+	}
+
+	/**
+	 * Where Effects goes down to at its default spot, Minecraft's top-right corner, which Ping's default spot shares: below Ping's
+	 * readout when Ping was drawn there in this pass, and below Armor's strip when Armor pushes the effect icons (as it pushes
+	 * Minecraft's). Moved anywhere else, Effects stays exactly where it was put.
+	 */
+	private static float effectsTop(Canvas c, ModuleState state, float left, float top, float drawnW, float drawnH, float screenH) {
+		if (!state.placement().equals(state.descriptor().defaultPlacement())) {
+			return top;
+		}
+		float at = top + HudData.armorEffectsPush(c.frame());
+		if (pingPass == pass && left < pingRight && left + drawnW > pingLeft && at < pingBottom && at + drawnH > pingTop) {
+			at = pingBottom + UNDER_PING_GAP;
+		}
+		return Math.min(at, Math.max(0, screenH - drawnH));
+	}
+
+	/**
+	 * Where the minimap goes down to at its default spot, under the effects in the same top-right corner: below the effect
+	 * tiles (and their times) when they were drawn there in this pass, and below Minecraft's own harmful line when its icons
+	 * show. Moved anywhere else, the minimap stays exactly where it was put.
+	 */
+	private static float minimapTop(ModuleState state, float left, float top, float drawnW, float drawnH, float screenH) {
+		if (!state.placement().equals(state.descriptor().defaultPlacement())) {
+			return top;
+		}
+		float at = top;
+		if (effectsPass == pass && left < effectsRight && left + drawnW > effectsLeft && at < effectsBottom && at + drawnH > effectsTop) {
+			at = effectsBottom + UNDER_PING_GAP;
+		}
+		if (!effectsHideVanilla && vanillaHarmfulShown()) {
+			at = Math.max(at, VANILLA_HARMFUL_BOTTOM);
+		}
+		return Math.min(at, Math.max(0, screenH - drawnH));
+	}
+
+	/** Whether Minecraft draws its second line of effect icons: a harmful effect that shows its icon. */
+	private static boolean vanillaHarmfulShown() {
+		return HudData.harmfulIconsShown();
 	}
 
 	// ---------- the HUD editor ----------
@@ -405,12 +531,13 @@ public final class HudRenderer {
 		long now = System.nanoTime();
 		FpsMeter.maintain(now);
 		holdsWorld = true;
+		pass++;
 		// The HUD isn't drawn while the editor is open; it resolves its styles again before its next frame.
 		stylesStale = true;
 		int guiScale = c.guiScale();
 		for (int i = 0; i < MODULES; i++) {
 			ModuleState state = layout.modules().get(i);
-			if (!state.enabled() || HUD_VIEWS[i] == null) {
+			if (!state.enabled() || HUD_VIEWS[i] == null || !com.flintclient.client.control.rshift.Catalog.runs(state.descriptor())) {
 				scene.off(i);
 				continue;
 			}
@@ -419,7 +546,8 @@ public final class HudRenderer {
 			style.resolve(layout.appearance(), state.appearance(), null, state.placement().scale(), guiScale);
 			HudPen pen = HUD_PEN.on(c, style);
 			view.update(state, ModuleView.HUD, now);
-			if (drawPlaced(c, pen, view, state, screenW, screenH, guiScale, scene, i, false)) {
+			// What Minecraft draws itself (the scoreboard) follows the editor's rectangle while it is dragged.
+			if (drawPlaced(c, pen, view, state, screenW, screenH, guiScale, scene, i, view.descriptor.drawnByMinecraft())) {
 				continue;
 			}
 			view.update(state, ModuleView.PLACEHOLDER, now);
@@ -430,15 +558,20 @@ public final class HudRenderer {
 			float h = (float) Math.max(view.height + 2 * padY, guiScale * 11) / guiScale;
 			float left = Math.round(state.placement().clampedLeft(screenW, w) * guiScale) / (float) guiScale;
 			float top = Math.round(state.placement().clampedTop(screenH, h) * guiScale) / (float) guiScale;
-			scene.set(i, HudScene.OUTLINE, left, top, w, h, reason(view));
+			boolean own = view.ownSpot(SPOT);
+			if (own) {
+				left = Math.round(SPOT[0] * guiScale) / (float) guiScale;
+				top = Math.round(SPOT[1] * guiScale) / (float) guiScale;
+			}
+			scene.set(i, HudScene.OUTLINE, left, top, w, h, reason(view), own);
 		}
 	}
 
 	/** Why a module shows nothing: its availability (needs a world, servers only...) or its own reason. */
 	private static String reason(ModuleView view) {
 		ModuleDescriptor descriptor = view.descriptor;
-		String unavailable = descriptor.availability(ControlState.inWorld(), ControlState.multiplayer(), ControlState.latencyKnown(),
-			ControlState.networkCoreRunning()).reason();
+		String unavailable = descriptor.availability(HudData.inWorld(), HudData.multiplayer(), HudData.latencyKnown(),
+			HudData.networkCoreRunning()).reason();
 		return unavailable != null ? unavailable : view.emptyReason();
 	}
 
@@ -482,7 +615,8 @@ public final class HudRenderer {
 	 */
 	public static boolean lastRect(String moduleId, float[] out4) {
 		int index = ModuleRegistry.indexOf(moduleId);
-		if (index < 0 || hudFrame == 0 || RECT_FRAME[index] != hudFrame || System.nanoTime() - hudFrameAt > RECT_STALE_NANOS) {
+		// The frame before counts too: Minecraft draws some of its parts (the scoreboard) before this frame drew its modules.
+		if (index < 0 || hudFrame == 0 || hudFrame - RECT_FRAME[index] > 1 || System.nanoTime() - hudFrameAt > RECT_STALE_NANOS) {
 			return false;
 		}
 		System.arraycopy(RECTS, 4 * index, out4, 0, 4);
@@ -498,6 +632,33 @@ public final class HudRenderer {
 		previewLayout = layout;
 		previewTicksAlone = 0;
 		previewScreenSeenAt = System.nanoTime();
+	}
+
+	// ---------- the HUD under chat's pointer ----------
+
+	/**
+	 * Chat is open with the pointer at ({@code x}, {@code y}) GUI units: called each frame chat draws, so HUD buttons under it
+	 * light up (Music Player's). Allocation-free; never throws.
+	 */
+	public static void chatPointer(double x, double y) {
+		MusicPlayerView.pointer(x, y, System.nanoTime());
+	}
+
+	/**
+	 * A mouse button went down at ({@code x}, {@code y}) GUI units in chat: true when it pressed one of the HUD's own buttons
+	 * (Music Player's previous, play/pause and next, or its bar), so chat doesn't take it too. Only the left button, only on a
+	 * card drawn in the last frames; never throws (a failure leaves the click to chat).
+	 */
+	public static boolean chatClick(double x, double y, int button) {
+		if (failed || button != com.flintclient.client.platform.Keys.MOUSE_LEFT || MUSIC < 0
+			|| !(HUD_VIEWS[MUSIC] instanceof MusicPlayerView music)) {
+			return false;
+		}
+		try {
+			return music.click(x, y, System.nanoTime());
+		} catch (RuntimeException | LinkageError e) {
+			return false;
+		}
 	}
 
 	/** Whether {@code moduleId} is drawn on the HUD (has a view here). */
@@ -651,7 +812,7 @@ public final class HudRenderer {
 		int line = Kit.hairline(canvas);
 		canvas.panelCorners(fx, fy, fw, fh, 3 * unitPx, line, Tokens.outline(), Tokens.WELL);
 
-		int screenH = Math.max(1, Minecraft.getInstance().getWindow().getGuiScaledHeight());
+		int screenH = Math.max(1, HudData.guiHeight());
 		float screenW = screenH * 16 / 9.0F;
 		float k = fh / (float) screenH;
 		// The hotbar, for orientation.

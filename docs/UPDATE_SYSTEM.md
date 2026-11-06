@@ -17,7 +17,7 @@ is installed. This document describes how it works, what was tested, and its lim
    the app. A file that fails the check is discarded.
 4. **Install.** "Restart to update" replaces the app and restarts Flint into the new version. It is disabled while a
    game launched from Flint is starting or running, so a game is never cut short. Profiles, worlds, accounts and
-   settings live outside the app (`~/Library/Application Support/com.flintclient.desktop`, `%APPDATA%\com.flintclient.desktop`)
+   settings live outside the app (`~/Library/Application Support/Flint Client`, `%APPDATA%\Flint Client`; older versions used `com.flintclient.desktop`, moved on first start)
    and are not touched.
 5. **Manual check.** Settings → General → About Flint → "Check for updates" reports "You're up to date", the new
    version, or a short error.
@@ -35,7 +35,7 @@ is installed. This document describes how it works, what was tested, and its lim
 ### Safety properties
 
 - **Signed updates only.** The app contains only the *public* key (minisign key ID `EE44136DEFE21C45`). Each update file
-  needs a signature from the matching private key, which never leaves the release machine or the protected GitHub
+  needs a signature from the matching private key, which never leaves the release machine or the restricted GitHub
   environment.
 - **Signed version.** `requireSignedVersion` is on: each signature records the version it was made for, so an older
   (validly signed) build can't be offered as a newer version.
@@ -46,7 +46,7 @@ is installed. This document describes how it works, what was tested, and its lim
   (`app/scripts/updater-manifest.mjs` refuses a platform without a signature file, or a non-HTTPS URL). Until Windows is
   verified on a real PC, the manifest lists only `darwin-aarch64`, and Windows copies see no update.
 - **Players get an update only when it is promoted.** Releases are created as drafts. Installed copies read only the
-  `updater-beta` release, which changes only through the "Promote update" workflow (owner approval required).
+  `updater-beta` release, which changes only through the "Promote update" workflow, started by the owner.
 
 ## Files
 

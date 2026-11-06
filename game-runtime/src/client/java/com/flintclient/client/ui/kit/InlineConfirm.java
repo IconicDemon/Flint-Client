@@ -1,9 +1,9 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.KeyInput;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Icon;
 import com.flintclient.client.render.TextLine;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -177,7 +177,7 @@ public class InlineConfirm extends Node {
 		}
 
 		@Override
-		public boolean keyDown(KeyEvent event) {
+		public boolean keyDown(KeyInput event) {
 			if (event.isEscape()) {
 				owner.cancel(true);
 				return true;

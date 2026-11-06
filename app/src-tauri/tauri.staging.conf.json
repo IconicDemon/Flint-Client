@@ -1,0 +1,35 @@
+{
+  "productName": "Flint Client Staging",
+  "identifier": "com.flintclient.desktop.staging",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Flint Client Staging",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1080,
+        "minHeight": 660,
+        "center": true,
+        "visible": false,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "backgroundColor": "#0a0908",
+        "theme": "Dark"
+      }
+    ]
+  },
+  "bundle": {
+    "shortDescription": "Flint Client staging test build.",
+    "fileAssociations": null,
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/IconicDemon/Flint-Client/releases/download/updater-staging/latest.json"
+      ]
+    }
+  }
+}

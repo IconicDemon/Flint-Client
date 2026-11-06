@@ -18,7 +18,12 @@ public final class IconButton extends FlintButton {
 
 	private final Icon icon;
 	private final IntSupplier badge;
-	private final TextLine badgeText = new TextLine(FlintFonts.CAPS, "");
+	/**
+	 * The count in Minecraft's own font, at the size Flint's caps would be. A digit drawn in Flint's TrueType caps face (the
+	 * menu's other caps are letters) was followed, about 30 s after it first showed, by one GL_INVALID_ENUM debug message
+	 * raised inside the window's buffer swap (26.3, seen on NVIDIA); Minecraft's font doesn't do that.
+	 */
+	private final TextLine badgeText = new TextLine(com.flintclient.client.render.PixelFace.of(FlintFonts.CAPS.size), "");
 	/** The count {@link #badgeText} shows, so its text is only rebuilt when the count changes. */
 	private int badgeCount;
 

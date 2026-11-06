@@ -1,16 +1,15 @@
 package com.flintclient.client.ui.kit;
 
+import com.flintclient.client.platform.Clock;
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
+import com.flintclient.client.platform.Services;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.FontFace;
 import com.flintclient.client.render.Icon;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
 import com.flintclient.client.ui.Motion;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.util.StringUtil;
-import net.minecraft.util.Util;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -174,14 +173,14 @@ public class TextField extends Node {
 
 	@Override
 	protected void focusChanged(boolean focused) {
-		caretSince = Util.getMillis();
+		caretSince = Clock.millis();
 		if (!focused) {
 			state.moveTo(state.caret(), false);
 		}
 	}
 
 	private void changed() {
-		caretSince = Util.getMillis();
+		caretSince = Clock.millis();
 		if (onChange != null) {
 			onChange.changed(state.text());
 		}
@@ -249,9 +248,9 @@ public class TextField extends Node {
 			}
 			return false;
 		}
-		boolean extend = Minecraft.getInstance().hasShiftDown();
+		boolean extend = Services.shiftDown();
 		state.moveTo(indexAt(mx), extend);
-		caretSince = Util.getMillis();
+		caretSince = Clock.millis();
 		return true;
 	}
 
@@ -261,7 +260,7 @@ public class TextField extends Node {
 	}
 
 	@Override
-	public boolean keyDown(KeyEvent event) {
+	public boolean keyDown(KeyInput event) {
 		if (event.isEscape()) {
 			if (onEscape == null) {
 				return false;
@@ -278,43 +277,43 @@ public class TextField extends Node {
 			state.selectAll();
 		} else if (event.isCopy()) {
 			if (state.hasSelection()) {
-				Minecraft.getInstance().keyboardHandler.setClipboard(state.selected());
+				Services.setClipboard(state.selected());
 			}
 		} else if (event.isCut()) {
 			String cut = state.cut();
 			if (!cut.isEmpty()) {
-				Minecraft.getInstance().keyboardHandler.setClipboard(cut);
+				Services.setClipboard(cut);
 				text = cut;
 			}
 		} else if (event.isPaste()) {
-			state.insert(StringUtil.filterText(Minecraft.getInstance().keyboardHandler.getClipboard()));
+			state.insert(Services.filterText(Services.clipboard()));
 			text = "";
-		} else if (key == InputConstants.KEY_BACKSPACE) {
+		} else if (key == Keys.BACKSPACE) {
 			state.backspace(word);
 			text = "";
-		} else if (key == InputConstants.KEY_DELETE) {
+		} else if (key == Keys.DELETE) {
 			state.delete(word);
 			text = "";
 		} else if (event.isLeft()) {
 			state.left(shift, word);
 		} else if (event.isRight()) {
 			state.right(shift, word);
-		} else if (key == InputConstants.KEY_HOME) {
+		} else if (key == Keys.HOME) {
 			state.home(shift);
-		} else if (key == InputConstants.KEY_END) {
+		} else if (key == Keys.END) {
 			state.end(shift);
-		} else if (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) {
+		} else if (key == Keys.RETURN || key == Keys.NUMPAD_ENTER) {
 			if (onSubmit != null) {
 				onSubmit.changed(state.text());
 			}
 		} else {
 			// Space is typed (charTyped), not an activation; Up/Down move between rows.
-			return key == InputConstants.KEY_SPACE;
+			return key == Keys.SPACE;
 		}
 		if (text != null && state.version() != before) {
 			changed();
 		} else {
-			caretSince = Util.getMillis();
+			caretSince = Clock.millis();
 		}
 		return true;
 	}
@@ -421,7 +420,7 @@ public class TextField extends Node {
 			}
 		}
 		if (active) {
-			long since = Util.getMillis() - caretSince;
+			long since = Clock.millis() - caretSince;
 			boolean shown = Kit.reduced() || (since / BLINK_MILLIS) % 2 == 0;
 			int cx = left + caretPx - scrollPx;
 			if (shown && cx >= left - 1 && cx <= right) {

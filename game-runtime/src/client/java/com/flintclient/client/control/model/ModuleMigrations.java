@@ -20,6 +20,18 @@ import org.jspecify.annotations.Nullable;
  * off. The style's text colour, panel and panel opacity overrides, which FPS no longer reads, become its own
  * {@code textColor}, {@code background} and {@code backgroundOpacity} when the file has none of those yet, so an
  * older FPS counter keeps its look.</li>
+ * <li>Shulker Preview {@code show} Holding Shift → {@code holdKey} on (the preview key starts as Shift).</li>
+ * <li>Effects without {@code view} (from before its Tiles layout): still at the list's old default spot (left edge, 4, 0), it
+ * moves to the new default, Minecraft's top-right corner; anywhere else it stays put.</li>
+ * <li>Effects without {@code tileLevel} and with {@code tileTime} Below (the old default): the time moves onto the tile, where the
+ * level now sits too.</li>
+ * <li>Hearts {@code sameBarAbsorption} (absorption over your hearts, on by default) is retired, not read: golden hearts get their own
+ * row above, as Minecraft draws them, until {@code sameRowAbsorption} is turned on.</li>
+ * <li>Inventory {@code search} (the search bar, on by default) is retired, not read: its {@code searchBar} starts off.</li>
+ * <li>Motion Blur {@code blurAlgorithm} {@code classic} (Flint's own trail, its default for a day before Natural Motion Blur's
+ * algorithms became the whole list) needs nothing here: an option key the list no longer has reads as the default, Velocity
+ * based, Natural Motion Blur's recommended one. Every other Motion Blur setting kept its id and meaning; the two new ones
+ * ({@code quality}, {@code movementBlur}) start at their defaults.</li>
  * <li>The style's "Show label" off → {@code labelPosition} Hidden (Ping, CPS), {@code showLabel} off (FPS) or
  * {@code labels} off (Coordinates), when the file has no such setting yet. Those modules' own setting decides the label from then
  * on, so the override is dropped then (it leaves the file on the next save).</li>
@@ -31,6 +43,30 @@ public final class ModuleMigrations {
 	private static final List<String> KEYSTROKES_RETIRED = List.of("showMouse", "showSpace");
 	private static final List<String> FPS_RETIRED = List.of("labelPosition");
 	private static final List<String> KILL_SOUNDS_RETIRED = List.of("sound", "volume");
+	private static final List<String> SHULKER_RETIRED = List.of("show");
+	private static final List<String> TITLES_RETIRED = List.of("show");
+	private static final List<String> TAB_RETIRED = List.of("pingColor");
+	/** Inventory's search bar was {@code search}, on by default; it is {@code searchBar} now, off until chosen. */
+	private static final List<String> INVENTORY_RETIRED = List.of("search");
+	/** Hearts drew absorption over your hearts by default ({@code sameBarAbsorption}); {@code sameRowAbsorption} starts off. */
+	private static final List<String> HEARTS_RETIRED = List.of("sameBarAbsorption");
+	/** Particle Changer's swirl filter once hid every swirl by default (0%); it now starts at 100%. */
+	private static final List<String> PARTICLES_RETIRED = List.of("effectParticles");
+	/** Drop Prevention's scroll resistance once started at 2 notches, which felt like a delay leaving a protected slot. */
+	private static final List<String> DROP_RETIRED = List.of("scrollResistance");
+	/** Custom F3 before BetterF3: a switch and a colour per line group, an ease-in, the profiler chart at first and the help lines. */
+	private static final List<String> F3_RETIRED = List.of("showMinecraftVersion", "showFPS", "showServer", "showSection",
+		"showEntityCount", "showChunkSource",
+		"showDimension", "showPos", "showBlockPos", "showChunkPos", "showFacing", "showClientLight", "showChunkInfo",
+		"showBiome", "showDifficulty", "showSpawnState", "showShader", "showSounds", "showMemoryUsage", "showAllocation",
+		"showCPU", "showDisplay", "showRenderer", "showGL", "showBlockHitResult", "showEntityHitResult",
+		"colorMinecraftVersion", "colorFPS", "colorServer", "colorSection", "colorEntityCount", "colorChunkSource",
+		"colorDimension", "colorPos", "colorBlockPos", "colorChunkPos", "colorFacing", "colorClientLight",
+		"colorChunkInfo", "colorBiome", "colorDifficulty", "colorSpawnState", "colorShader", "colorSounds",
+		"colorMemoryUsage", "colorAllocation", "colorCPU", "colorDisplay", "colorRenderer", "colorGL",
+		"colorBlockHitResult", "colorEntityHitResult", "animate", "animateAlpha", "animatePos", "animationDuration",
+		"showPieByDefault", "showHelpTips");
+	private static final List<String> TOASTS_RETIRED = List.of("enabled", "advancement", "recipe", "system", "tutorial");
 
 	private ModuleMigrations() {
 	}
@@ -52,7 +88,23 @@ public final class ModuleMigrations {
 				}
 			}
 			case ModuleId.FPS -> fps(module, settings);
+			case ModuleId.EFFECTS -> effects(module, settings);
 			case com.flintclient.client.control.model.mods.PlayerMods.KillSounds.ID -> killSounds(module, settings);
+			case com.flintclient.client.control.model.mods.UtilityMods.ToastControl.ID -> toasts(module, settings);
+			case com.flintclient.client.control.model.mods.ToolMods.CustomF3.ID -> customF3(module, settings);
+			case com.flintclient.client.control.model.mods.UtilityMods.Titles.ID -> {
+				// Titles {@code show} (off hid them) is now Title Tweaks' Disable titles.
+				Boolean shown = bool(settings, "show");
+				if (shown != null && !has(settings, com.flintclient.client.control.model.mods.UtilityMods.Titles.DISABLE)) {
+					module.set(com.flintclient.client.control.model.mods.UtilityMods.Titles.DISABLE, !shown);
+				}
+			}
+			case com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.ID -> {
+				// Shulker Preview {@code show}: Holding Shift is now the hold switch (the key stays Shift).
+				if ("shift".equals(string(settings, "show")) && !has(settings, com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.HOLD)) {
+					module.set(com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.HOLD, true);
+				}
+			}
 			case ModuleId.DIRECTION -> {
 				Boolean axis = bool(settings, ModuleSettings.Direction.SHOW_AXIS.id());
 				Boolean degrees = bool(settings, ModuleSettings.Direction.SHOW_DEGREES.id());
@@ -88,12 +140,46 @@ public final class ModuleMigrations {
 	}
 
 	/** Setting ids of {@code module} that newer settings replaced: never written, and removed from a file when it is saved. */
+	/** Where Effects sat by default while its only look was the list: the middle of the left edge. */
+	static final com.flintclient.client.control.hud.HudPlacement EFFECTS_OLD_DEFAULT = com.flintclient.client.control.hud.HudPlacement.of(
+		com.flintclient.client.control.hud.Anchor.LEFT, 4, 0);
+
+	/**
+	 * Effects before its Tiles layout (the file has no {@code view} yet): a list never moved from its old default spot moves to the
+	 * new default, the top-right corner where Minecraft draws its effect tiles, keeping its size. A list the player placed
+	 * elsewhere stays exactly where it is.
+	 */
+	private static void effects(ModuleState module, @Nullable JsonObject settings) {
+		if (settings != null && !has(settings, ModuleSettings.Effects.TILE_LEVEL) && "below".equals(string(settings, ModuleSettings.Effects.TILE_TIME.id()))) {
+			// From before the level on the tile, when the time sat under it by default: the time moves onto the tile too.
+			module.set(ModuleSettings.Effects.TILE_TIME, 1);
+		}
+		if (has(settings, ModuleSettings.Effects.VIEW)) {
+			return;
+		}
+		com.flintclient.client.control.hud.HudPlacement placement = module.placement();
+		if (placement.anchor() == EFFECTS_OLD_DEFAULT.anchor() && placement.x() == EFFECTS_OLD_DEFAULT.x()
+			&& placement.y() == EFFECTS_OLD_DEFAULT.y()) {
+			com.flintclient.client.control.hud.HudPlacement fresh = module.descriptor().defaultPlacement();
+			module.setPlacement(new com.flintclient.client.control.hud.HudPlacement(fresh.anchor(), fresh.x(), fresh.y(), placement.scale()));
+		}
+	}
+
 	public static List<String> retiredKeys(ModuleDescriptor module) {
 		return switch (module.id()) {
 			case ModuleId.CPS -> CPS_RETIRED;
 			case ModuleId.KEYSTROKES -> KEYSTROKES_RETIRED;
 			case ModuleId.FPS -> FPS_RETIRED;
 			case com.flintclient.client.control.model.mods.PlayerMods.KillSounds.ID -> KILL_SOUNDS_RETIRED;
+			case com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.ID -> SHULKER_RETIRED;
+			case com.flintclient.client.control.model.mods.UtilityMods.ToastControl.ID -> TOASTS_RETIRED;
+			case com.flintclient.client.control.model.mods.ToolMods.CustomF3.ID -> F3_RETIRED;
+			case com.flintclient.client.control.model.mods.UtilityMods.Titles.ID -> TITLES_RETIRED;
+			case com.flintclient.client.control.model.mods.UtilityMods.TabEditor.ID -> TAB_RETIRED;
+			case com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID -> INVENTORY_RETIRED;
+			case com.flintclient.client.control.model.mods.LookMods.Hearts.ID -> HEARTS_RETIRED;
+			case com.flintclient.client.control.model.mods.VisualMods.ParticleChanger.ID -> PARTICLES_RETIRED;
+			case com.flintclient.client.control.model.mods.ToolMods.DropPrevention.ID -> DROP_RETIRED;
 			default -> NONE;
 		};
 	}
@@ -129,6 +215,44 @@ public final class ModuleMigrations {
 		if (volume != null && volume.isJsonPrimitive() && volume.getAsJsonPrimitive().isNumber()) {
 			for (IntSetting each : volumes) {
 				module.set(each, (int) Math.round(volume.getAsDouble()));
+			}
+		}
+	}
+
+	/**
+	 * Custom F3 before BetterF3: its ease-in ({@code animate}) is now the slide-in animation, the profiler chart at first
+	 * ({@code showPieByDefault}) is Always enable the profiler, and the help lines ({@code showHelpTips}) are the Help module.
+	 */
+	private static void customF3(ModuleState module, @Nullable JsonObject settings) {
+		Boolean animate = bool(settings, "animate");
+		if (animate != null && !has(settings, com.flintclient.client.control.model.mods.ToolMods.CustomF3.ANIMATIONS)) {
+			module.set(com.flintclient.client.control.model.mods.ToolMods.CustomF3.ANIMATIONS, animate);
+		}
+		Boolean pie = bool(settings, "showPieByDefault");
+		if (pie != null && !has(settings, com.flintclient.client.control.model.mods.ToolMods.CustomF3.ALWAYS_PROFILER)) {
+			module.set(com.flintclient.client.control.model.mods.ToolMods.CustomF3.ALWAYS_PROFILER, pie);
+		}
+		Boolean help = bool(settings, "showHelpTips");
+		if (help != null && !has(settings, com.flintclient.client.control.model.mods.ToolMods.CustomF3.HELP.enabled)) {
+			module.set(com.flintclient.client.control.model.mods.ToolMods.CustomF3.HELP.enabled, help);
+		}
+	}
+
+	/**
+	 * Toast Control's older switches said which toasts show ({@code enabled}, {@code advancement}, {@code recipe}, {@code system},
+	 * {@code tutorial}); ToastControl's say which are blocked. A file that set the older ones keeps what it showed.
+	 */
+	private static void toasts(ModuleState module, @Nullable JsonObject settings) {
+		String[] old = {"enabled", "advancement", "recipe", "system", "tutorial"};
+		BoolSetting[] block = {com.flintclient.client.control.model.mods.UtilityMods.ToastControl.BLOCK_ALL,
+			com.flintclient.client.control.model.mods.UtilityMods.ToastControl.BLOCK_ADVANCEMENTS,
+			com.flintclient.client.control.model.mods.UtilityMods.ToastControl.BLOCK_RECIPES,
+			com.flintclient.client.control.model.mods.UtilityMods.ToastControl.BLOCK_SYSTEM,
+			com.flintclient.client.control.model.mods.UtilityMods.ToastControl.BLOCK_TUTORIAL};
+		for (int i = 0; i < old.length; i++) {
+			Boolean shown = bool(settings, old[i]);
+			if (shown != null && !has(settings, block[i])) {
+				module.set(block[i], !shown);
 			}
 		}
 	}
@@ -174,6 +298,9 @@ public final class ModuleMigrations {
 		}
 		if (setting instanceof BoolSetting) {
 			return value.getAsJsonPrimitive().isBoolean();
+		}
+		if (setting instanceof OptionSetting option) {
+			return value.getAsJsonPrimitive().isString() && option.keys().contains(value.getAsString().toLowerCase(java.util.Locale.ROOT));
 		}
 		if (setting instanceof RgbSetting) {
 			return value.getAsJsonPrimitive().isString() && RgbSetting.parseHex(value.getAsString()) >= 0;

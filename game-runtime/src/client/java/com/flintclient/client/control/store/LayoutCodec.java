@@ -71,7 +71,12 @@ public final class LayoutCodec {
 			integer(json, Appearance.BACKGROUND_OPACITY.id()),
 			Appearance.PADDING.parse(field(json, Appearance.PADDING)),
 			null,
-			json == null ? null : choice(json, Appearance.ACCENT_COLOR.id(), HudColor.class));
+			json == null ? null : choice(json, Appearance.ACCENT_COLOR.id(), HudColor.class),
+			rgb(json, Appearance.BACKGROUND_COLOR.id()),
+			JsonFields.bool(json, Appearance.BORDER.id()),
+			rgb(json, Appearance.BORDER_COLOR.id()),
+			integer(json, Appearance.BORDER_THICKNESS.id()),
+			JsonFields.bool(json, Appearance.TEXT_SHADOW.id()));
 	}
 
 	private static void readModule(ModuleState module, @Nullable JsonObject json) {
@@ -105,7 +110,22 @@ public final class LayoutCodec {
 			integer(json, Appearance.BACKGROUND_OPACITY.id()),
 			integer(json, Appearance.PADDING.id()),
 			JsonFields.bool(json, Appearance.SHOW_LABEL.id()),
-			choice(json, Appearance.ACCENT_COLOR.id(), HudColor.class));
+			choice(json, Appearance.ACCENT_COLOR.id(), HudColor.class),
+			rgb(json, Appearance.BACKGROUND_COLOR.id()),
+			JsonFields.bool(json, Appearance.BORDER.id()),
+			rgb(json, Appearance.BORDER_COLOR.id()),
+			integer(json, Appearance.BORDER_THICKNESS.id()),
+			JsonFields.bool(json, Appearance.TEXT_SHADOW.id()));
+	}
+
+	/** A colour written as "#RRGGBB"; null when missing or unreadable (then it follows the layout or the style). */
+	private static @Nullable Integer rgb(@Nullable JsonObject json, String key) {
+		String text = JsonFields.string(json, key);
+		if (text == null) {
+			return null;
+		}
+		int value = com.flintclient.client.control.model.RgbSetting.parseHex(text);
+		return value < 0 ? null : value;
 	}
 
 	/** A new object holding {@code layout} (for export, or a first save). */
@@ -171,6 +191,16 @@ public final class LayoutCodec {
 			value.showLabel() == null ? null : Appearance.SHOW_LABEL.toJson(value.showLabel()));
 		JsonFields.put(json, Appearance.ACCENT_COLOR.id(), onFile.accentColor(), value.accentColor(),
 			value.accentColor() == null ? null : Appearance.ACCENT_COLOR.toJson(value.accentColor()));
+		JsonFields.put(json, Appearance.BACKGROUND_COLOR.id(), onFile.backgroundColor(), value.backgroundColor(),
+			value.backgroundColor() == null ? null : Appearance.BACKGROUND_COLOR.toJson(value.backgroundColor()));
+		JsonFields.put(json, Appearance.BORDER.id(), onFile.border(), value.border(),
+			value.border() == null ? null : Appearance.BORDER.toJson(value.border()));
+		JsonFields.put(json, Appearance.BORDER_COLOR.id(), onFile.borderColor(), value.borderColor(),
+			value.borderColor() == null ? null : Appearance.BORDER_COLOR.toJson(value.borderColor()));
+		JsonFields.put(json, Appearance.BORDER_THICKNESS.id(), onFile.borderThickness(), value.borderThickness(),
+			value.borderThickness() == null ? null : Appearance.BORDER_THICKNESS.toJson(value.borderThickness()));
+		JsonFields.put(json, Appearance.TEXT_SHADOW.id(), onFile.textShadow(), value.textShadow(),
+			value.textShadow() == null ? null : Appearance.TEXT_SHADOW.toJson(value.textShadow()));
 	}
 
 	@SuppressWarnings("unchecked")

@@ -1,0 +1,83 @@
+{
+	"name": "jungle",
+	"biomes": [
+		"#is_jungle",
+		"jungle",
+		"sacred springs",
+		"tropical",
+		"bamboo forest",
+		"bambona beach",
+		"encalyptus forest",
+		"overgrown cliffs",
+		"tropics",
+		"tyros",
+		"rainforest",
+		"crag_gardens"
+	],
+	"bad-biomes": [
+		"tropics plains",
+		"tropics beach",
+		"tyros swamp",
+		"subtropical forest",
+		"tropical*extreme hills",
+		"pale-garden"
+	],
+	"features": [
+		"tree"
+	],
+	"temperature": {
+		"min": 0.5
+	},
+	"sounds": [
+		{
+			"name": "cricket-jungle",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_day",
+			"pause": {
+				"min": 10,
+				"max": 60
+			},
+			"pitch": 1.1,
+			"volume": 0.4
+		},
+		{
+			"name": "cricket-jungle-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_night",
+			"pause": {
+				"min": 5,
+				"max": 40
+			},
+			"volume": 0.6
+		},
+		{
+			"name": "bird-ambience-jungle",
+			"files": [
+				"minecraft:entity.parrot.ambient"
+			],
+			"category": "bird_day",
+			"pause": {
+				"min": 10,
+				"max": 80
+			},
+			"volume": 0.5
+		},
+		{
+			"name": "bird-ambience-jungle-night",
+			"files": [
+				"minecraft:entity.parrot.ambient"
+			],
+			"category": "bird_night",
+			"pause": {
+				"min": 100,
+				"max": 400
+			},
+			"pitch": 0.8,
+			"volume": 0.3
+		}
+	]
+}

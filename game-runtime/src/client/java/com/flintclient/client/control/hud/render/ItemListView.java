@@ -3,7 +3,6 @@ package com.flintclient.client.control.hud.render;
 import com.flintclient.client.control.hud.TextOut;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.render.Palette;
-import net.minecraft.world.item.ItemStack;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -15,7 +14,7 @@ abstract class ItemListView extends ModuleView {
 	static final int MAX = 12;
 	private static final long REFRESH_NANOS = 100_000_000L;
 
-	final @Nullable ItemStack[] stacks = new ItemStack[MAX];
+	final @Nullable Object[] stacks = new Object[MAX];
 	final float[] share = new float[MAX];
 	private final HudText[] texts = new HudText[MAX];
 	private final String[] shown = new String[MAX];
@@ -111,7 +110,7 @@ abstract class ItemListView extends ModuleView {
 		int at = x;
 		int top = y;
 		for (int i = 0; i < count; i++) {
-			ItemStack stack = stacks[i];
+			Object stack = stacks[i];
 			if (stack != null) {
 				p.item(stack, at, top, itemPx, null);
 			}

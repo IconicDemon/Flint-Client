@@ -138,6 +138,26 @@ public final class HudFormat {
 		return twoDigits(seconds, out, n);
 	}
 
+	/**
+	 * A song's time as music apps show it, from {@code out[at]}: {@code 0:07}, {@code 3:45}, and from an hour up
+	 * {@code 1:02:03}. Whole seconds, rounded down. Returns the index after it.
+	 */
+	public static int songTime(long millis, char[] out, int at) {
+		long seconds = Math.max(0, millis) / 1000;
+		long hours = seconds / 3600;
+		int minutes = (int) (seconds / 60 % 60);
+		int n = at;
+		if (hours > 0) {
+			n = integer(Math.min(hours, 99), out, n);
+			out[n++] = ':';
+			n = twoDigits(minutes, out, n);
+		} else {
+			n = integer(minutes, out, n);
+		}
+		out[n++] = ':';
+		return twoDigits((int) (seconds % 60), out, n);
+	}
+
 	/** At least two digits ({@code %02d}): negative numbers keep their sign before the padding. */
 	private static int twoDigits(int value, char[] out, int at) {
 		int n = at;
@@ -208,6 +228,18 @@ public final class HudFormat {
 			}
 		}
 		return out.toString();
+	}
+
+	/** An angle in degrees brought into −180..180, exactly as Minecraft's {@code Mth.wrapDegrees} does. */
+	public static float wrapDegrees(float degrees) {
+		float angle = degrees % 360.0F;
+		if (angle >= 180.0F) {
+			angle -= 360.0F;
+		}
+		if (angle < -180.0F) {
+			angle += 360.0F;
+		}
+		return angle;
 	}
 
 	/**

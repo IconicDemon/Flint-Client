@@ -3,6 +3,7 @@ package com.flintclient.client.control.hud.render;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.platform.Keys;
 import org.junit.jupiter.api.Test;
 
 class KeyLabelsTest {
@@ -47,10 +48,10 @@ class KeyLabelsTest {
 
 	@Test
 	void mouseButtonsAreNamedByButton() {
-		assertEquals("LMB", KeyLabels.mouse(1));
-		assertEquals("MMB", KeyLabels.mouse(2));
-		assertEquals("RMB", KeyLabels.mouse(3));
-		assertEquals("M4", KeyLabels.mouse(4));
-		assertEquals("M8", KeyLabels.mouse(8));
+		assertEquals("LMB", KeyLabels.mouse(Keys.MOUSE_LEFT));
+		assertEquals("MMB", KeyLabels.mouse(Keys.MOUSE_MIDDLE));
+		assertEquals("RMB", KeyLabels.mouse(Keys.MOUSE_RIGHT));
+		assertEquals("M4", KeyLabels.mouse(Keys.MOUSE_4));
+		assertEquals("M8", KeyLabels.mouse(Keys.MOUSE_4 + 4));
 	}
 }

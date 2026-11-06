@@ -19,3 +19,34 @@ export function onWindowFocus(handler: (focused: boolean) => void): () => void {
     unlisten?.();
   };
 }
+
+/**
+ * Calls `handler` when the native window is minimized or restored (asked of the window after it is resized or loses or
+ * gains focus, which minimizing and restoring both do). A web view may keep `document.hidden` false while minimized, so
+ * anything that animates on its own timer listens to this too. Nothing in a browser preview.
+ */
+export function onWindowMinimized(handler: (minimized: boolean) => void): () => void {
+  if (!isDesktop()) return () => {};
+  const win = getCurrentWindow();
+  let disposed = false;
+  let last = false;
+  const offs: (() => void)[] = [];
+  const check = () =>
+    void win
+      .isMinimized()
+      .then((now) => {
+        if (disposed || now === last) return;
+        last = now;
+        handler(now);
+      })
+      .catch(() => {});
+  for (const listen of [(cb: () => void) => win.onResized(cb), (cb: () => void) => win.onFocusChanged(cb)]) {
+    void listen(check)
+      .then((off) => (disposed ? off() : offs.push(off)))
+      .catch(() => {});
+  }
+  return () => {
+    disposed = true;
+    offs.forEach((off) => off());
+  };
+}

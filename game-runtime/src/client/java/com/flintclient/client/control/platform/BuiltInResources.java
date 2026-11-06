@@ -7,14 +7,11 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 import net.minecraft.SharedConstants;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.packs.PackLocationInfo;
-import net.minecraft.server.packs.PackMetadataResources;
-import net.minecraft.server.packs.PackResources;
 import net.minecraft.server.packs.PackSelectionConfig;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.PathPackResources;
@@ -80,7 +77,7 @@ public final class BuiltInResources {
 				return;
 			}
 			discovered.accept(PACK_ID, id -> create(id, root));
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
 	}
@@ -122,32 +119,19 @@ public final class BuiltInResources {
 		}
 		try {
 			PackLocationInfo location = new PackLocationInfo(id, Component.literal(FlintClient.NAME), PackSource.BUILT_IN, Optional.empty());
-			return Pack.readMetaAndCreate(location, new JarPack(root), PackType.CLIENT_RESOURCES, SELECTION);
-		} catch (RuntimeException e) {
+			return Pack.readMetaAndCreate(location, new BuiltInPackSupplier(root), PackType.CLIENT_RESOURCES, SELECTION);
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			return null;
 		}
 	}
 
-	private static void turnedOff(String path, RuntimeException error) {
+	private static void turnedOff(String path, Throwable error) {
 		FlintClient.LOGGER.warn("Flint's built-in resource pack couldn't be added and is off for this session; Flint's fonts and text may be missing", error);
 	}
 
-	/** Opens the jar (or folder) as a pack. */
-	private record JarPack(Path root) implements Pack.ResourcesSupplier {
-		@Override
-		public PackMetadataResources openMetadata(PackLocationInfo location) {
-			return new Resources(location, root);
-		}
-
-		@Override
-		public Stream<PackResources> openResources(PackLocationInfo location, Pack.Metadata metadata) {
-			return Stream.of(new Resources(location, root));
-		}
-	}
-
-	/** The jar's files, with the pack's metadata answered from code instead of a pack.mcmeta file. */
-	private static final class Resources extends PathPackResources {
+	/** The jar's files, with the pack's metadata answered from code instead of a pack.mcmeta file ({@link BuiltInPackSupplier} opens it). */
+	static final class Resources extends PathPackResources {
 		private static @Nullable ResourceMetadata metadata;
 
 		Resources(PackLocationInfo location, Path root) {

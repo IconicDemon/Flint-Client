@@ -1,0 +1,521 @@
+{
+  "schema": 1,
+  "menu": {
+    "favorites": [],
+    "compact": false
+  },
+  "general": {
+    "menuScale": 100
+  },
+  "modules": {
+    "armorstatus": {
+      "enabled": true,
+      "settings": {
+        "durability": "percent",
+        "layout": "vertical",
+        "held": true,
+        "dynamicColor": true,
+        "count": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 2,
+        "x": -4.0,
+        "y": -4.0,
+        "scale": 1.0
+      }
+    },
+    "blockoverlay": {
+      "enabled": false,
+      "settings": {
+        "outline": true,
+        "outlineColor": "#66000000",
+        "outlineWidth": 2,
+        "fill": false,
+        "fillColor": "#33FF8139",
+        "throughWalls": false,
+        "toggleKey": 0
+      }
+    },
+    "brightness": {
+      "enabled": false,
+      "settings": {
+        "level": 1000,
+        "toggleKey": 0
+      }
+    },
+    "combodisplay": {
+      "enabled": false,
+      "settings": {
+        "timeout": 2,
+        "showZero": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 172.0,
+        "scale": 1.0
+      }
+    },
+    "coordinates": {
+      "enabled": true,
+      "settings": {
+        "layout": "vertical",
+        "decimals": "0",
+        "facing": false,
+        "axisColor": "#FFFF8139",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 192.0,
+        "scale": 1.0
+      }
+    },
+    "cps": {
+      "enabled": true,
+      "settings": {
+        "buttons": "both",
+        "labelMode": "suffix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 24.0,
+        "scale": 1.0
+      }
+    },
+    "crosshair": {
+      "enabled": false,
+      "settings": {
+        "style": "cross",
+        "size": 5,
+        "gap": 2,
+        "thickness": 2,
+        "color": "#FFFFFFFF",
+        "outline": true,
+        "outlineColor": "#C0000000",
+        "invert": false,
+        "toggleKey": 0
+      }
+    },
+    "day_counter": {
+      "enabled": false,
+      "settings": {
+        "labelMode": "prefix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 0,
+        "x": -4.0,
+        "y": 24.0,
+        "scale": 1.0
+      }
+    },
+    "direction": {
+      "enabled": false,
+      "settings": {
+        "format": "short",
+        "degrees": true,
+        "axis": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 1,
+        "anchorY": 0,
+        "x": 0.0,
+        "y": 4.0,
+        "scale": 1.0
+      }
+    },
+    "fps": {
+      "enabled": true,
+      "settings": {
+        "labelMode": "suffix",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 4.0,
+        "scale": 1.0
+      }
+    },
+    "hitcolor": {
+      "enabled": false,
+      "settings": {
+        "color": "#FFFF0000",
+        "strength": 30,
+        "toggleKey": 0
+      }
+    },
+    "itemcounter": {
+      "enabled": false,
+      "settings": {
+        "goldenApples": true,
+        "enderPearls": true,
+        "arrows": true,
+        "splashHealing": true,
+        "soup": false,
+        "hideZero": true,
+        "layout": "vertical",
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 1,
+        "x": -4.0,
+        "y": 60.0,
+        "scale": 1.0
+      }
+    },
+    "keystrokes": {
+      "enabled": true,
+      "settings": {
+        "mouse": true,
+        "cps": true,
+        "space": true,
+        "keyColor": "#66000000",
+        "pressedColor": "#CCFFFFFF",
+        "textColor": "#FFFFFFFF",
+        "pressedTextColor": "#FF000000",
+        "textShadow": true,
+        "fade": 100,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 44.0,
+        "scale": 1.0
+      }
+    },
+    "motionblur": {
+      "enabled": false,
+      "settings": {
+        "amount": 5,
+        "toggleKey": 0
+      }
+    },
+    "nametags": {
+      "enabled": false,
+      "settings": {
+        "showOwn": true,
+        "textShadow": true,
+        "background": true,
+        "backgroundOpacity": 25,
+        "toggleKey": 0
+      }
+    },
+    "ping": {
+      "enabled": false,
+      "settings": {
+        "colored": false,
+        "hideSingleplayer": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 132.0,
+        "scale": 1.0
+      }
+    },
+    "potioneffects": {
+      "enabled": false,
+      "settings": {
+        "layout": "tiles",
+        "showTime": true,
+        "splitHarmful": true,
+        "blink": true,
+        "timeColor": "#FFAAAAAA",
+        "icons": true,
+        "names": true,
+        "nameColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": false,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 0,
+        "x": -1.0,
+        "y": 1.0,
+        "scale": 1.0
+      }
+    },
+    "reachdisplay": {
+      "enabled": false,
+      "settings": {
+        "decimals": "2",
+        "hideAfter": 3,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 0,
+        "x": 4.0,
+        "y": 152.0,
+        "scale": 1.0
+      }
+    },
+    "saturation": {
+      "enabled": false,
+      "settings": {
+        "hud": true,
+        "showFood": false,
+        "overlay": true,
+        "color": "#FFFFC93C",
+        "opacity": 55,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 1,
+        "anchorY": 2,
+        "x": 124.0,
+        "y": -3.0,
+        "scale": 1.0
+      }
+    },
+    "scoreboard": {
+      "enabled": false,
+      "settings": {
+        "showNumbers": true,
+        "numberColor": "#FFFF5555",
+        "textColor": "#FFFFFFFF",
+        "textShadow": false,
+        "background": true,
+        "backgroundColor": "#50000000",
+        "titleBackground": "#66000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 2,
+        "verticalPadding": 1,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 1,
+        "x": -1.0,
+        "y": 0.0,
+        "scale": 1.0
+      }
+    },
+    "time": {
+      "enabled": false,
+      "settings": {
+        "24h": false,
+        "seconds": false,
+        "date": false,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 2,
+        "anchorY": 0,
+        "x": -4.0,
+        "y": 4.0,
+        "scale": 1.0
+      }
+    },
+    "togglesprint": {
+      "enabled": false,
+      "settings": {
+        "toggleSprint": true,
+        "toggleSneak": false,
+        "hud": true,
+        "textColor": "#FFFFFFFF",
+        "textShadow": true,
+        "background": true,
+        "backgroundColor": "#6F000000",
+        "border": false,
+        "borderColor": "#60FFFFFF",
+        "borderThickness": 1,
+        "horizontalPadding": 5,
+        "verticalPadding": 4,
+        "brackets": false,
+        "toggleKey": 0
+      },
+      "hud": {
+        "anchorX": 0,
+        "anchorY": 2,
+        "x": 4.0,
+        "y": -4.0,
+        "scale": 1.0
+      }
+    },
+    "waypoints": {
+      "enabled": true,
+      "settings": {
+        "deathWaypoints": false,
+        "deathLimit": 8,
+        "randomColors": true,
+        "sort": "proximity",
+        "hideBeyond": 0,
+        "display": "both",
+        "labelStyle": "icon",
+        "labelScale": 100,
+        "labelHeight": 25,
+        "labelOpacity": 50,
+        "showDistance": true,
+        "distanceFacing": true,
+        "textShadow": true,
+        "shadowOpacity": 70,
+        "throughWalls": false,
+        "outlineOpacity": 100,
+        "fillOpacity": 10,
+        "outlineThickness": 20,
+        "createKey": 49,
+        "hideKey": 0,
+        "listKey": 0,
+        "toggleKey": 0
+      }
+    },
+    "zoom": {
+      "enabled": false,
+      "settings": {
+        "mode": "hold",
+        "level": 4,
+        "scroll": true,
+        "smooth": true,
+        "slowerMouse": true,
+        "cinematic": false,
+        "toggleKey": 0
+      }
+    }
+  }
+}

@@ -2,8 +2,9 @@
 """Generates src/gamesettings/tables.rs: the per-version Minecraft facts that Game settings & sync relies on,
 read from the real game jars instead of written by hand.
 
-What it reads, for each version, from the deobfuscated jars Fabric Loom keeps in the Gradle cache
-(~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}-deobf/<v>/):
+What it reads, for each version, from the Mojang-named jars Fabric Loom keeps in the Gradle cache
+(~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}-deobf/<v>/ for 26.x, and
+minecraft-{clientonly,common}/<v>-loom.mappings.<...>/ for the 1.21.x builds, which use layered Mojang mappings):
   - version.json: the data version (`world_version`), which options.txt's `version:` line holds.
   - net.minecraft.client.Options (javap -c): the option keys `processOptions` reads and writes, the vanilla key
     mappings created in the constructor with their default keys, and a normalised fingerprint of how each
@@ -16,11 +17,13 @@ What it reads, for each version, from the deobfuscated jars Fabric Loom keeps in
   - The enums whose serialised values options.txt stores (graphics preset, clouds, particles, ...).
   - assets/minecraft/lang/en_us.json: English labels for key names and key mappings.
 
-Versions with identical tables form one family (26.1, 26.1.1 and 26.1.2 are one); the script refuses to
-group versions whose tables differ. Nothing is downloaded and nothing outside the output file is written.
+Versions with identical tables form one family (26.1, 26.1.1 and 26.1.2 are one; each 1.21.x release is its
+own); the script refuses to group versions whose tables differ. Nothing is downloaded and nothing outside the
+output file is written. 1.8.9 isn't read here: its options.txt is a different format, translated by
+`legacy189.rs`.
 
 Usage (from app/src-tauri):
-    python3 -I tools/gen_mc_tables.py [--loom <dir>] [--out src/gamesettings/tables.rs]
+    python3 -I -X utf8 tools/gen_mc_tables.py [--loom <dir>] [--out src/gamesettings/tables.rs]
 Requires a JDK's `javap` and `unzip` on PATH. Rerun it, then `cargo test`, whenever a version is added; a new
 family also needs its entry in versions.rs and its overrides (if any) in registry.rs.
 """
@@ -34,23 +37,25 @@ import subprocess
 import sys
 from collections import OrderedDict
 
-VERSIONS = ["26.1", "26.1.1", "26.1.2", "26.2", "26.3"]
+VERSIONS = ["1.21.1", "1.21.10", "1.21.11", "26.1", "26.1.1", "26.1.2", "26.2", "26.3"]
 DEFAULT_LOOM = os.path.expanduser("~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft")
 
-# Enums whose serialised form options.txt stores: (class, jar, "string"|"int", index of the value among the
-# constructor's string or int arguments, counting the constant's own name / ordinal as 0).
+# Enums whose serialised form options.txt stores: (classes it has lived in, oldest place last; "string"|"int";
+# index of the value among the constructor's string or int arguments, counting the constant's own name /
+# ordinal as 0). A version without any of the classes simply doesn't have the enum (1.21.1 has no graphics
+# preset, 1.21.10 no texture filtering method).
 ENUMS = [
-    ("net.minecraft.client.GraphicsPreset", "client", "string", 1),
-    ("net.minecraft.client.CloudStatus", "client", "string", 1),
-    ("net.minecraft.client.PrioritizeChunkUpdates", "client", "int", 1),
-    ("net.minecraft.client.TextureFilteringMethod", "client", "int", 1),
-    ("net.minecraft.client.NarratorStatus", "client", "int", 1),
-    ("net.minecraft.client.PreferredGraphicsApi", "client", "string", 1),
-    ("net.minecraft.server.level.ParticleStatus", "common", "int", 1),
-    ("net.minecraft.world.entity.player.ChatVisiblity", "common", "int", 1),
-    ("net.minecraft.world.entity.HumanoidArm", "common", "string", 1),
-    ("net.minecraft.sounds.SoundSource", "common", "string", 1),
-    ("net.minecraft.world.entity.player.PlayerModelPart", "common", "string", 1),
+    (["net.minecraft.client.GraphicsPreset"], "string", 1),
+    (["net.minecraft.client.CloudStatus"], "string", 1),
+    (["net.minecraft.client.PrioritizeChunkUpdates"], "int", 1),
+    (["net.minecraft.client.TextureFilteringMethod"], "int", 1),
+    (["net.minecraft.client.NarratorStatus"], "int", 1),
+    (["net.minecraft.client.PreferredGraphicsApi"], "string", 1),
+    (["net.minecraft.server.level.ParticleStatus", "net.minecraft.client.ParticleStatus"], "int", 1),
+    (["net.minecraft.world.entity.player.ChatVisiblity"], "int", 1),
+    (["net.minecraft.world.entity.HumanoidArm"], "string", 1),
+    (["net.minecraft.sounds.SoundSource"], "string", 1),
+    (["net.minecraft.world.entity.player.PlayerModelPart"], "string", 1),
 ]
 
 STRING = re.compile(r"//\s*String (.*)$")
@@ -62,10 +67,19 @@ def run(args):
 
 
 def jar(loom, kind, version):
+    """The Mojang-named jar: `minecraft-<kind>-deobf/<v>/` for versions Loom deobfuscates on its own (26.x), or
+    `minecraft-<kind>/<v>-loom.mappings.<...>/` for versions built with layered Mojang mappings (1.21.x)."""
     path = os.path.join(loom, f"minecraft-{kind}-deobf", version, f"minecraft-{kind}-deobf-{version}.jar")
-    if not os.path.isfile(path):
-        sys.exit(f"missing jar: {path}")
-    return path
+    if os.path.isfile(path):
+        return path
+    folder = os.path.join(loom, f"minecraft-{kind}")
+    if os.path.isdir(folder):
+        for name in sorted(os.listdir(folder)):
+            if name.startswith(f"{version}-loom.mappings."):
+                candidate = os.path.join(folder, name, f"minecraft-{kind}-{name}.jar")
+                if os.path.isfile(candidate):
+                    return candidate
+    sys.exit(f"missing jar: {path} (or a layered-mappings jar for {version} under {folder})")
 
 
 def javap(jar_path, cls):
@@ -116,7 +130,83 @@ def normalise(line):
     if re.search(r"invokedynamic .*\)" + listener + r"$", text) or "OptionInstance.NO_ACTION:" in text:
         return "<listener>"
     text = re.sub(listener, "<listener>", text)
+    # How an option is captioned and explained on screen (tooltips, caption functions, translated texts) doesn't
+    # affect what options.txt holds either; 1.21.x builds them with other helpers and overloads than 26.x. A helper
+    # that takes a translation key is marked, so the key loaded for it is left out too.
+    if re.search(r"(invoke\w+|getstatic) .*\)?" + PRESENTATION + r"$", text):
+        return "<presentation(String)>" if re.search(r":\(Ljava/lang/String;\)", text) else "<presentation>"
+    text = re.sub(PRESENTATION, "", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+PRESENTATION = (r"(Lnet/minecraft/client/OptionInstance\$TooltipSupplier;|Lnet/minecraft/client/OptionInstance\$CaptionBasedToString;"
+                r"|Lnet/minecraft/network/chat/Component;|Lnet/minecraft/client/gui/components/Tooltip;)")
+
+
+ENUM_ID_CODEC = [
+    "getstatic // Field com/mojang/serialization/Codec.INT:Lcom/mojang/serialization/codecs/PrimitiveCodec;",
+    "invokedynamic // InvokeDynamic:apply:()Ljava/util/function/Function;",
+    "invokedynamic // InvokeDynamic:apply:()Ljava/util/function/Function;",
+    "invokeinterface // InterfaceMethod com/mojang/serialization/codecs/PrimitiveCodec.xmap:(Ljava/util/function/Function;Ljava/util/function/Function;)Lcom/mojang/serialization/Codec;",
+]
+
+# Enums that moved package between versions, by their newest place (their values are compared through the enum
+# tables, so the move itself changes nothing in options.txt).
+MOVED_CLASSES = {"net/minecraft/client/ParticleStatus": "net/minecraft/server/level/ParticleStatus"}
+
+
+def comparable(segment):
+    """How one option is constructed (its normalised instructions), without what doesn't change what options.txt
+    holds:
+    - presentation: the caption key (the first text the option loads; options.txt names the option by the key in
+      `processOptions`, compared on its own), tooltips, caption functions and the translation keys they load;
+    - listeners, with the `this` a listener lambda captures, and whether the option has one at all;
+    - an enum's id codec written inline (`Codec.INT.xmap(byId, getId)`, 1.21.10 and older) or as the enum's own
+      `LEGACY_CODEC`, which 26.x defines as exactly that (both read and write the id with the same WRAP strategy;
+      the ids themselves are compared through the enum tables), and an enum's package move;
+    - the `discrete` flag 26.x passes to `IntRange.xmap`, which only decides how the slider steps with the arrow
+      keys (the codec and validation don't read it);
+    - a value used only while a `SharedConstants.DEBUG_*` switch is on, which is always off in released games."""
+    kept = []
+    caption_seen = False
+    i = 0
+    while i < len(segment):
+        line = segment[i]
+        following = segment[i + 1] if i + 1 < len(segment) else ""
+        i += 1
+        if line.startswith("<presentation") or line == "<listener>":
+            continue
+        if line == "aload_0" and following == "<listener>":
+            continue
+        if re.fullmatch(r"ldc(_w)? // String [\w.]+", line):
+            if following == "<presentation(String)>":
+                continue
+            if not caption_seen:
+                caption_seen = True
+                continue
+        # `DEBUG_X ? a : b` compiles to getstatic, ifeq, <a>, goto, <b>: only b is ever used.
+        if re.fullmatch(r"getstatic // Field net/minecraft/SharedConstants\.DEBUG_\w+:Z", line) and segment[i:i + 1] == ["ifeq"] and segment[i + 2:i + 3] == ["goto"]:
+            i += 3
+            continue
+        if segment[i - 1:i - 1 + len(ENUM_ID_CODEC)] == ENUM_ID_CODEC:
+            kept.append("<enum id codec>")
+            i += len(ENUM_ID_CODEC) - 1
+            continue
+        if re.fullmatch(r"getstatic // Field [\w/$]+\.LEGACY_CODEC:Lcom/mojang/serialization/Codec;", line):
+            kept.append("<enum id codec>")
+            continue
+        if line in ("iconst_0", "iconst_1") and "IntRange.xmap:(Ljava/util/function/IntFunction;Ljava/util/function/ToIntFunction;Z)" in following:
+            continue
+        line = line.replace("ToIntFunction;Z)", "ToIntFunction;)").replace("<listener>", "")
+        for old, new in MOVED_CLASSES.items():
+            line = line.replace(old, new)
+        kept.append(line)
+    return kept
+
+
+def fingerprint(segment):
+    """A short hash of `comparable(segment)`: equal when two versions construct the option the same way."""
+    return hashlib.sha256("\n".join(comparable(segment)).encode()).hexdigest()[:16]
 
 
 def read_version_json(client_jar):
@@ -166,7 +256,7 @@ def options_tables(client_jar):
         segment.append(norm)
         f = re.search(r"putfield .*// Field (\w+):Lnet/minecraft/client/OptionInstance;", line)
         if f:
-            field_print[f.group(1)] = hashlib.sha256("\n".join(segment).encode()).hexdigest()[:16]
+            field_print[f.group(1)] = fingerprint(segment)
             segment = []
             continue
         if re.search(r"putfield", line):
@@ -205,6 +295,9 @@ def options_tables(client_jar):
 
 def preset_managed(client_jar, getter_field, key_field):
     text = javap(client_jar, "net.minecraft.client.GraphicsPreset")
+    if text is None:
+        # Before 1.21.11 there is no graphics preset: nothing is overwritten at start.
+        return []
     body = method(text, " apply(")
     getters = []
     for line in body:
@@ -302,8 +395,17 @@ def options_fixers(common_jar):
     return fixers
 
 
-def enum_values(jars, cls, kind, index):
-    text = javap(jars[ENUMS_JAR[cls]], cls)
+def enum_values(jars, classes, kind, index):
+    """The enum's serialised values from whichever of its classes the version has (in either jar), or None."""
+    text = cls = None
+    for candidate in classes:
+        for jar_path in jars.values():
+            text = javap(jar_path, candidate)
+            if text is not None:
+                cls = candidate
+                break
+        if text is not None:
+            break
     if text is None:
         return None
     body = method(text, "static {}")
@@ -327,9 +429,6 @@ def enum_values(jars, cls, kind, index):
             values.append(strings[index] if kind == "string" else str(ints[index]))
             strings = ints = None
     return values
-
-
-ENUMS_JAR = {cls: jar_kind for cls, jar_kind, _, _ in ENUMS}
 
 
 def en_us(client_jar):
@@ -357,10 +456,10 @@ def collect(loom, version):
     inputs = input_tables(client)
     jars = {"client": client, "common": common}
     enums = OrderedDict()
-    for cls, _, kind, index in ENUMS:
-        values = enum_values(jars, cls, kind, index)
+    for classes, kind, index in ENUMS:
+        values = enum_values(jars, classes, kind, index)
         if values is not None:
-            enums[cls.rsplit(".", 1)[1]] = values
+            enums[classes[0].rsplit(".", 1)[1]] = values
     mappings = [(m["name"], key_name_for(inputs, m["type"], m["code"], m["unknown"])) for m in opts["mappings"]]
     fixers = options_fixers(common)
     key_print = {k: opts["field_print"].get(f) for k, f in opts["key_field"].items()}
@@ -386,8 +485,10 @@ FAMILY_FIELDS = ["era", "option_keys", "key_print", "preset_managed", "mappings"
 
 
 def family_of(version):
+    """26.x versions are grouped by their first two numbers (26.1, 26.1.1 and 26.1.2 are one family); each 1.x
+    release is its own family, since 1.21.1, 1.21.10 and 1.21.11 differ in their options."""
     parts = version.split(".")
-    return ".".join(parts[:2])
+    return version if parts[0] == "1" else ".".join(parts[:2])
 
 
 def rust_str(s):
@@ -519,7 +620,7 @@ def main():
     out.append("/// English names of vanilla key mappings (from en_us.json), sorted by mapping name.")
     out.append("pub static MAPPING_LABELS: &[(&str, &str)] = " + rust_list([f"({rust_str(k)}, {rust_str(v)})" for k, v in mapping_labels], "    ", 2) + ";")
     out.append("")
-    with open(args.out, "w", encoding="utf-8") as f:
+    with open(args.out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(out))
     for line in report:
         print(line)

@@ -39,15 +39,22 @@ fn options_26_2() -> Vec<u8> {
     (lines.join("\n") + "\n").into_bytes()
 }
 
-/// A profile with its version installed (26.3 or 26.2) and options.txt; `played` sets its last-played time.
+/// A profile with its version installed (26.x, 1.21.x or 1.8.9) and options.txt; `played` sets its
+/// last-played time.
 fn profile(state: &AppState, id: &str, version: &str, options: Option<&[u8]>, played: Option<u64>) {
     let data = match version {
         "26.3" => Some(5023),
         "26.2" => Some(4903),
         "26.1" => Some(4786),
+        "1.21.11" => Some(4671),
+        "1.21.10" => Some(4556),
+        "1.21.1" => Some(3955),
         _ => None,
     };
     add_profile(state, id, version, data, options);
+    if version == "1.8.9" {
+        crate::gamesettings::testkit::install_legacy_189(&state.paths.game());
+    }
     if played.is_some() {
         let mut file: ProfilesFile = crate::core::read_json(&state.paths.profiles());
         file.profiles.iter_mut().find(|p| p.id == id).unwrap().last_played = played;
@@ -184,6 +191,106 @@ fn changes_made_in_26_3_reach_26_2_and_back_without_touching_anything_else() {
     // Nothing more to do on either side now.
     assert!(launch(&state, "new").applied.is_empty());
     assert!(launch(&state, "old").captured.is_empty());
+}
+
+/// options.txt as Minecraft 1.21.11 writes it (abridged).
+const OPTIONS_1_21_11: &[u8] = b"version:4671\nfov:0.0\nrenderDistance:12\ngamma:0.5\nmouseSensitivity:0.5\nlang:en_us\nkey_key.jump:key.keyboard.space\nkey_key.swapOffhand:key.keyboard.f\nsoundCategory_master:1.0\nresourcePacks:[\"vanilla\"]\n";
+
+/// options.txt as Minecraft 1.8.9 writes it (abridged, with its CRLF line endings and no version line).
+const OPTIONS_1_8_9: &[u8] = b"invertYMouse:false\r\nmouseSensitivity:0.5\r\nfov:0.0\r\ngamma:0.5\r\nrenderDistance:12\r\nfancyGraphics:true\r\nlang:en_US\r\nkey_key.jump:57\r\nkey_key.drop:16\r\nkey_key.streamStartStop:64\r\nsoundCategory_master:1.0\r\nresourcePacks:[]\r\n";
+
+#[test]
+fn changes_made_in_26_3_reach_1_21_11_and_1_8_9_and_changes_made_there_come_back() {
+    let (_dir, state) = setup();
+    pair(&state);
+    // Created after Auto Sync was turned on: their first launch brings in the whole store.
+    profile(&state, "mid", "1.21.11", Some(OPTIONS_1_21_11), Some(500));
+    profile(&state, "legacy", "1.8.9", Some(OPTIONS_1_8_9), Some(400));
+    assert_eq!(launch(&state, "mid").skipped, None);
+    assert_eq!(launch(&state, "legacy").skipped, None);
+    let fixture = OptionsDoc::parse(FIXTURE_26_3).unwrap();
+    assert_eq!(options(&state, "mid").get("fov"), fixture.get("fov"), "a new profile of another version gets the store");
+    exit(&state, "mid");
+    exit(&state, "legacy");
+
+    // The player changes settings in 26.3, including an off-hand key 1.8.9 doesn't have.
+    play(&state, "new", &[
+        ("fov", "0.5"),
+        ("gamma", "1.0"),
+        ("mouseSensitivity", "0.75"),
+        ("renderDistance", "8"),
+        ("lang", "fr_fr"),
+        ("key_key.jump", "key.keyboard.v"),
+        ("key_key.swapOffhand", "key.keyboard.g"),
+    ]);
+    exit(&state, "new");
+
+    let report = launch(&state, "mid");
+    assert!(report.backup.is_some());
+    let mid = options(&state, "mid");
+    assert_eq!((mid.get("fov"), mid.get("gamma"), mid.get("mouseSensitivity"), mid.get("renderDistance")), (Some("0.5"), Some("1.0"), Some("0.75"), Some("8")));
+    assert_eq!((mid.get("lang"), mid.get("key_key.jump"), mid.get("key_key.swapOffhand")), (Some("fr_fr"), Some("key.keyboard.v"), Some("key.keyboard.g")));
+    assert_eq!(mid.get("graphicsPreset"), Some("\"custom\""), "1.21.11 has graphics presets: the copied render distance stays");
+    assert_eq!(mid.get("version"), Some("4671"), "1.21.11 keeps its own version line");
+
+    let report = launch(&state, "legacy");
+    assert!(report.backup.is_some());
+    assert!(report.deferred.contains_key("options/key_key.swapOffhand"), "1.8.9 has no off-hand key");
+    assert!(stored(&state).entries.contains_key("options/key_key.swapOffhand"), "but the store keeps it for the others");
+    let legacy = options(&state, "legacy");
+    assert_eq!((legacy.get("fov"), legacy.get("gamma"), legacy.get("mouseSensitivity"), legacy.get("renderDistance")), (Some("0.5"), Some("1.0"), Some("0.75"), Some("8")));
+    assert_eq!((legacy.get("lang"), legacy.get("key_key.jump")), (Some("fr_FR"), Some("47")), "1.8.9's spelling and LWJGL 2 key code for V");
+    assert_eq!(legacy.get("key_key.swapOffhand"), None);
+    assert_eq!((legacy.get("fancyGraphics"), legacy.get("key_key.streamStartStop"), legacy.get("resourcePacks")), (Some("true"), Some("64"), Some("[]")), "1.8.9's own lines and packs stay");
+    assert_eq!(legacy.get("version"), None, "1.8.9 files never get a version line");
+    let text = String::from_utf8(std::fs::read(dir(&state, "legacy").join("options.txt")).unwrap()).unwrap();
+    assert!(text.lines().count() > 0 && !text.replace("\r\n", "").contains('\n'), "its CRLF line endings are kept");
+
+    // Changes made in 1.8.9 (in its own spelling) reach 26.3 and 1.21.11.
+    play(&state, "legacy", &[("fov", "0.25"), ("gamma", "0.3"), ("key_key.jump", "48")]);
+    let report = exit(&state, "legacy");
+    assert_eq!(report.captured, ["options/fov", "options/gamma", "options/key_key.jump"]);
+    launch(&state, "new");
+    let new = options(&state, "new");
+    assert_eq!((new.get("fov"), new.get("gamma"), new.get("key_key.jump")), (Some("0.25"), Some("0.3"), Some("key.keyboard.b")));
+    assert_eq!(new.get("version"), Some("5023"));
+    launch(&state, "mid");
+    let mid = options(&state, "mid");
+    assert_eq!((mid.get("fov"), mid.get("gamma"), mid.get("key_key.jump")), (Some("0.25"), Some("0.3"), Some("key.keyboard.b")));
+    // Nothing more to do anywhere: what was written reads back as the same values.
+    assert!(launch(&state, "legacy").captured.is_empty());
+    assert!(launch(&state, "legacy").applied.is_empty());
+    assert!(launch(&state, "mid").captured.is_empty());
+}
+
+#[test]
+fn a_1_21_x_profile_met_before_its_version_was_checked_gets_the_whole_store_once() {
+    let (_dir, state) = setup();
+    pair(&state);
+    play(&state, "new", &[("fov", "0.5"), ("gamma", "1.0")]);
+    exit(&state, "new");
+    // Records as Flint saved them before 1.21.x was checked: no `metAs`, and nothing brought in yet.
+    profile(&state, "mid", "1.21.11", Some(OPTIONS_1_21_11), Some(500));
+    let old_record = |id: &str| {
+        let generation = stored(&state).generation;
+        let mut record = ProfileSync { store: stored(&state).tag(), generation, seen: BTreeMap::from([("options/fov".to_owned(), "Int(70)".to_owned())]), ..ProfileSync::new(stored(&state).head()) };
+        store::save_profile(&dir(&state, id), &mut record, generation).unwrap();
+        assert!(!std::fs::read_to_string(dir(&state, id).join(store::PROFILE_FILE)).unwrap().contains("metAs"));
+    };
+    old_record("mid");
+    let report = launch(&state, "mid");
+    let mid = options(&state, "mid");
+    assert_eq!((mid.get("fov"), mid.get("gamma")), (Some("0.5"), Some("1.0")), "values changed before it was checked come in too");
+    assert!(report.applied.contains(&"options/fov".to_owned()));
+    assert_eq!(store::load_profile(&dir(&state, "mid")).unwrap().met_as.as_deref(), Some("1.21.11"));
+    // An old record of a 26.x profile is a normal one: it always took values.
+    let mut record = store::load_profile(&dir(&state, "old")).unwrap();
+    record.met_as = None;
+    assert_eq!(start(&stored(&state), "old", "26.2", &Some(record.clone())), Start::Normal);
+    // A record saved while the version couldn't take values (not installed yet), then installed: the whole store.
+    record.met_as = Some(String::new());
+    assert_eq!(start(&stored(&state), "old", "26.2", &Some(record.clone())), Start::FirstContact);
+    assert_eq!(start(&stored(&state), "old", "", &Some(record)), Start::Normal, "still can't: its own changes are taken as usual");
 }
 
 #[test]
@@ -541,7 +648,7 @@ fn the_hooks_follow_the_setting_even_without_the_command() {
 fn an_unverified_version_gets_nothing_but_its_own_changes_are_still_taken() {
     let (_dir, state) = setup();
     pair(&state);
-    profile(&state, "legacy", "1.21.11", Some(b"version:4671\nfov:0.0\ngamma:0.5\nkey_key.jump:key.keyboard.space\nkey_key.drop:key.keyboard.81\n"), Some(50));
+    profile(&state, "legacy", "1.20.1", Some(b"version:3465\nfov:0.0\ngamma:0.5\nkey_key.jump:key.keyboard.space\nkey_key.drop:key.keyboard.81\n"), Some(50));
     let legacy_before = std::fs::read(dir(&state, "legacy").join("options.txt")).unwrap();
     play(&state, "new", &[("fov", "0.5")]);
     exit(&state, "new");
@@ -826,6 +933,7 @@ fn snap_with(items: &[(&str, &str)]) -> Snap {
         packs: [(Folder::Resource, Vec::new()), (Folder::Shader, Vec::new())].into_iter().collect(),
         too_large: Vec::new(),
         iris: None,
+        lists: Lists::default(),
     }
 }
 
@@ -833,19 +941,19 @@ fn snap_with(items: &[(&str, &str)]) -> Snap {
 fn a_profile_s_first_contact_decides_whether_it_is_taken_as_it_is() {
     let mut st = State::new();
     st.baseline_ids.insert("old".into());
-    assert_eq!(start(&st, "old", &None), Start::Baseline, "existed when Auto Sync was turned on");
-    assert_eq!(start(&st, "later", &None), Start::FirstContact, "created afterwards");
+    assert_eq!(start(&st, "old", "26.3", &None), Start::Baseline, "existed when Auto Sync was turned on");
+    assert_eq!(start(&st, "later", "26.3", &None), Start::FirstContact, "created afterwards");
     let mut record = ProfileSync { store: st.tag(), generation: 3, ..ProfileSync::new(1) };
     st.generation = 3;
-    assert_eq!(start(&st, "x", &Some(record.clone())), Start::Normal);
+    assert_eq!(start(&st, "x", "26.3", &Some(record.clone())), Start::Normal);
     st.epoch += 1;
-    assert_eq!(start(&st, "x", &Some(record.clone())), Start::Baseline, "turned off and on again");
+    assert_eq!(start(&st, "x", "26.3", &Some(record.clone())), Start::Baseline, "turned off and on again");
     record.store = st.tag();
     record.generation = 4;
-    assert_eq!(start(&st, "x", &Some(record.clone())), Start::Baseline, "a record from a run whose store never landed");
+    assert_eq!(start(&st, "x", "26.3", &Some(record.clone())), Start::Baseline, "a record from a run whose store never landed");
     record.generation = 3;
     record.pending_baseline = true;
-    assert_eq!(start(&st, "x", &Some(record)), Start::Baseline);
+    assert_eq!(start(&st, "x", "26.3", &Some(record)), Start::Baseline);
 }
 
 #[test]
@@ -899,4 +1007,379 @@ fn a_merged_selection_keeps_what_this_profile_couldn_t_show() {
     assert_eq!(merged_selection(Some(stored), &["b".into(), "c".into()], keep), ["only-new", "b", "never-here", "c"]);
     assert_eq!(merged_selection(Some(stored), &["c".into()], |_| false), ["c"], "dropped packs leave");
     assert_eq!(merged_selection(None, &["c".into()], keep), ["c"]);
+}
+
+// ---------- Settings → Syncing: switches, the game's lists, profiles left out ----------
+
+use super::gamefiles::testdata::{hotbar, server, servers_dat};
+use super::nbt::{Compound, Tag};
+
+/// Settings → Syncing: one switch, starting from the most recently played profile.
+fn turn(state: &AppState, switch: Switch, on: bool) {
+    set_switch(state, switch, on, None, &quiet(), &Hooks::default()).unwrap();
+}
+
+fn put_servers(state: &AppState, id: &str, servers: &[Compound]) {
+    std::fs::write(dir(state, id).join("servers.dat"), servers_dat(servers)).unwrap();
+}
+
+fn servers_in(state: &AppState, id: &str) -> Vec<Compound> {
+    gamefiles::read_servers(&std::fs::read(dir(state, id).join("servers.dat")).unwrap()).unwrap().servers.into_iter().map(|s| s.tag).collect()
+}
+
+fn server_names(state: &AppState, id: &str) -> Vec<String> {
+    servers_in(state, id).iter().map(|t| String::from_utf8_lossy(t.text("name").unwrap()).into_owned()).collect()
+}
+
+fn server_named(state: &AppState, id: &str, name: &str) -> Compound {
+    servers_in(state, id).into_iter().find(|t| t.text("name") == Some(name.as_bytes())).unwrap()
+}
+
+fn touches_servers(keys: &[String]) -> bool {
+    keys.iter().any(|k| k.starts_with(SERVERS))
+}
+
+#[test]
+fn servers_wait_for_their_switch_then_flow_between_every_version_from_then_on() {
+    let (_dir, state) = setup();
+    pair(&state);
+    let hub = server("Hub", "hub.example.invalid", &[("hidden", Tag::Byte(0))]);
+    put_servers(&state, "new", std::slice::from_ref(&hub));
+    // Off until turned on: nothing about servers is taken or written.
+    assert!(!touches_servers(&exit(&state, "new").captured));
+    assert!(!touches_servers(&launch(&state, "old").applied));
+    assert!(!dir(&state, "old").join("servers.dat").exists());
+    put_servers(&state, "old", &[server("Mine", "mine.invalid", &[])]);
+    exit(&state, "old");
+
+    // Turned on, it starts from the most recently played profile, and every profile keeps its own list.
+    turn(&state, Switch::Servers, true);
+    let st = stored(&state);
+    assert_eq!(st.switches["servers"].source.as_deref(), Some("new"));
+    assert!(st.entries.contains_key(SERVER_ORDER));
+    for id in ["old", "new"] {
+        let report = launch(&state, id);
+        assert!(!touches_servers(&report.applied) && !touches_servers(&report.captured), "{id}: {report:?}");
+        exit(&state, id);
+    }
+    assert_eq!(server_names(&state, "old"), ["Mine"], "nothing overwritten when it was turned on");
+
+    // From then on, changes flow: 26.3 adds a server (26.x writes the code of conduct it accepted) and joins one
+    // by address, which Minecraft keeps hidden.
+    let lobby = server("Lobby", "lobby.invalid", &[("hidden", Tag::Byte(0)), ("acceptedCodeOfConduct", Tag::Int(2))]);
+    let direct = server("Direct", "direct.invalid", &[("hidden", Tag::Byte(1))]);
+    put_servers(&state, "new", &[hub.clone(), lobby.clone(), direct.clone()]);
+    let report = exit(&state, "new");
+    assert_eq!(report.captured.iter().filter(|k| k.starts_with(SERVERS)).count(), 3, "two servers and the order: {report:?}");
+    let report = launch(&state, "old");
+    assert!(report.backup.is_some());
+    assert_eq!(server_names(&state, "old"), ["Mine", "Lobby", "Direct"], "its own server keeps its place");
+    assert!(gamefiles::hidden(&server_named(&state, "old", "Direct")));
+    exit(&state, "old");
+
+    // A 1.8.9 profile made now gets the whole list, but never a hidden server, which it would show.
+    profile(&state, "legacy", "1.8.9", Some(OPTIONS_1_8_9), Some(400));
+    launch(&state, "legacy");
+    assert_eq!(server_names(&state, "legacy"), ["Hub", "Lobby"]);
+    exit(&state, "legacy");
+    // 1.8.9 saves the list its own way (without the tags it doesn't know): not a change. Then the player renames
+    // a server there.
+    put_servers(&state, "legacy", &[server("Hub", "hub.example.invalid", &[]), server("Lobby", "lobby.invalid", &[])]);
+    assert!(!touches_servers(&exit(&state, "legacy").captured));
+    put_servers(&state, "legacy", &[server("Hub", "hub.example.invalid", &[]), server("Lobby EU", "lobby.invalid", &[])]);
+    assert_eq!(exit(&state, "legacy").captured.len(), 1);
+    launch(&state, "new");
+    assert_eq!(server_names(&state, "new"), ["Hub", "Lobby EU", "Direct"]);
+    let renamed = server_named(&state, "new", "Lobby EU");
+    assert_eq!((renamed.get("acceptedCodeOfConduct"), renamed.get("hidden")), (Some(&Tag::Int(2)), Some(&Tag::Byte(0))), "what only 26.x writes stays");
+    exit(&state, "new");
+
+    // A server removed in 26.3 leaves the other lists.
+    put_servers(&state, "new", &[renamed, direct]);
+    exit(&state, "new");
+    launch(&state, "legacy");
+    assert_eq!(server_names(&state, "legacy"), ["Lobby EU"]);
+    launch(&state, "old");
+    assert_eq!(server_names(&state, "old"), ["Mine", "Lobby EU", "Direct"]);
+    // Nothing more to do anywhere.
+    assert!(launch(&state, "legacy").applied.is_empty() && launch(&state, "old").applied.is_empty());
+}
+
+#[test]
+fn two_profiles_adding_different_servers_both_keep_both() {
+    let (_dir, state) = setup();
+    turn(&state, Switch::Servers, true);
+    pair(&state);
+    put_servers(&state, "new", &[server("A", "a.invalid", &[])]);
+    exit(&state, "new");
+    put_servers(&state, "old", &[server("B", "b.invalid", &[])]);
+    exit(&state, "old");
+    launch(&state, "new");
+    launch(&state, "old");
+    assert_eq!(server_names(&state, "new"), ["A", "B"]);
+    assert_eq!(server_names(&state, "old"), ["A", "B"]);
+}
+
+#[test]
+fn a_server_list_that_can_t_be_read_is_never_written_over() {
+    let (_dir, state) = setup();
+    turn(&state, Switch::Servers, true);
+    pair(&state);
+    put_servers(&state, "new", &[server("A", "a.invalid", &[])]);
+    exit(&state, "new");
+    let damaged = servers_dat(&[server("Mine", "mine.invalid", &[])])[..20].to_vec();
+    std::fs::write(dir(&state, "old").join("servers.dat"), &damaged).unwrap();
+    let report = launch(&state, "old");
+    assert!(report.deferred.keys().any(|k| k.starts_with(SERVERS)), "{report:?}");
+    assert_eq!(std::fs::read(dir(&state, "old").join("servers.dat")).unwrap(), damaged);
+}
+
+#[test]
+fn hotbars_go_to_the_same_or_a_newer_version_and_never_to_1_8_9() {
+    let (_dir, state) = setup();
+    profile(&state, "a", "26.3", Some(FIXTURE_26_3), Some(300));
+    profile(&state, "b", "26.3", Some(FIXTURE_26_3), Some(200));
+    profile(&state, "c", "1.21.1", Some(b"version:3955\nfov:0.0\n"), Some(100));
+    profile(&state, "d", "1.8.9", Some(OPTIONS_1_8_9), Some(50));
+    std::fs::write(dir(&state, "a").join("hotbar.nbt"), hotbar(5023, "minecraft:diamond")).unwrap();
+    std::fs::write(dir(&state, "c").join("hotbar.nbt"), hotbar(3955, "minecraft:dirt")).unwrap();
+    turn(&state, Switch::Hotbars, true);
+    switch(&state, true);
+    assert!(stored(&state).entries.contains_key(HOTBARS_KEY), "started from the latest played profile");
+    for id in ["a", "b", "c", "d"] {
+        launch(&state, id);
+        exit(&state, id);
+    }
+    assert!(!dir(&state, "b").join("hotbar.nbt").exists(), "nothing overwritten or added when it was turned on");
+    // Saved again in 26.3: another 26.3 profile takes it, 1.21.1 can't read 26.3's items, 1.8.9 has no hotbars.
+    let saved = hotbar(5023, "minecraft:emerald");
+    std::fs::write(dir(&state, "a").join("hotbar.nbt"), &saved).unwrap();
+    assert_eq!(exit(&state, "a").captured, [HOTBARS_KEY]);
+    launch(&state, "b");
+    assert_eq!(std::fs::read(dir(&state, "b").join("hotbar.nbt")).unwrap(), saved);
+    let report = launch(&state, "c");
+    assert!(report.deferred[HOTBARS_KEY].contains("newer"), "{report:?}");
+    assert_eq!(std::fs::read(dir(&state, "c").join("hotbar.nbt")).unwrap(), hotbar(3955, "minecraft:dirt"));
+    let report = launch(&state, "d");
+    assert!(!report.deferred.contains_key(HOTBARS_KEY) && !dir(&state, "d").join("hotbar.nbt").exists());
+    exit(&state, "c");
+    // Saved in 1.21.1: Minecraft 26.3 upgrades older hotbars as it loads them, so they come in there.
+    let older = hotbar(3955, "minecraft:stone");
+    std::fs::write(dir(&state, "c").join("hotbar.nbt"), &older).unwrap();
+    exit(&state, "c");
+    launch(&state, "a");
+    assert_eq!(std::fs::read(dir(&state, "a").join("hotbar.nbt")).unwrap(), older);
+}
+
+#[test]
+fn command_history_is_shared_from_1_21_on_and_a_cut_short_file_isn_t_taken() {
+    let (_dir, state) = setup();
+    profile(&state, "new", "26.3", Some(FIXTURE_26_3), Some(300));
+    profile(&state, "mid", "1.21.11", Some(OPTIONS_1_21_11), Some(200));
+    profile(&state, "legacy", "1.8.9", Some(OPTIONS_1_8_9), Some(100));
+    turn(&state, Switch::CommandHistory, true);
+    switch(&state, true);
+    for id in ["new", "mid", "legacy"] {
+        launch(&state, id);
+        exit(&state, id);
+    }
+    // A server's login command carries a password: it never leaves the profile it was typed in.
+    let history = b"/gamemode creative\r\n/login hunter2\r\n/tp 0 64 0\r\n".to_vec();
+    std::fs::write(dir(&state, "new").join("command_history.txt"), &history).unwrap();
+    std::fs::write(dir(&state, "mid").join("command_history.txt"), b"/login mine\r\n").unwrap();
+    assert_eq!(exit(&state, "new").captured, [COMMANDS_KEY]);
+    let stored_copy = std::fs::read(store::root(&state.paths.root).join("files/commands").join(&stored(&state).entries[COMMANDS_KEY].value)).unwrap();
+    assert_eq!(stored_copy, b"/gamemode creative\r\n/tp 0 64 0\r\n");
+    launch(&state, "mid");
+    assert_eq!(std::fs::read(dir(&state, "mid").join("command_history.txt")).unwrap(), b"/gamemode creative\r\n/tp 0 64 0\r\n/login mine\r\n", "its own login command stays");
+    launch(&state, "new");
+    assert_eq!(std::fs::read(dir(&state, "new").join("command_history.txt")).unwrap(), history, "the origin isn't rewritten");
+    // Typing only a login command isn't a change to share.
+    std::fs::write(dir(&state, "new").join("command_history.txt"), [history.as_slice(), b"/l hunter2\r\n"].concat()).unwrap();
+    assert!(exit(&state, "new").captured.is_empty());
+    launch(&state, "legacy");
+    assert!(!dir(&state, "legacy").join("command_history.txt").exists(), "1.8.9 keeps no command history");
+    // The game crashed while writing it: the cut-short file isn't taken.
+    std::fs::write(dir(&state, "new").join("command_history.txt"), b"/gamemode creative\r\n/tp 0 64 0\r\n/time set da").unwrap();
+    let report = after_exit_with(&state, "new", Exit::Unclean, &quiet(), &Hooks::default());
+    assert!(!report.captured.contains(&COMMANDS_KEY.to_owned()), "{report:?}");
+    // A history that isn't UTF-8 text can't be read, so the shared one never replaces it.
+    let foreign = b"/msg caf\xE9\r\n".to_vec();
+    std::fs::write(dir(&state, "mid").join("command_history.txt"), &foreign).unwrap();
+    std::fs::write(dir(&state, "new").join("command_history.txt"), b"/gamemode creative\r\n/tp 0 64 0\r\n/weather clear\r\n").unwrap();
+    assert_eq!(exit(&state, "new").captured, [COMMANDS_KEY]);
+    launch(&state, "mid");
+    assert_eq!(std::fs::read(dir(&state, "mid").join("command_history.txt")).unwrap(), foreign);
+}
+
+#[test]
+fn a_switch_turned_off_leaves_its_kind_alone_while_the_others_still_flow() {
+    let (_dir, state) = setup();
+    pair(&state);
+    turn(&state, Switch::GameOptions, false);
+    turn(&state, Switch::ResourcePacks, false);
+    resource_pack(&dir(&state, "new").join("resourcepacks/Pack.zip"), json!({ "min_format": 84, "max_format": 99 }), "p");
+    play(&state, "new", &[("fov", "0.5"), ("key_key.jump", "key.keyboard.v"), ("resourcePacks", r#"["vanilla","file/Pack.zip"]"#)]);
+    assert_eq!(exit(&state, "new").captured, ["options/key_key.jump"], "key bindings have their own switch");
+    let fov_before = options(&state, "old").get("fov").map(str::to_owned);
+    launch(&state, "old");
+    assert_eq!(options(&state, "old").get("key_key.jump"), Some("key.keyboard.v"));
+    assert_eq!(options(&state, "old").get("fov").map(str::to_owned), fov_before);
+    assert!(!dir(&state, "old").join("resourcepacks/Pack.zip").exists());
+    exit(&state, "old");
+    // Turned back on: every profile is taken as it is for it, then later changes flow again.
+    turn(&state, Switch::GameOptions, true);
+    for id in ["old", "new"] {
+        assert!(launch(&state, id).applied.iter().all(|k| Switch::of(k) != Switch::GameOptions), "{id}");
+        exit(&state, id);
+    }
+    assert_eq!(options(&state, "old").get("fov").map(str::to_owned), fov_before, "nothing overwritten when it came back");
+    play(&state, "new", &[("gamma", "0.9")]);
+    exit(&state, "new");
+    launch(&state, "old");
+    assert_eq!(options(&state, "old").get("gamma"), Some("0.9"));
+    assert_eq!(options(&state, "old").get("fov").map(str::to_owned), fov_before);
+}
+
+#[test]
+fn a_profile_left_out_is_never_read_or_written_and_comes_back_as_it_is() {
+    let (_dir, state) = setup();
+    turn(&state, Switch::Servers, true);
+    pair(&state);
+    set_excluded(&state, "old", true).unwrap();
+    let old_options = std::fs::read(dir(&state, "old").join("options.txt")).unwrap();
+    play(&state, "new", &[("fov", "0.5")]);
+    put_servers(&state, "new", &[server("A", "a.invalid", &[])]);
+    exit(&state, "new");
+    assert_eq!(launch(&state, "old").skipped, Some("left out"));
+    assert_eq!(std::fs::read(dir(&state, "old").join("options.txt")).unwrap(), old_options);
+    assert!(!dir(&state, "old").join("servers.dat").exists());
+    assert!(crate::gamesettings::backup::list(&dir(&state, "old")).is_empty());
+    play(&state, "old", &[("gamma", "0.9")]);
+    assert_eq!(exit(&state, "old").skipped, Some("left out"));
+    launch(&state, "new");
+    assert_ne!(options(&state, "new").get("gamma"), Some("0.9"), "its changes aren't taken");
+    assert!(!overview(&state).profiles.iter().find(|p| p.id == "old").unwrap().can_start);
+    // Put back: taken as it is, so neither side's changes made meanwhile cross over.
+    set_excluded(&state, "old", false).unwrap();
+    let report = launch(&state, "old");
+    assert!(report.applied.is_empty() && report.captured.is_empty(), "{report:?}");
+    assert_eq!(std::fs::read(dir(&state, "old").join("options.txt")).unwrap(), edited(&old_options, &[("gamma", "0.9")]));
+    exit(&state, "old");
+    launch(&state, "new");
+    assert_ne!(options(&state, "new").get("gamma"), Some("0.9"), "what changed while it was out stays there");
+    // Changes made from then on flow both ways again.
+    play(&state, "new", &[("mouseSensitivity", "0.75")]);
+    exit(&state, "new");
+    launch(&state, "old");
+    assert_eq!(options(&state, "old").get("mouseSensitivity"), Some("0.75"));
+    assert_ne!(options(&state, "old").get("fov"), Some("0.5"));
+}
+
+#[test]
+fn a_running_game_s_server_list_is_never_written() {
+    let (_dir, state) = setup();
+    turn(&state, Switch::Servers, true);
+    pair(&state);
+    put_servers(&state, "new", &[server("A", "a.invalid", &[])]);
+    exit(&state, "new");
+    let elsewhere = ProcessScan::from(Ok(vec![format!("9 /usr/bin/java Main --gameDir {}", dir(&state, "old").display())]));
+    assert_eq!(before_launch_with(&state, &find(&state, "old"), &elsewhere, &Hooks::default()).skipped, Some("running"));
+    assert!(!dir(&state, "old").join("servers.dat").exists());
+    // A game Flint started is running in it: its exit report is ignored too.
+    state.running.lock().unwrap().insert("old".into(), RunningGame { kill: None });
+    assert_eq!(exit(&state, "old").skipped, Some("busy"));
+    state.running.lock().unwrap().clear();
+    launch(&state, "old");
+    assert_eq!(server_names(&state, "old"), ["A"], "brought in at its next launch");
+}
+
+#[test]
+fn a_failed_write_puts_the_server_list_back_and_leaves_no_hotbar_behind() {
+    let (_dir, state) = setup();
+    turn(&state, Switch::Servers, true);
+    turn(&state, Switch::Hotbars, true);
+    profile(&state, "new", "26.3", Some(FIXTURE_26_3), Some(2_000));
+    profile(&state, "other", "26.3", Some(FIXTURE_26_3), Some(1_000));
+    switch(&state, true);
+    for id in ["new", "other"] {
+        launch(&state, id);
+        exit(&state, id);
+    }
+    let own = servers_dat(&[server("Mine", "mine.invalid", &[])]);
+    std::fs::write(dir(&state, "other").join("servers.dat"), &own).unwrap();
+    exit(&state, "other");
+    put_servers(&state, "new", &[server("A", "a.invalid", &[])]);
+    std::fs::write(dir(&state, "new").join("hotbar.nbt"), hotbar(5023, "minecraft:diamond")).unwrap();
+    exit(&state, "new");
+    let report = launch_with(&state, "other", &Hooks { fail_rename: Some(1), ..Hooks::default() });
+    assert_eq!(report.skipped, Some("failed"));
+    assert_eq!(std::fs::read(dir(&state, "other").join("servers.dat")).unwrap(), own, "put back");
+    assert!(!dir(&state, "other").join("hotbar.nbt").exists() && !files_in(&dir(&state, "other")).iter().any(|n| n.ends_with(".flint-tmp")));
+    let backup = crate::gamesettings::backup::list(&dir(&state, "other")).into_iter().next().unwrap();
+    assert!(backup.files.iter().any(|f| f.path == "servers.dat" && f.existed) && backup.files.iter().any(|f| f.path == "hotbar.nbt" && !f.existed));
+    // The next launch succeeds.
+    launch(&state, "other");
+    assert_eq!(server_names(&state, "other"), ["Mine", "A"]);
+    assert_eq!(std::fs::read(dir(&state, "other").join("hotbar.nbt")).unwrap(), hotbar(5023, "minecraft:diamond"));
+}
+
+#[test]
+fn turning_on_starts_from_the_profile_picked_and_refuses_one_it_can_t_read() {
+    let (_dir, state) = setup();
+    profile(&state, "a", "26.3", Some(&edited(FIXTURE_26_3, &[("fov", "0.25")])), Some(100));
+    profile(&state, "b", "26.3", Some(&edited(FIXTURE_26_3, &[("fov", "0.5")])), Some(300));
+    profile(&state, "fresh", "26.2", None, None);
+    crate::core::write_json(&state.paths.settings(), &json!({ "autoSync": true })).unwrap();
+    let error = set_enabled_from(&state, true, Some("fresh"), &quiet(), &Hooks::default()).unwrap_err();
+    assert!(error.contains("‘Profile fresh’") && error.contains("hasn't been played yet"), "{error}");
+    assert!(matches!(store::load(&state.paths.root), Loaded::Missing), "nothing started");
+    set_enabled_from(&state, true, Some("a"), &quiet(), &Hooks::default()).unwrap();
+    assert_eq!(stored(&state).seeded_from.as_deref(), Some("a"));
+    assert_eq!(stored(&state).entries["options/fov"].value, "0.25");
+    assert_eq!(overview(&state).started_from.as_deref(), Some("a"));
+    // A switch too: one whose game is running can't be read safely.
+    put_servers(&state, "a", &[server("A", "a.invalid", &[])]);
+    state.running.lock().unwrap().insert("a".into(), RunningGame { kill: None });
+    let error = set_switch(&state, Switch::Servers, true, Some("a"), &quiet(), &Hooks::default()).unwrap_err();
+    assert!(error.contains("its game is running"), "{error}");
+    assert!(!switches::load(&store::root(&state.paths.root)).on(Switch::Servers), "it stays off");
+    state.running.lock().unwrap().clear();
+    set_switch(&state, Switch::Servers, true, Some("a"), &quiet(), &Hooks::default()).unwrap();
+    let view = overview(&state);
+    let servers = view.switches.iter().find(|s| s.id == "servers").unwrap();
+    assert!(servers.on && servers.started_from.as_deref() == Some("a"));
+    assert_eq!(view.default_source.as_deref(), Some("b"), "the most recently played readable profile");
+    assert!(!view.profiles.iter().find(|p| p.id == "fresh").unwrap().can_start);
+    // A profile made afterwards gets what the switch started from.
+    profile(&state, "later", "26.3", Some(FIXTURE_26_3), None);
+    launch(&state, "later");
+    assert_eq!(server_names(&state, "later"), ["A"]);
+    let later = overview(&state);
+    let row = later.profiles.iter().find(|p| p.id == "later").unwrap();
+    assert!(row.backups >= 1 && row.last_backup.is_some());
+    assert_eq!(later.last_sync.map(|l| l.profile).as_deref(), Some("later"));
+}
+
+#[test]
+fn an_imported_profile_keeps_its_own_settings_then_syncs_like_the_others() {
+    let (_dir, state) = setup();
+    pair(&state);
+    play(&state, "new", &[("fov", "0.5")]);
+    exit(&state, "new");
+    // A profile imported from another launcher arrives with options of its own.
+    let own = edited(FIXTURE_26_3, &[("fov", "0.9"), ("key_key.jump", "key.keyboard.v")]);
+    profile(&state, "imported", "26.3", Some(&own), None);
+    take_as_is(&state, "imported");
+    let report = launch(&state, "imported");
+    assert!(report.applied.is_empty(), "nothing replaces what it came with: {report:?}");
+    assert_eq!(options(&state, "imported").get("fov"), Some("0.9"));
+    assert_eq!(options(&state, "imported").get("key_key.jump"), Some("key.keyboard.v"));
+    exit(&state, "imported");
+    // From then on, changes flow both ways as for any profile.
+    play(&state, "new", &[("gamma", "0.9")]);
+    exit(&state, "new");
+    launch(&state, "imported");
+    assert_eq!(options(&state, "imported").get("gamma"), Some("0.9"));
+    assert_eq!(options(&state, "imported").get("fov"), Some("0.9"));
 }

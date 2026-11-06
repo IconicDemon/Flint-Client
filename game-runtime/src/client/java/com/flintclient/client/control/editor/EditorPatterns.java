@@ -1,12 +1,7 @@
 package com.flintclient.client.control.editor;
 
-import com.flintclient.client.FlintClient;
+import com.flintclient.client.platform.Texture;
 import com.flintclient.client.render.Canvas;
-import com.mojang.blaze3d.platform.NativeImage;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -53,7 +48,7 @@ public final class EditorPatterns {
 			return;
 		}
 		int size = Math.max(1, spacing);
-		Identifier id = dots.get(size, size, Math.min(dot, size), Math.min(dot, size));
+		Texture id = dots.get(size, size, Math.min(dot, size), Math.min(dot, size));
 		blit(c, id, x0, y0, x1 - x0, y1 - y0, size, size, argb);
 	}
 
@@ -79,8 +74,8 @@ public final class EditorPatterns {
 			return;
 		}
 		int period = dash + Math.max(0, gap);
-		Identifier across = dashesAcross.get(period, 1, dash, 1);
-		Identifier down = dashesDown.get(1, period, 1, dash);
+		Texture across = dashesAcross.get(period, 1, dash, 1);
+		Texture down = dashesDown.get(1, period, 1, dash);
 		int thick = Math.min(line, y1 - y0);
 		blit(c, across, x0, y0, x1 - x0, thick, period, 1, argb);
 		blit(c, across, x0, y1 - thick, x1 - x0, thick, period, 1, argb);
@@ -94,7 +89,7 @@ public final class EditorPatterns {
 	}
 
 	/** One quad of {@code w × h} pixels covered by the tile repeated from its corner (texture pixels map 1:1). */
-	private static void blit(Canvas c, Identifier id, int x, int y, int w, int h, int tileW, int tileH, int argb) {
+	private static void blit(Canvas c, Texture id, int x, int y, int w, int h, int tileW, int tileH, int argb) {
 		int color = c.tint(argb);
 		if (w <= 0 || h <= 0 || (color >>> 24) == 0) {
 			return;
@@ -102,14 +97,14 @@ public final class EditorPatterns {
 		// A one-pixel-thick tile is stretched across the line's thickness; otherwise one texel per pixel.
 		int srcW = tileW == 1 ? 1 : w;
 		int srcH = tileH == 1 ? 1 : h;
-		c.graphics().blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0, 0, w, h, srcW, srcH, tileW, tileH, color);
+		c.frame().blit(id, x, y, 0, 0, w, h, srcW, srcH, tileW, tileH, color);
 	}
 
 	/** One repeating tile: white where the mark is, clear elsewhere (the blit colour tints it). */
 	private static final class Tile {
 		private final String name;
-		private @Nullable Identifier id;
-		private @Nullable Identifier retired;
+		private @Nullable Texture id;
+		private @Nullable Texture retired;
 		private long key = -1;
 		private int version;
 
@@ -118,21 +113,20 @@ public final class EditorPatterns {
 		}
 
 		/** The tile {@code w × h} with an opaque {@code markW × markH} block at its corner, made on first need. */
-		Identifier get(int w, int h, int markW, int markH) {
+		Texture get(int w, int h, int markW, int markH) {
 			long wanted = (long) (w & 0xFFFF) << 48 | (long) (h & 0xFFFF) << 32 | (long) (markW & 0xFFFF) << 16 | markH & 0xFFFF;
 			if (id != null && wanted == key) {
 				return id;
 			}
-			NativeImage image = new NativeImage(w, h, true);
+			int[] pixels = new int[w * h];
 			for (int y = 0; y < markH; y++) {
 				for (int x = 0; x < markW; x++) {
-					image.setPixel(x, y, 0xFFFFFFFF);
+					pixels[y * w + x] = 0xFFFFFFFF;
 				}
 			}
 			freeRetired();
 			retired = id;
-			Identifier next = Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, "dynamic/" + name + "_" + (++version));
-			Minecraft.getInstance().getTextureManager().register(next, new DynamicTexture(() -> "Flint " + name, image));
+			Texture next = Texture.upload("dynamic/" + name + "_" + (++version), w, h, pixels, false);
 			id = next;
 			key = wanted;
 			return next;
@@ -140,7 +134,7 @@ public final class EditorPatterns {
 
 		void freeRetired() {
 			if (retired != null) {
-				Minecraft.getInstance().getTextureManager().release(retired);
+				retired.release();
 				retired = null;
 			}
 		}
@@ -148,7 +142,7 @@ public final class EditorPatterns {
 		void release() {
 			freeRetired();
 			if (id != null) {
-				Minecraft.getInstance().getTextureManager().release(id);
+				id.release();
 				id = null;
 				key = -1;
 			}

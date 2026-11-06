@@ -1,0 +1,29 @@
+{
+	"name": "nether",
+	"dimension-names": [
+		"nether"
+	],
+	"rain": false,
+	"storm": false,
+	"biome-selector": {
+		"always": false
+	},
+	"regions": [
+		{
+			"name": "suspense",
+			"sounds": [
+				{
+					"name": "nether",
+					"files": [
+						"minecraft:ambient.nether_wastes.mood"
+					],
+					"volume": 0.3,
+					"pause": {
+						"min": 200,
+						"max": 800
+					}
+				}
+			]
+		}
+	]
+}

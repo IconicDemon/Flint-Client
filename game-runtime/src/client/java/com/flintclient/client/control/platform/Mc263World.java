@@ -10,18 +10,11 @@ import com.flintclient.client.control.model.mods.VisualMods.LightOverlay;
 import net.minecraft.client.Camera;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
-import net.minecraft.world.entity.projectile.hurtingprojectile.Fireball;
-import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
-import net.minecraft.world.entity.projectile.throwableitemprojectile.Snowball;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -32,7 +25,6 @@ import net.minecraft.gizmos.Gizmos;
 import net.minecraft.gizmos.TextGizmo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.tags.ItemTags;
-import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LightLayer;
@@ -48,10 +40,7 @@ import net.minecraft.world.phys.Vec3;
 public final class Mc263World {
 	private static final int LIGHT = Mods.index(LightOverlay.ID);
 	private static final int CHUNKS = Mods.index(ChunkBorders.ID);
-	private static final int HITBOX = Mods.index(Hitbox.ID);
-	/** The most entities outlined in one frame. */
-	static final int MAX_HITBOXES = 512;
-	private static final int LOOK_COLOR = 0xFF3F76E4;
+	private static final int WAYPOINTS = Mods.index(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ID);
 	private static boolean chunksHidden;
 	private static boolean chunksKeyWas;
 	private static final HookGuard GUARD = new HookGuard("world overlays",
@@ -85,14 +74,16 @@ public final class Mc263World {
 
 	/** From the client tick (the per-tick gizmo collection is open). */
 	public static void tick() {
+		// Sound Physics' debug rays are world gizmos too, emitted in the same tick collection.
+		com.flintclient.client.control.platform.sound.SoundPhysics.tickGizmos();
 		if (!GUARD.on()) {
 			return;
 		}
 		try {
 			tickLight();
 			tickChunks();
-			tickWaypoints();
-		} catch (RuntimeException e) {
+			Mc263Hitbox.tick(Mc263Features.gameplay());
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
 	}
@@ -120,7 +111,7 @@ public final class Mc263World {
 		if (held && !lightKeyWas) {
 			lightHidden = !lightHidden;
 			if (state.bool(LightOverlay.STATE_MESSAGE)) {
-				mc.gui.hud.setOverlayMessage(Component.literal(lightHidden ? "Light Overlay off" : "Light Overlay on"), false);
+				com.flintclient.client.compat.McCompat.hud().setOverlayMessage(Component.literal(lightHidden ? "Light Overlay off" : "Light Overlay on"), false);
 			}
 		}
 		lightKeyWas = held;
@@ -185,7 +176,7 @@ public final class Mc263World {
 					}
 					BELOW.set(x, y - 1, z);
 					BlockState below = level.getBlockState(BELOW);
-					if (!below.isValidSpawn(level, BELOW, EntityTypes.ZOMBIE)) {
+					if (!below.isValidSpawn(level, BELOW, com.flintclient.client.compat.McCompat.zombieType())) {
 						continue;
 					}
 					int light = LightRules.level(level.getBrightness(LightLayer.BLOCK, POS), level.getBrightness(LightLayer.SKY, POS), skyDarken,
@@ -331,109 +322,25 @@ public final class Mc263World {
 			return;
 		}
 		try {
-			frameHitboxes(camera, partialTicks);
-		} catch (RuntimeException e) {
+			Mc263Hitbox.frame();
+			frameWaypoints();
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
 	}
 
-	private static void frameHitboxes(Camera camera, float partialTicks) {
-		Minecraft mc = Minecraft.getInstance();
-		LocalPlayer player = mc.player;
-		ClientLevel level = mc.level;
-		if (player == null || level == null || !Mods.on(HITBOX) || mc.gui.hud.isHidden()) {
-			return;
-		}
-		ModuleState state = Mods.state(HITBOX);
-		double limit = state.bool(Hitbox.LIMIT) ? state.integer(Hitbox.DISTANCE) : Double.MAX_VALUE;
-		double limit2 = limit * limit;
-		Vec3 eye = player.getEyePosition(partialTicks);
-		double reach = player.entityInteractionRange();
-		boolean firstPerson = mc.options.getCameraType().isFirstPerson();
-		int drawn = 0;
-		for (Entity entity : level.entitiesForRendering()) {
-			if (drawn >= MAX_HITBOXES) {
-				break;
-			}
-			if (entity == player && firstPerson || entity.isInvisibleTo(player)) {
-				continue;
-			}
-			Hitbox.Group group = groupOf(entity);
-			if (!state.bool(group.enabled())) {
-				continue;
-			}
-			double dx = entity.getX() - player.getX();
-			double dy = entity.getY() - player.getY();
-			double dz = entity.getZ() - player.getZ();
-			if (dx * dx + dy * dy + dz * dz > limit2) {
-				continue;
-			}
-			// Where the entity is this frame (between its last two ticks), as it's drawn.
-			double ox = net.minecraft.util.Mth.lerp(partialTicks, entity.xOld, entity.getX()) - entity.getX();
-			double oy = net.minecraft.util.Mth.lerp(partialTicks, entity.yOld, entity.getY()) - entity.getY();
-			double oz = net.minecraft.util.Mth.lerp(partialTicks, entity.zOld, entity.getZ()) - entity.getZ();
-			AABB box = entity.getBoundingBox().move(ox, oy, oz);
-			if (!camera.getCullFrustum().isVisible(box)) {
-				continue;
-			}
-			int rgb = state.rgb(group.color());
-			if (group.hittable() != null) {
-				boolean inReach = entity != player && box.distanceToSqr(eye) <= reach * reach;
-				if (state.bool(group.onlyHittable()) && !inReach) {
-					continue;
-				}
-				if (state.bool(group.damaged()) && entity instanceof LivingEntity living && living.hurtTime > 0) {
-					rgb = state.rgb(group.damagedColor());
-				} else if (state.bool(group.hittable()) && inReach) {
-					rgb = state.rgb(group.hittableColor());
-				}
-			}
-			float width = state.integer(group.width());
-			Gizmos.cuboid(box, GizmoStyle.stroke(0xFF000000 | rgb, width));
-			if (state.bool(group.look())) {
-				Vec3 from = new Vec3(box.getCenter().x, box.minY + entity.getEyeHeight(), box.getCenter().z);
-				Gizmos.line(from, from.add(entity.getViewVector(partialTicks).scale(2)), LOOK_COLOR, width);
-			}
-			drawn++;
-		}
-		hitboxesDrawn = drawn;
-	}
-
-	private static int hitboxesDrawn;
-
-	/** How many hitboxes the last frame outlined (for the dev tour). */
+	/** Hitboxes drawn since the last call (for the dev tour). */
 	public static int hitboxes() {
-		return hitboxesDrawn;
+		return Mc263Hitbox.drawnAndReset();
 	}
 
-	/** The settings group an entity's hitbox follows; the most specific kind wins. */
+	/** The settings group an entity's hitbox follows. */
 	static Hitbox.Group groupOf(Entity entity) {
 		if (entity instanceof Player) {
 			return Hitbox.PLAYERS;
 		}
 		if (entity instanceof ItemEntity) {
 			return Hitbox.ITEMS;
-		}
-		if (entity instanceof ExperienceOrb) {
-			return Hitbox.ORBS;
-		}
-		if (entity instanceof ItemFrame) {
-			return Hitbox.FRAMES;
-		}
-		if (entity instanceof FireworkRocketEntity) {
-			return Hitbox.FIREWORKS;
-		}
-		if (entity instanceof WitherSkull) {
-			return Hitbox.WITHER_SKULLS;
-		}
-		if (entity instanceof Snowball) {
-			return Hitbox.SNOWBALLS;
-		}
-		if (entity instanceof Fireball) {
-			return Hitbox.FIREBALLS;
-		}
-		if (entity instanceof AbstractArrow) {
-			return Hitbox.ARROWS;
 		}
 		if (entity instanceof Projectile) {
 			return Hitbox.PROJECTILES;
@@ -449,38 +356,80 @@ public final class Mc263World {
 
 	// ---------- Waypoints ----------
 
-	/** Beams and highlighted blocks of this dimension's shown waypoints, within the view distance (plus a little). */
-	private static void tickWaypoints() {
+	/**
+	 * Each frame: this dimension's shown waypoints' blocks, as wWaypoints highlights them (an outline in the waypoint's colour
+	 * and a light fill of it, fitted to the block's shape with Use block model, hidden behind other blocks unless Block through
+	 * walls), within your render distance; and their beams (Flint's), a bright core in a soft glow from the bottom of the world
+	 * to its top.
+	 */
+	private static void frameWaypoints() {
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
 		ClientLevel level = mc.level;
-		if (player == null || level == null || !Mc263Features.markersShown()) {
+		if (player == null || level == null || !Mc263Features.markersShown() || com.flintclient.client.compat.McCompat.hud().isHidden()) {
+			// F1 hides the blocks and beams with the labels, for a clean screenshot.
 			return;
 		}
 		String dimension = level.dimension().identifier().toString();
-		ModuleState state = Mods.state(Mods.index(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ID));
+		ModuleState state = Mods.state(WAYPOINTS);
+		int display = state.option(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.DISPLAY);
+		boolean blocks = display != 1;
+		boolean beams = state.bool(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.SHOW_BEAM);
+		double core = 0.09 * state.decimal(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.BEAM_SCALE);
+		boolean model = state.bool(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.BLOCK_MODEL);
+		boolean walls = state.bool(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.THROUGH_WALLS);
+		int outlineAlpha = Math.round(state.integer(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.OUTLINE_OPACITY) * 2.55F);
+		int fillAlpha = Math.round(state.integer(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.FILL_OPACITY) * 2.55F);
+		float thickness = state.decimal(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.OUTLINE_THICKNESS);
 		int max = state.integer(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.MAX_DISTANCE);
-		double view = mc.options.getEffectiveRenderDistance() * 16 + 32;
+		int within = Mc263Features.shownWithin();
+		double view = Math.max(2, mc.options.getEffectiveRenderDistance() * 16);
 		double reach = max > 0 ? Math.min(max, view) : view;
+		if (within >= 0) {
+			reach = Math.min(reach, within);
+		}
 		double bottom = level.getMinY();
 		double top = level.getMaxY() + 1;
-		for (com.flintclient.client.control.feature.Waypoint wp : com.flintclient.client.control.feature.Features.waypoints().all()) {
-			if (!wp.visible() || !wp.dimension().equals(dimension) || !(wp.beam() || wp.highlight())) {
+		boolean allSets = state.bool(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ALL_SETS);
+		var store = com.flintclient.client.control.feature.Features.waypoints();
+		BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
+		for (com.flintclient.client.control.feature.Waypoint wp : store.all()) {
+			boolean block = blocks && wp.highlight() && (outlineAlpha > 0 || fillAlpha > 0);
+			boolean beam = beams && wp.beam();
+			if (!store.shown(wp, allSets) || !wp.dimension().equals(dimension) || !(block || beam)) {
 				continue;
 			}
 			double dx = wp.x() + 0.5 - player.getX();
+			double dy = wp.y() + 1 - player.getY();
 			double dz = wp.z() + 0.5 - player.getZ();
-			if (dx * dx + dz * dz > reach * reach) {
+			if (dx * dx + dy * dy + dz * dz > reach * reach) {
 				continue;
 			}
-			int argb = 0xFF000000 | wp.rgb();
-			if (wp.beam()) {
-				Gizmos.line(new Vec3(wp.x() + 0.5, bottom, wp.z() + 0.5), new Vec3(wp.x() + 0.5, top, wp.z() + 0.5), (argb & 0xFFFFFF) | 0xB0000000,
-					6.0F);
+			int rgb = wp.rgb();
+			if (beam) {
+				double cx = wp.x() + 0.5;
+				double cz = wp.z() + 0.5;
+				Gizmos.cuboid(new AABB(cx - core, bottom, cz - core, cx + core, top, cz + core), GizmoStyle.fill(0xC0000000 | rgb));
+				Gizmos.cuboid(new AABB(cx - core * 2.5, bottom, cz - core * 2.5, cx + core * 2.5, top, cz + core * 2.5), GizmoStyle.fill(0x38000000 | rgb));
 			}
-			if (wp.highlight()) {
-				Gizmos.cuboid(new AABB(wp.x(), wp.y(), wp.z(), wp.x() + 1, wp.y() + 1, wp.z() + 1),
-					GizmoStyle.strokeAndFill(argb, 2.5F, (argb & 0xFFFFFF) | 0x50000000));
+			if (block) {
+				GizmoStyle look = thickness > 0 && outlineAlpha > 0 ? GizmoStyle.strokeAndFill(outlineAlpha << 24 | rgb, thickness, fillAlpha << 24 | rgb)
+					: GizmoStyle.fill(fillAlpha << 24 | rgb);
+				at.set(wp.x(), wp.y(), wp.z());
+				java.util.List<AABB> boxes = model ? level.getBlockState(at).getShape(level, at).toAabbs() : java.util.List.of();
+				if (boxes.isEmpty()) {
+					var p = Gizmos.cuboid(new AABB(wp.x() - 0.002, wp.y() - 0.002, wp.z() - 0.002, wp.x() + 1.002, wp.y() + 1.002, wp.z() + 1.002), look);
+					if (walls) {
+						p.setAlwaysOnTop();
+					}
+				} else {
+					for (AABB box : boxes) {
+						var p = Gizmos.cuboid(box.move(wp.x(), wp.y(), wp.z()).inflate(0.002), look);
+						if (walls) {
+							p.setAlwaysOnTop();
+						}
+					}
+				}
 			}
 		}
 	}

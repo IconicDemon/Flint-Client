@@ -6,13 +6,14 @@ import com.flintclient.client.control.editor.HudEditor;
 import com.flintclient.client.control.fx.MotionBlur;
 import com.flintclient.client.control.hud.CpsCounter;
 import com.flintclient.client.control.hud.render.HudRenderer;
-import com.flintclient.client.control.menu.MenuScreen;
 import com.flintclient.client.control.platform.ControlKeys;
 import com.flintclient.client.control.platform.ControlPlatform;
 import com.flintclient.client.control.platform.HookGuard;
 import com.flintclient.client.control.platform.Mc263ControlPlatform;
 import com.flintclient.client.control.platform.ReleaseLatch;
 import com.flintclient.client.control.platform.UiSounds;
+import com.flintclient.client.control.rshift.HudPageScreen;
+import com.flintclient.client.control.rshift.ModMenuScreen;
 import com.flintclient.client.control.store.ControlSettings;
 import com.mojang.blaze3d.audio.SoundBuffer;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -21,11 +22,9 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
@@ -49,7 +48,6 @@ public final class ControlCenter {
 	private static final HookGuard SOUND = new HookGuard("sound", ControlCenter::turnedOff);
 	private static final HookGuard HINT = new HookGuard("hint", ControlCenter::turnedOff);
 	/** Flint's own toast id: a hint lasts a little longer than vanilla's 5 s notices, and is never merged with them. */
-	private static final SystemToast.SystemToastId HINT_TOAST = new SystemToast.SystemToastId(8000L);
 	private static final HintGate HINT_GATE = new HintGate();
 	// Armed when something opens or the screen changes, as the key that did it may still be held.
 	private static final ReleaseLatch OPEN_KEY_HELD = new ReleaseLatch();
@@ -76,11 +74,11 @@ public final class ControlCenter {
 			KeyMapping[] merged = created.addTo(keyMappings);
 			keys = created;
 			return merged;
-		} catch (RuntimeException e) {
-			KEYBINDS.fail(e);
 		} catch (ExceptionInInitializerError e) {
 			// A failed static initialiser leaves the class unusable; keys stays null so it's never touched again.
 			KEYBINDS.fail(new IllegalStateException("Flint's key bindings couldn't be created", e));
+		} catch (RuntimeException | LinkageError e) {
+			KEYBINDS.fail(e);
 		}
 		return keyMappings;
 	}
@@ -92,19 +90,55 @@ public final class ControlCenter {
 	 * closed, in game or on the title screen. Looks at the keys only after a change or while waiting. Also
 	 * shows the first-world hint when it is due ({@link #tickHint}).
 	 */
+	/** Whether the Right Shift menu has been readied for its first opening ({@link ModMenuScreen#warmUp}). */
+	private static boolean menuWarm;
+
+	private static final HookGuard BLUR_TICK = new HookGuard("motion blur tick", ControlCenter::turnedOff);
+	private static final HookGuard FEATURES_TICK = new HookGuard("feature tick", ControlCenter::turnedOff);
+	private static final HookGuard OVERLAY_TICK = new HookGuard("overlay tick", ControlCenter::turnedOff);
+	private static final HookGuard FOLDERS_TICK = new HookGuard("game folders tick", ControlCenter::turnedOff);
+	private static final HookGuard PACKS_TICK = new HookGuard("live packs tick", ControlCenter::turnedOff);
+	private static final HookGuard HINT_TICK = new HookGuard("hint tick", ControlCenter::turnedOff);
+
+	/** Runs {@code step} while its guard is on; a failure (or a Minecraft change it can't link against) turns the guard off. */
+	private static void guarded(HookGuard guard, Runnable step) {
+		if (!guard.on()) {
+			return;
+		}
+		try {
+			step.run();
+		} catch (RuntimeException | LinkageError e) {
+			guard.fail(e);
+		}
+	}
+
 	public static void onClientTick() {
-		MotionBlur.tick();
-		com.flintclient.client.control.platform.Mc263Features.tick();
-		com.flintclient.client.control.platform.Mc263Overlay.tick();
+		if (!menuWarm && Minecraft.getInstance().gui.overlay() == null && Minecraft.getInstance().gui.screen() != null) {
+			menuWarm = true;
+			com.flintclient.client.StartupTrace.titleShown();
+			try {
+				com.flintclient.client.control.rshift.ModMenuScreen.warmUp();
+			} catch (RuntimeException | LinkageError e) {
+				FlintClient.LOGGER.warn("Flint: couldn't ready the Right Shift menu ahead; it loads when first opened", e);
+			}
+		}
+		// Each step on its own guard: one that can't run on this Minecraft turns itself off, never the game or the others.
+		// Lambdas, not method references: a class that no longer links then fails inside the guard, not at the call site.
+		guarded(BLUR_TICK, () -> MotionBlur.tick());
+		guarded(FEATURES_TICK, () -> com.flintclient.client.control.platform.Mc263Features.tick());
+		guarded(OVERLAY_TICK, () -> com.flintclient.client.control.platform.Mc263Overlay.tick());
+		guarded(FOLDERS_TICK, () -> com.flintclient.client.control.platform.Mc263GameFolders.tick());
+		// Packs the Flint app added while the game runs, shown at once (.flint-packs.json, looked at once a second).
+		guarded(PACKS_TICK, () -> com.flintclient.client.control.platform.Mc263LivePacks.tick());
 		// Lets the HUD stop recording frame times soon after nothing shows FPS any more (F1, title screen).
 		if (HUD.on()) {
 			try {
 				HudRenderer.tick();
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				HUD.fail(e);
 			}
 		}
-		tickHint();
+		guarded(HINT_TICK, () -> tickHint());
 		ControlKeys mappings = keys;
 		if (mappings == null || !KEYBINDS.on()) {
 			return;
@@ -117,7 +151,7 @@ public final class ControlCenter {
 			}
 			watchRelease(OPEN_KEY_HELD, mappings.controlCenter());
 			watchRelease(EDITOR_KEY_HELD, mappings.hudEditor());
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			KEYBINDS.fail(e);
 		}
 	}
@@ -141,7 +175,7 @@ public final class ControlCenter {
 			} else if (editor) {
 				requestHudEditor();
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			KEYBINDS.fail(e);
 		}
 	}
@@ -158,7 +192,7 @@ public final class ControlCenter {
 		}
 		try {
 			return mappings.controlCenter().matches(event) && !OPEN_KEY_HELD.holding();
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			KEYBINDS.fail(e);
 			return false;
 		}
@@ -172,92 +206,76 @@ public final class ControlCenter {
 		}
 		try {
 			return mappings.controlCenter().matchesMouse(event) && !OPEN_KEY_HELD.holding();
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			KEYBINDS.fail(e);
 			return false;
 		}
 	}
 
-	/** Right Shift over the game: in a world the HUD editor with its hub (EDIT FLINT MODS, WIDGETS); elsewhere the menu. */
+	/** Right Shift over the game: in a world the HUD page (EDIT FLINT MODS, HUDS, shortcuts); elsewhere the window. */
 	public static void requestOpen() {
 		requestOpen(null);
 	}
 
 	/**
-	 * Opens Flint's Right Shift experience. Over a world (no {@code parent}) that is the HUD editor with Flint's hub in the
-	 * middle ({@link HudEditorScreen}), from which the module menu opens; otherwise, or when the editor is off this session,
-	 * the menu itself ({@link MenuScreen}), and closing it returns to {@code parent} (the title screen, say).
+	 * Opens Flint's Right Shift menu, the one way it opens: over a world (no {@code parent}) the HUD page
+	 * ({@link HudPageScreen}), from which EDIT FLINT MODS opens the window; otherwise, or when the HUD editor is off this
+	 * session, the window itself ({@link ModMenuScreen}), and closing it returns to {@code parent} (the title screen, say).
 	 */
 	public static void requestOpen(@Nullable Screen parent) {
 		if (!BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION) {
 			return;
 		}
-		if (parent == null && ControlState.inWorld() && HudEditor.available()) {
+		if (parent == null && GameState.inWorld() && HudEditor.available()) {
 			requestHudEditor();
 			return;
 		}
-		openScreen(parent);
+		openWindow(parent);
 	}
 
-	/** Opens the module menu ({@link MenuScreen}) itself; closing it returns to {@code parent}. */
-	public static void openMenu(@Nullable Screen parent) {
+	/** Opens the window ({@link ModMenuScreen}); closing it returns to {@code parent} (the HUD page, say). */
+	public static void openWindow(@Nullable Screen parent) {
 		if (!BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION) {
 			return;
 		}
-		openScreen(parent);
-	}
-
-	/**
-	 * Opens the menu on {@code moduleId}'s settings page (from the HUD editor's "All settings"); a module whose page
-	 * isn't built yet opens the menu on its grid.
-	 */
-	public static void openModuleSettings(@Nullable Screen parent, String moduleId) {
-		if (!BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION) {
-			return;
-		}
-		MenuScreen.showModule(moduleId);
-		openScreen(parent);
-	}
-
-	private static void openScreen(@Nullable Screen parent) {
 		holdKeys();
 		if (!OPEN.on()) {
 			return;
 		}
 		try {
 			Minecraft minecraft = Minecraft.getInstance();
-			if (minecraft.gui.screen() instanceof MenuScreen) {
+			if (minecraft.gui.screen() instanceof ModMenuScreen) {
 				return;
 			}
-			minecraft.gui.setScreen(new MenuScreen(parent));
-		} catch (RuntimeException e) {
+			minecraft.gui.setScreen(new ModMenuScreen(parent));
+		} catch (RuntimeException | LinkageError e) {
 			OPEN.fail(e);
 		}
 	}
 
 	/**
-	 * From {@link MenuScreen}, when building, drawing or handling input threw: reported once and the "open" path
+	 * From {@link ModMenuScreen}, when building, drawing or handling input threw: reported once and the "open" path
 	 * turned off for the session, so the key can't keep reopening a screen that fails. The screen itself steps aside.
 	 */
-	public static void screenFailed(RuntimeException error) {
+	public static void screenFailed(Throwable error) {
 		OPEN.fail(error);
 	}
 
-	/** Opens the HUD editor over the game; it needs a world, so elsewhere nothing happens. */
+	/** Opens the HUD page over the game; it needs a world, so elsewhere nothing happens. */
 	public static void requestHudEditor() {
 		if (!BetaFeatures.RIGHT_SHIFT_CUSTOMIZATION) {
 			return;
 		}
 		holdKeys();
-		if (!OPEN.on() || !ControlState.inWorld() || !HudEditor.available()) {
+		if (!OPEN.on() || !GameState.inWorld() || !HudEditor.available()) {
 			return;
 		}
 		try {
 			Minecraft minecraft = Minecraft.getInstance();
-			if (!(minecraft.gui.screen() instanceof HudEditorScreen)) {
-				minecraft.gui.setScreen(new HudEditorScreen(null));
+			if (!(minecraft.gui.screen() instanceof HudPageScreen)) {
+				minecraft.gui.setScreen(new HudPageScreen(null));
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			OPEN.fail(e);
 		}
 	}
@@ -272,7 +290,7 @@ public final class ControlCenter {
 		}
 		try {
 			drawHud(graphics, deltaTracker);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			HUD.fail(e);
 		}
 	}
@@ -284,7 +302,7 @@ public final class ControlCenter {
 		}
 		try {
 			return effectsModuleHidesVanilla();
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			EFFECTS.fail(e);
 			return false;
 		}
@@ -306,7 +324,7 @@ public final class ControlCenter {
 			if (PLATFORM.gameplayHasInput()) {
 				CPS.press(counted, nowMillis());
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			CLICKS.fail(e);
 		}
 	}
@@ -336,24 +354,24 @@ public final class ControlCenter {
 	 * The one way to play it: a failure here turns the sounds off instead of reaching the screen.
 	 */
 	public static void playOpenSound(float volume) {
-		if (!SOUND.on()) {
+		if (!SOUND.on() || !ControlState.settings().gameBool(com.flintclient.client.control.model.GameOptions.MENU_SOUND)) {
 			return;
 		}
 		try {
 			PLATFORM.playOpenSound(volume);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			SOUND.fail(e);
 		}
 	}
 
 	/** Plays the close sound, as {@link #playOpenSound} does the open one. */
 	public static void playCloseSound(float volume) {
-		if (!SOUND.on()) {
+		if (!SOUND.on() || !ControlState.settings().gameBool(com.flintclient.client.control.model.GameOptions.MENU_SOUND)) {
 			return;
 		}
 		try {
 			PLATFORM.playCloseSound(volume);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			SOUND.fail(e);
 		}
 	}
@@ -369,7 +387,7 @@ public final class ControlCenter {
 		}
 		try {
 			return UiSounds.buffer(file);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			SOUND.fail(e);
 			return null;
 		}
@@ -377,8 +395,7 @@ public final class ControlCenter {
 
 	/**
 	 * The first-world hint: once, on the first tick with the player in a world and nothing else on screen (so
-	 * never over a loading screen), a Minecraft toast "Flint Control Center · Press Right Shift to customise
-	 * your HUD" with the key actually bound; then it is remembered as shown and the settings are saved once.
+	 * never over a loading screen), Flint's toast "Press Right Shift to open the mod menu" with the key actually bound; then it is remembered as shown and the settings are saved once.
 	 * Each tick costs a field read once it has been dealt with. A toast never takes input from the game.
 	 */
 	private static void tickHint() {
@@ -395,14 +412,14 @@ public final class ControlCenter {
 			boolean bound = mappings != null && KEYBINDS.on() && !mappings.controlCenter().isUnbound();
 			ControlSettings settings = ControlState.settings();
 			if (HINT_GATE.poll(settings.hintShown(), true, bound) && mappings != null) {
-				SystemToast.add(minecraft.gui.toastManager(), HINT_TOAST, Component.translatable("flintclient.hint.title"),
-					Component.translatable("flintclient.hint.body", Mc263ControlPlatform.keyName(mappings.controlCenter())));
+				minecraft.gui.toastManager().addToast(new com.flintclient.client.control.platform.Mc263HintToast(
+					Mc263ControlPlatform.keyName(mappings.controlCenter()).getString()));
 				settings.setHintShown(true);
 				// Saved now, outside the usual moments (closing a screen, a layout action): the hint shows to players
 				// who may never open the Control Center, so waiting for a close could show it again every launch.
 				settings.save();
 			}
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			HINT.fail(e);
 		}
 	}
@@ -431,14 +448,14 @@ public final class ControlCenter {
 
 	private static void drawHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		com.flintclient.client.control.platform.Mc263Overlay.render(graphics, deltaTracker);
-		HudRenderer.render(graphics, deltaTracker);
+		HudRenderer.render(com.flintclient.client.platform.Frame.of(graphics));
 	}
 
 	private static boolean effectsModuleHidesVanilla() {
 		return HudRenderer.hideVanillaEffects();
 	}
 
-	private static void turnedOff(String path, RuntimeException error) {
+	private static void turnedOff(String path, Throwable error) {
 		FlintClient.LOGGER.warn("Flint Control Center: the {} hook failed; it's off for the rest of this session", path, error);
 	}
 }

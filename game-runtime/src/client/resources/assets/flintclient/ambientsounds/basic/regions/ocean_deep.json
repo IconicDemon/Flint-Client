@@ -1,0 +1,29 @@
+{
+	"name": "ocean",
+	"features": [
+		"ocean"
+	],
+	"underwater": {
+		"min": 0.01,
+		"fade": 4
+	},
+	"mute": 0.1,
+	"mute-priority": 10,
+	"sounds": [
+		{
+			"name": "whale",
+			"files": [
+				"minecraft:ambient.underwater.loop.additions.rare"
+			],
+			"category": "animal",
+			"pause": {
+				"min": 100,
+				"max": 1000
+			},
+			"features": [
+				"ocean"
+			],
+			"volume": 1
+		}
+	]
+}

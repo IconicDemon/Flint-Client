@@ -1,4 +1,4 @@
-export type Cue = "tap" | "toggle" | "nav" | "open" | "success" | "error" | "launch";
+export type Cue = "tap" | "toggle" | "nav" | "open" | "success" | "error" | "launch" | "message" | "request" | "online" | "sent";
 
 type Note = { freq: number; to?: number; at: number; dur: number; gain: number; type?: OscillatorType };
 
@@ -28,6 +28,21 @@ export const CUES: Record<Cue, Note[]> = {
     { freq: 587, at: 0.06, dur: 0.42, gain: 0.1, type: "sine" },
     { freq: 784, at: 0.12, dur: 0.46, gain: 0.08, type: "sine" },
   ],
+  /*
+   * Friends: soft sine notes, below the outcome cues, so a busy chat never nags. A message is two close notes, a friend
+   * request a gentle three-note rise, a friend coming online one soft lift, and sending a short airy blip.
+   */
+  message: [
+    { freq: 784, at: 0, dur: 0.11, gain: 0.07, type: "sine" },
+    { freq: 1047, at: 0.075, dur: 0.16, gain: 0.055, type: "sine" },
+  ],
+  request: [
+    { freq: 523, at: 0, dur: 0.14, gain: 0.07, type: "sine" },
+    { freq: 659, at: 0.09, dur: 0.15, gain: 0.06, type: "sine" },
+    { freq: 784, at: 0.18, dur: 0.22, gain: 0.055, type: "sine" },
+  ],
+  online: [{ freq: 587, to: 784, at: 0, dur: 0.2, gain: 0.05, type: "sine" }],
+  sent: [{ freq: 880, to: 1175, at: 0, dur: 0.07, gain: 0.04, type: "sine" }],
 };
 
 /** The same interaction cue can't repeat faster than this, so rapid clicks never chatter. */

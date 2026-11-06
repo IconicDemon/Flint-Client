@@ -10,7 +10,6 @@ import com.flintclient.client.control.hud.HudPlacement;
 import com.flintclient.client.control.model.Appearance;
 import com.flintclient.client.control.model.CoordinatesLayout;
 import com.flintclient.client.control.model.Decimals;
-import com.flintclient.client.control.model.DurabilityFormat;
 import com.flintclient.client.control.model.HudColor;
 import com.flintclient.client.control.model.HudThemeId;
 import com.flintclient.client.control.model.KeystrokesLayout;
@@ -38,12 +37,25 @@ class LayoutCodecTest {
 		coordinates.setPlacement(new HudPlacement(Anchor.BOTTOM, -12.5F, 30.25F, 1.25F));
 		coordinates.setAppearance(new Appearance(HudThemeId.MINIMAL, HudColor.LAVENDER, true, 10, 0, false));
 		ModuleState armor = layout.module(ModuleId.ARMOR);
-		armor.set(ModuleSettings.Armor.DURABILITY, DurabilityFormat.NUMBER);
-		armor.set(ModuleSettings.Armor.SHOW_HANDS, true);
+		armor.set(ModuleSettings.Armor.DURABILITY, 1);
+		armor.set(ModuleSettings.Armor.MAINHAND_DURABILITY, true);
 		armor.setAppearance(Appearance.INHERIT.withTextColor(HudColor.EMBER));
 		layout.module(ModuleId.KEYSTROKES).set(ModuleSettings.Keystrokes.KEY_SIZE, 21);
 		layout.module(ModuleId.FPS).setPlacement(new HudPlacement(Anchor.TOP_LEFT, 0.1F + 0.2F, 1F / 3F, 0.75F));
 		return layout;
+	}
+
+	@Test
+	void theLooksPanelBorderAndShadowRoundTrip() {
+		Layout layout = busyLayout();
+		layout.setAppearance(layout.appearance().with(Appearance.TEXT_SHADOW, true).with(Appearance.BORDER_COLOR, 0x123456));
+		ModuleState ping = layout.module(ModuleId.PING);
+		ping.setAppearance(ping.appearance().with(Appearance.BACKGROUND_COLOR, 0xABCDEF).with(Appearance.BORDER, true)
+			.with(Appearance.BORDER_THICKNESS, 3));
+		JsonObject json = LayoutCodec.toJson(layout);
+		assertEquals(layout, LayoutCodec.read(json, "ranked"));
+		assertEquals(JsonParser.parseString("{\"backgroundColor\": \"#ABCDEF\", \"border\": true, \"borderThickness\": 3}"),
+			json.getAsJsonObject("modules").getAsJsonObject("ping").getAsJsonObject("hud").get("appearance"));
 	}
 
 	@Test
@@ -71,7 +83,11 @@ class LayoutCodecTest {
 		JsonObject coordinates = modules.getAsJsonObject("coordinates");
 		assertEquals(JsonParser.parseString("""
 			{"enabled": true,
-			 "settings": {"layout": "horizontal", "decimals": "one", "labels": true, "showDirection": false, "otherDimension": false},
+			 "settings": {"layout": "horizontal", "decimals": "one", "labels": true, "showDirection": false, "otherDimension": false,
+			              "alignment": "left", "showAngle": false, "formatColor": "default", "showCoordinates": true, "showXZCoordinates": true,
+			              "showYCoordinate": true, "showMovementDirection": false, "showBlockCoordinates": false, "showChunkCoordinates": false,
+			              "formattedChunk": false, "showBiome": false, "showChunkCounter": false, "streamlineOther": false, "showKeyChunk": true,
+			              "showKeyBiome": true, "showKeyCounter": true, "copyCoordinates": "", "modKey": "", "modKeyNotify": true},
 			 "hud": {"anchor": "BOTTOM", "x": -12.5, "y": 30.25, "scale": 1.25,
 			         "appearance": {"theme": "minimal", "textColor": "lavender", "background": true, "backgroundOpacity": 10,
 			                        "padding": 0, "showLabel": false}}}
@@ -101,14 +117,14 @@ class LayoutCodecTest {
 			{"schema": 1, "id": "x", "name": "X",
 			 "appearance": {"theme": "glass", "textColor": "default", "backgroundOpacity": 72, "padding": 3},
 			 "modules": {
-			   "armor": {"enabled": true, "settings": {"durability": "bars", "layout": "VERTICAL"},
+			   "armor": {"enabled": true, "settings": {"durabilityDisplay": "bars", "layout": "VERTICAL"},
 			             "hud": {"anchor": "right", "x": 4, "y": 0, "scale": 1, "appearance": {"theme": "glass", "padding": 99}}}}}
 			""").getAsJsonObject();
 		Layout layout = LayoutCodec.read(json, "x");
 		assertEquals(HudThemeId.FLINT, layout.appearance().theme(), "an unknown style reads as the default");
 		assertEquals(70, layout.appearance().backgroundOpacity(), "snapped to the 5 % steps");
 		ModuleState armor = layout.module(ModuleId.ARMOR);
-		assertEquals(DurabilityFormat.PERCENT, armor.choice(ModuleSettings.Armor.DURABILITY));
+		assertEquals(0, armor.option(ModuleSettings.Armor.DURABILITY), "an unknown option reads as the default");
 		assertNull(armor.appearance().theme(), "an unknown override follows the layout");
 		assertEquals(8, armor.appearance().padding(), "clamped");
 		layout.module(ModuleId.CPS).setEnabled(true);
@@ -116,21 +132,21 @@ class LayoutCodecTest {
 		JsonObject armorJson = json.getAsJsonObject("modules").getAsJsonObject("armor");
 		assertEquals("glass", json.getAsJsonObject("appearance").get("theme").getAsString(), "kept for the Flint that wrote it");
 		assertEquals(72, json.getAsJsonObject("appearance").get("backgroundOpacity").getAsInt());
-		assertEquals("bars", armorJson.getAsJsonObject("settings").get("durability").getAsString());
+		assertEquals("bars", armorJson.getAsJsonObject("settings").get("durabilityDisplay").getAsString());
 		assertEquals("VERTICAL", armorJson.getAsJsonObject("settings").get("layout").getAsString(), "its own spelling stays");
 		assertEquals(JsonParser.parseString("{\"anchor\": \"right\", \"x\": 4, \"y\": 0, \"scale\": 1, \"appearance\": {\"theme\": \"glass\", "
 			+ "\"padding\": 99}}"), armorJson.get("hud"));
 		assertTrue(json.getAsJsonObject("modules").getAsJsonObject("cps").get("enabled").getAsBoolean(), "real changes are written");
 
 		layout.setAppearance(layout.appearance().withTheme(HudThemeId.MINIMAL).withBackgroundOpacity(60));
-		armor.set(ModuleSettings.Armor.DURABILITY, DurabilityFormat.NUMBER);
+		armor.set(ModuleSettings.Armor.DURABILITY, 1);
 		armor.setAppearance(Appearance.INHERIT);
 		armor.setPlacement(armor.placement().withOffset(10, 0));
 		LayoutCodec.write(layout, json);
 		armorJson = json.getAsJsonObject("modules").getAsJsonObject("armor");
 		assertEquals("minimal", json.getAsJsonObject("appearance").get("theme").getAsString(), "replaced once changed");
 		assertEquals(60, json.getAsJsonObject("appearance").get("backgroundOpacity").getAsInt());
-		assertEquals("number", armorJson.getAsJsonObject("settings").get("durability").getAsString());
+		assertEquals("numeric", armorJson.getAsJsonObject("settings").get("durabilityDisplay").getAsString());
 		assertEquals(JsonParser.parseString("{\"theme\": \"glass\"}"), armorJson.getAsJsonObject("hud").get("appearance"),
 			"a cleared override goes; one this version can't show (or clear) stays");
 		assertEquals(10.0, armorJson.getAsJsonObject("hud").get("x").getAsDouble());
@@ -143,7 +159,7 @@ class LayoutCodecTest {
 			{"schema": 1, "id": "x", "name": "X", "exportedBy": "Flint 9",
 			 "appearance": {"theme": "flint", "font": "serif"},
 			 "modules": {
-			   "minimap": {"enabled": true, "zoom": 3},
+			   "teleporter": {"enabled": true, "zoom": 3},
 			   "fps": {"enabled": true, "pinned": true,
 			           "settings": {"showLow": true, "graph": "bars"},
 			           "hud": {"anchor": "TOP_LEFT", "x": 4, "y": 4, "scale": 1, "rotation": 90,
@@ -156,7 +172,7 @@ class LayoutCodecTest {
 		assertEquals("Flint 9", json.get("exportedBy").getAsString());
 		assertEquals("serif", json.getAsJsonObject("appearance").get("font").getAsString());
 		JsonObject modules = json.getAsJsonObject("modules");
-		assertEquals(JsonParser.parseString("{\"enabled\": true, \"zoom\": 3}"), modules.get("minimap"), "a module from a newer Flint is kept");
+		assertEquals(JsonParser.parseString("{\"enabled\": true, \"zoom\": 3}"), modules.get("teleporter"), "a module from a newer Flint is kept");
 		JsonObject fps = modules.getAsJsonObject("fps");
 		assertTrue(fps.get("pinned").getAsBoolean());
 		assertEquals("bars", fps.getAsJsonObject("settings").get("graph").getAsString());
@@ -175,7 +191,7 @@ class LayoutCodecTest {
 			   "fps": {"enabled": "true", "settings": {"showLow": 1}},
 			   "keystrokes": {"enabled": true, "settings": {"keySize": 99, "showSpace": false},
 			                  "hud": {"anchor": "MIDDLE", "x": "4", "y": 12, "scale": 3}},
-			   "armor": {"enabled": true, "settings": {"durability": "bars", "layout": "HORIZONTAL"},
+			   "armor": {"enabled": true, "settings": {"durabilityDisplay": "bars", "layout": "HORIZONTAL"},
 			             "hud": {"appearance": {"theme": "classic", "textColor": "red", "padding": 99, "showLabel": "no"}}},
 			   "effects": "on",
 			   "ping": {"settings": [], "hud": []}}}
@@ -196,9 +212,9 @@ class LayoutCodecTest {
 		assertEquals(24, keystrokes.integer(ModuleSettings.Keystrokes.KEY_SIZE));
 		assertEquals(KeystrokesLayout.KEYS_MOUSE, keystrokes.choice(ModuleSettings.Keystrokes.LAYOUT), "the old jump switch, migrated");
 		HudPlacement fallback = ModuleRegistry.get(ModuleId.KEYSTROKES).defaultPlacement();
-		assertEquals(new HudPlacement(fallback.anchor(), fallback.x(), 12, 2.0F), keystrokes.placement(), "field by field");
+		assertEquals(new HudPlacement(fallback.anchor(), fallback.x(), 12, 3.0F), keystrokes.placement(), "field by field");
 		ModuleState armor = layout.module(ModuleId.ARMOR);
-		assertEquals(DurabilityFormat.PERCENT, armor.choice(ModuleSettings.Armor.DURABILITY));
+		assertEquals(0, armor.option(ModuleSettings.Armor.DURABILITY), "an unknown option reads as the default");
 		assertEquals(Orientation.HORIZONTAL, armor.choice(ModuleSettings.Armor.LAYOUT));
 		Appearance overrides = armor.appearance();
 		assertEquals(HudThemeId.CLASSIC, overrides.theme());

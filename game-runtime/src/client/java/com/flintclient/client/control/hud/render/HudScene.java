@@ -19,6 +19,7 @@ public final class HudScene {
 	private final int[] state = new int[ModuleRegistry.size()];
 	private final float[] rects = new float[4 * ModuleRegistry.size()];
 	private final @Nullable String[] reasons = new String[ModuleRegistry.size()];
+	private final boolean[] pinned = new boolean[ModuleRegistry.size()];
 
 	public int size() {
 		return state.length;
@@ -50,6 +51,19 @@ public final class HudScene {
 		return reasons[i];
 	}
 
+	/**
+	 * Whether the module at {@code i} is drawn where its own settings put it (Armor against the hotbar), not where its HUD
+	 * placement says: moving or sizing it hands it to its placement first ({@code ModuleSettings.free}). Drawn at size 1.
+	 */
+	public boolean pinned(int i) {
+		return pinned[i];
+	}
+
+	/** The module at {@code i} is placed by its HUD placement from now on (the editor freed it). */
+	public void unpin(int i) {
+		pinned[i] = false;
+	}
+
 	/** The topmost module (drawn last) whose rectangle contains the point, or -1. */
 	public int hit(float px, float py) {
 		for (int i = state.length - 1; i >= 0; i--) {
@@ -61,7 +75,12 @@ public final class HudScene {
 	}
 
 	void set(int i, int value, float x, float y, float w, float h, @Nullable String reason) {
+		set(i, value, x, y, w, h, reason, false);
+	}
+
+	void set(int i, int value, float x, float y, float w, float h, @Nullable String reason, boolean pinnedThere) {
 		state[i] = value;
+		pinned[i] = pinnedThere;
 		rects[4 * i] = x;
 		rects[4 * i + 1] = y;
 		rects[4 * i + 2] = w;
@@ -71,6 +90,7 @@ public final class HudScene {
 
 	void off(int i) {
 		state[i] = OFF;
+		pinned[i] = false;
 		reasons[i] = null;
 	}
 }

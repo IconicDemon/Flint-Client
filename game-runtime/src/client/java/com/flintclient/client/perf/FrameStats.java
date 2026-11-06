@@ -41,7 +41,7 @@ public final class FrameStats {
 	}
 
 	/** From the frame-time hook. True when the frame was recorded (something has acquired the statistics). */
-	static boolean record(long frameNanos) {
+	public static boolean record(long frameNanos) {
 		if (users == 0 || shared == null) {
 			return false;
 		}

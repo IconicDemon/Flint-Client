@@ -2,23 +2,15 @@ package com.flintclient.client.control.hud.render;
 
 import com.flintclient.client.control.hud.ScaleSteps;
 import com.flintclient.client.control.model.HudThemeId;
+import com.flintclient.client.platform.FontRef;
 import com.flintclient.client.render.DigitRun;
-import com.flintclient.client.render.FlintFonts;
 import com.flintclient.client.render.FontFace;
-import com.flintclient.client.render.ScaledFont;
-import net.minecraft.network.chat.FontDescription;
 
 /**
- * The HUD's typefaces: per style, a value face and a smaller label face at each size step, so the number of
- * font sets stays fixed (3 styles × 2 roles × 6 steps at most, far below {@link ScaledFont#MAX_FACES}).
- * <ul>
- * <li>Flint: Inter SemiBold, values at {@value #VALUE_EM} units and labels at {@value #FLINT_LABEL_EM}, tracked
- * like small capitals.</li>
- * <li>Minimal: Inter Medium, values at {@value #VALUE_EM} and units at {@value #MINIMAL_LABEL_EM}.</li>
- * <li>Classic: Minecraft's own font ({@link #VANILLA}) for both, drawn at a whole number of pixels per font
- * pixel so it stays pixel-crisp.</li>
- * </ul>
- * Faces and their digit runs are made the first time a style and size is drawn, then kept. Render thread.
+ * The HUD's typeface: Minecraft's own font ({@link #VANILLA}) in every style and role, drawn at a whole number of
+ * pixels per font pixel so it stays pixel-crisp, as the owner asked for all of Flint's in-game text. The styles
+ * differ in their panels and shadows ({@link HudStyle}), not their letters. Indexed per style, role and size step so
+ * callers keep one face per slot. Render thread.
  */
 final class HudFaces {
 	static final int VALUE = 0;
@@ -28,17 +20,10 @@ final class HudFaces {
 	/** {@code values()} copies its array on every call; this one is read per draw. */
 	private static final HudThemeId[] THEMES = HudThemeId.values();
 	static final int COUNT = THEMES.length * ROLES * STEPS;
-	/** Em sizes in GUI units at size 1×. A value line is 7 units tall, so a default module with padding is 11. */
-	static final float VALUE_EM = 7.0F;
-	static final float FLINT_LABEL_EM = 5.0F;
-	static final float MINIMAL_LABEL_EM = 5.4F;
-	/** Flint's labels are tracked a little, as small capitals are. */
-	static final float LABEL_TRACKING = 0.06F;
-	/** Minecraft's font (for the Classic style): an 8-pixel bitmap whose capitals are 7 pixels tall. */
+	/** Minecraft's font: an 8-pixel bitmap whose capitals are 7 pixels tall. */
 	static final FontFace VANILLA = new VanillaFace();
 
 	private static final FontFace[] FACES = new FontFace[COUNT];
-	private static final DigitRun[] DIGITS = new DigitRun[COUNT];
 	private static DigitRun vanillaDigits;
 
 	private HudFaces() {
@@ -72,33 +57,19 @@ final class HudFaces {
 
 	/** Letter spacing (em) for text in this face. */
 	static float tracking(int index) {
-		return theme(index) == HudThemeId.FLINT && role(index) == LABEL ? LABEL_TRACKING : 0.0F;
+		return 0.0F;
 	}
 
-	/** Tabular digits in this face (shared by every Classic size: one run caches each pixel scale). */
+	/** Tabular digits in this face (one run for every style and size: it caches each pixel scale). */
 	static DigitRun digits(int index) {
-		if (theme(index) == HudThemeId.CLASSIC) {
-			if (vanillaDigits == null) {
-				vanillaDigits = new DigitRun(VANILLA);
-			}
-			return vanillaDigits;
+		if (vanillaDigits == null) {
+			vanillaDigits = new DigitRun(VANILLA);
 		}
-		DigitRun run = DIGITS[index];
-		if (run == null) {
-			run = new DigitRun(face(index));
-			DIGITS[index] = run;
-		}
-		return run;
+		return vanillaDigits;
 	}
 
 	private static FontFace create(int index) {
-		float step = step(index);
-		boolean label = role(index) == LABEL;
-		return switch (theme(index)) {
-			case FLINT -> ScaledFont.of(FlintFonts.STRONG, (label ? FLINT_LABEL_EM : VALUE_EM) * step);
-			case MINIMAL -> ScaledFont.of(FlintFonts.LABEL, (label ? MINIMAL_LABEL_EM : VALUE_EM) * step);
-			case CLASSIC -> VANILLA;
-		};
+		return VANILLA;
 	}
 
 	/**
@@ -107,8 +78,8 @@ final class HudFaces {
 	 */
 	private static final class VanillaFace implements FontFace {
 		@Override
-		public FontDescription forScale(int scale) {
-			return FontDescription.DEFAULT;
+		public FontRef forScale(int scale) {
+			return FontRef.MINECRAFT;
 		}
 
 		@Override

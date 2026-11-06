@@ -300,8 +300,8 @@ fn classify(status: u16, body: &Value) -> Reply {
 }
 
 /// The configured gateway without a trailing slash.
-fn configured_gateway(state: &AppState) -> CmdResult<String> {
-    let gateway = gateway_url(state).ok_or("AI_NOT_CONFIGURED")?;
+fn configured_gateway() -> CmdResult<String> {
+    let gateway = gateway_url().ok_or("AI_NOT_CONFIGURED")?;
     Ok(gateway.trim_end_matches('/').to_owned())
 }
 
@@ -382,7 +382,7 @@ pub async fn ai_suggest(
     if prompt.chars().count() < 2 {
         return Err("Describe what you'd like to add.".into());
     }
-    let gateway = configured_gateway(&state)?;
+    let gateway = configured_gateway()?;
     let profile = target_profile(&state, profile_id.as_deref(), game_version.as_deref())?;
     // Vanilla profiles can still use resource packs; the gateway only suggests those for them.
     let loader = gateway_loader(&profile.loader);
@@ -478,7 +478,7 @@ pub fn ai_cancel(state: State<'_, AppState>, request_id: String) {
 /// no session, no Minecraft account and no Keychain access.
 #[tauri::command]
 pub async fn ai_status(state: State<'_, AppState>) -> CmdResult<Value> {
-    let Ok(gateway) = configured_gateway(&state) else {
+    let Ok(gateway) = configured_gateway() else {
         return Ok(json!({ "configured": false, "reachable": false }));
     };
     let reachable = state.http.get(format!("{gateway}/v1/health")).timeout(HEALTH_TIMEOUT).send().await.is_ok_and(|r| r.status().is_success());
@@ -491,7 +491,7 @@ pub async fn ai_status(state: State<'_, AppState>) -> CmdResult<Value> {
 #[tauri::command]
 pub async fn ai_quota(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Value> {
     assist_enabled(&state)?;
-    let gateway = configured_gateway(&state)?;
+    let gateway = configured_gateway()?;
     let mut renewed = false;
     loop {
         let session = gateway_session(&app, &state, &gateway).await?;

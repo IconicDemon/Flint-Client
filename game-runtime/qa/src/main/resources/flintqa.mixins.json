@@ -4,7 +4,11 @@
   "package": "com.flintclient.qa.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
-    "MinecraftMixin"
+    "MinecraftMixin",
+    "AbstractClientPlayerMixin",
+    "PlayerInfoSkinMixin",
+    "MouseHandlerMixin",
+    "ClientPacketListenerAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

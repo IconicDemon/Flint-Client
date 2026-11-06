@@ -278,10 +278,11 @@ export function Segmented<T extends string>({
 }: {
   value: T;
   onChange: (value: T) => void;
-  options: { value: T; label: string }[];
+  /** `count`: a quiet number after the label (how many items an option shows). */
+  options: { value: T; label: string; count?: number }[];
   label: string;
 }) {
-  const ref = useIndicator(`${value}|${options.map((o) => o.value).join(",")}`);
+  const ref = useIndicator(`${value}|${options.map((o) => `${o.value}${o.count ?? ""}`).join(",")}`);
   return (
     <div ref={ref} className="segmented" role="radiogroup" aria-label={label}>
       <span className="seg-ind" aria-hidden />
@@ -298,6 +299,7 @@ export function Segmented<T extends string>({
           }}
         >
           {o.label}
+          {o.count !== undefined && <span className="seg-count">{o.count}</span>}
         </button>
       ))}
     </div>
@@ -313,6 +315,7 @@ export function Slider({
   label,
   format,
   disabled,
+  showValue = true,
 }: {
   value: number;
   min: number;
@@ -322,6 +325,8 @@ export function Slider({
   label: string;
   format?: (value: number) => string;
   disabled?: boolean;
+  /** False: `format` names the value for screen readers only (something beside the slider shows it). */
+  showValue?: boolean;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -338,7 +343,7 @@ export function Slider({
         style={{ "--pct": `${pct}%` } as React.CSSProperties}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      {format && <output className="slider-value">{format(value)}</output>}
+      {format && showValue && <output className="slider-value">{format(value)}</output>}
     </div>
   );
 }

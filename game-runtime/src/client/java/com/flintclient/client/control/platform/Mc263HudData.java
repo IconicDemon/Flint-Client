@@ -3,7 +3,6 @@ package com.flintclient.client.control.platform;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
@@ -22,7 +21,6 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
-import net.minecraft.world.scores.TeamColor;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -88,6 +86,72 @@ public final class Mc263HudData {
 		return level == null ? 20.0F : level.tickRateManager().tickrate();
 	}
 
+	private static @Nullable ClientLevel biomeLevel;
+	private static long biomeAt = Long.MIN_VALUE;
+	private static @Nullable String biomeName;
+
+	/** The biome's name where {@code player} stands, in the game's language; looked up again only after moving to another block. */
+	public static @Nullable String biome(LocalPlayer player) {
+		ClientLevel level = Minecraft.getInstance().level;
+		if (level == null) {
+			return null;
+		}
+		long at = player.blockPosition().asLong();
+		if (level != biomeLevel || at != biomeAt) {
+			biomeLevel = level;
+			biomeAt = at;
+			biomeName = level.getBiome(player.blockPosition()).unwrapKey()
+				.map(key -> Component.translatable(key.identifier().toLanguageKey("biome")).getString()).orElse(null);
+		}
+		return biomeName;
+	}
+
+	/**
+	 * The yaw toward each shown waypoint in this dimension (Minecraft's: 0 faces south, 90 west), with its colour, into
+	 * the arrays; returns how many (at most their length).
+	 */
+	public static int waypointYaws(LocalPlayer player, float[] yaws, int[] colors) {
+		String dimension = Mc263Features.dimension();
+		if (dimension == null || !Mc263Features.markersShown()) {
+			// Waypoints off, or their markers hidden with the toggle key: no dots either.
+			return 0;
+		}
+		java.util.List<com.flintclient.client.control.feature.Waypoint> all = com.flintclient.client.control.feature.Features.waypoints().all();
+		int max = com.flintclient.client.control.feature.Mods.state(com.flintclient.client.control.feature.Mods.index(
+			com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ID)).integer(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.MAX_DISTANCE);
+		int n = 0;
+		boolean allSets = com.flintclient.client.control.feature.Mods.state(com.flintclient.client.control.feature.Mods.index(
+			com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ID)).bool(com.flintclient.client.control.model.mods.UtilityMods.Waypoints.ALL_SETS);
+		var store = com.flintclient.client.control.feature.Features.waypoints();
+		for (int i = 0; i < all.size() && n < yaws.length; i++) {
+			com.flintclient.client.control.feature.Waypoint wp = all.get(i);
+			if (!store.shown(wp, allSets) || !wp.dimension().equals(dimension)) {
+				continue;
+			}
+			double dx = wp.x() + 0.5 - player.getX();
+			double dz = wp.z() + 0.5 - player.getZ();
+			if (dx * dx + dz * dz < 1) {
+				continue;
+			}
+			if (max > 0) {
+				double dy = wp.y() - player.getY();
+				if (dx * dx + dy * dy + dz * dz > (double) max * max) {
+					continue;
+				}
+			}
+			yaws[n] = (float) Math.toDegrees(Math.atan2(-dx, dz));
+			colors[n] = 0xFF000000 | wp.rgb();
+			n++;
+		}
+		return n;
+	}
+
+	/** How many chunks the game holds (0 outside a world). */
+	public static int loadedChunks() {
+		ClientLevel level = Minecraft.getInstance().level;
+		return level == null ? 0 : level.getChunkSource().getLoadedChunksCount();
+	}
+
 	/** {@link #OVERWORLD}, {@link #NETHER} or {@link #OTHER} (also outside a world). */
 	public static int dimension() {
 		ClientLevel level = Minecraft.getInstance().level;
@@ -147,9 +211,9 @@ public final class Mc263HudData {
 		Objective objective = null;
 		PlayerTeam team = scoreboard.getPlayersTeam(player.getScoreboardName());
 		if (team != null) {
-			Optional<TeamColor> color = team.getColor();
-			if (color.isPresent()) {
-				objective = scoreboard.getDisplayObjective(color.get().displaySlot());
+			DisplaySlot slot = com.flintclient.client.compat.McCompat.teamSidebar(team);
+			if (slot != null) {
+				objective = scoreboard.getDisplayObjective(slot);
 			}
 		}
 		if (objective == null) {
@@ -177,6 +241,25 @@ public final class Mc263HudData {
 			widest = Math.max(widest, font.width(name) + (scoreWidth > 0 ? spacer + scoreWidth : 0));
 		}
 		return new int[] {widest, lines};
+	}
+
+	private static long sidebarReadAt;
+	private static int @Nullable [] sidebarSize;
+
+	/** {@link #sidebar()}, worked out again at most four times a second (it allocates): for drawing it each frame. */
+	public static int @Nullable [] sidebarCached() {
+		long now = System.nanoTime();
+		if (now - sidebarReadAt > 250_000_000L) {
+			sidebarReadAt = now;
+			sidebarSize = sidebar();
+		}
+		return sidebarSize;
+	}
+
+	/** How many boss bars the server has up (0 outside a world). */
+	public static int bossBars() {
+		Minecraft mc = Minecraft.getInstance();
+		return mc.level == null ? 0 : ((com.flintclient.client.mixin.feature.BossHealthOverlayAccessor) com.flintclient.client.compat.McCompat.hud().getBossOverlay()).flint$events().size();
 	}
 
 	/**

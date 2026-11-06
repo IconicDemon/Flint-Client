@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.platform.KeyInput;
 import com.flintclient.client.render.TextLine;
 import com.mojang.blaze3d.platform.InputConstants;
-import java.util.List;
 import net.minecraft.client.input.KeyEvent;
 import org.junit.jupiter.api.Test;
 
@@ -123,8 +123,8 @@ class NodeTest {
 		assertEquals(0, parent.childCount());
 	}
 
-	private static KeyEvent key(int key) {
-		return new KeyEvent(key, 0, 0);
+	private static KeyInput key(int key) {
+		return KeyInput.of(new KeyEvent(key, 0, 0));
 	}
 
 	@Test

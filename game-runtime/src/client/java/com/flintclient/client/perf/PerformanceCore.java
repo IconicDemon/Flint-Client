@@ -50,7 +50,7 @@ public final class PerformanceCore {
 	static List<PerfModule> all() {
 		return List.of(new FrameStatsLogModule(), new MenuResourcesModule(), new AtlasBatchingModule(), new DecodeExecutorModule(),
 			new FontPreloadModule(), new GraphicsCoreModule(), new GpuResourcesLogModule(), new FontTimingModule(), new NetworkCoreModule(),
-			new NetworkLogModule());
+			new NetworkLogModule(), new com.flintclient.client.network.platform.NetworkTuning());
 	}
 
 	/**
@@ -94,7 +94,7 @@ public final class PerformanceCore {
 			try {
 				module.start();
 				started.add(module);
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				FlintClient.LOGGER.warn("Flint Performance Core module {} couldn't start; it stays off", module.id(), e);
 			}
 		}
@@ -135,7 +135,7 @@ public final class PerformanceCore {
 		if (FrameStats.record(frameNanos) && frameStatsLog != null) {
 			try {
 				frameStatsLog.afterFrame();
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				turnOff(frameStatsLog, e);
 			}
 		}
@@ -145,13 +145,13 @@ public final class PerformanceCore {
 		for (PerfModule module : modules) {
 			try {
 				callback.accept(module);
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				turnOff(module, e);
 			}
 		}
 	}
 
-	private static void turnOff(PerfModule module, RuntimeException e) {
+	private static void turnOff(PerfModule module, Throwable e) {
 		FlintClient.LOGGER.warn("Flint Performance Core module {} failed; it's off for the rest of this session", module.id(), e);
 		List<PerfModule> rest = new ArrayList<>(modules);
 		rest.remove(module);

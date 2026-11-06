@@ -56,7 +56,7 @@ public final class Mc263Tooltips {
 			drawY = at.y() + SCROLL.offsetY();
 			drawScale = scale;
 			return new Vector2i(drawX, drawY);
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			drawScale = 1;
 			return null;
@@ -98,7 +98,7 @@ public final class Mc263Tooltips {
 				moved |= SCROLL.scroll(true, dy, lineShift);
 			}
 			return moved;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			return false;
 		}

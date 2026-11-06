@@ -2,10 +2,8 @@ package com.flintclient.client.control.hud.render;
 
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.mods.UtilityMods.Inventory;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import com.flintclient.client.platform.HudData;
+import com.flintclient.client.platform.ItemPainter;
 
 /**
  * Inventory's HUD: your 27 main inventory slots (not the hotbar) as a 9 by 3 grid of items with Minecraft's counts and
@@ -15,8 +13,8 @@ import net.minecraft.world.item.Items;
 final class InventoryView extends ModuleView {
 	private static final int COLUMNS = 9;
 	private static final int ROWS = 3;
-	private static final ItemStack[] SAMPLE_ITEMS = new ItemStack[COLUMNS * ROWS];
-	private final ItemStack[] stacks = new ItemStack[COLUMNS * ROWS];
+	private static final Object[] SAMPLE_ITEMS = new Object[COLUMNS * ROWS];
+	private final Object[] stacks = new Object[COLUMNS * ROWS];
 	private boolean shown;
 	private boolean background;
 	private int cell;
@@ -30,26 +28,25 @@ final class InventoryView extends ModuleView {
 		background = state.bool(Inventory.HUD_BACKGROUND);
 		if (mode == SAMPLE || mode == PLACEHOLDER) {
 			if (SAMPLE_ITEMS[0] == null) {
-				java.util.Arrays.fill(SAMPLE_ITEMS, ItemStack.EMPTY);
-				SAMPLE_ITEMS[0] = new ItemStack(Items.COBBLESTONE, 64);
-				SAMPLE_ITEMS[3] = new ItemStack(Items.TORCH, 23);
-				SAMPLE_ITEMS[10] = new ItemStack(Items.IRON_PICKAXE);
-				SAMPLE_ITEMS[14] = new ItemStack(Items.BREAD, 12);
-				SAMPLE_ITEMS[25] = new ItemStack(Items.ENDER_PEARL, 8);
+				java.util.Arrays.fill(SAMPLE_ITEMS, ItemPainter.none());
+				SAMPLE_ITEMS[0] = ItemPainter.sample("cobblestone", 64);
+				SAMPLE_ITEMS[3] = ItemPainter.sample("torch", 23);
+				SAMPLE_ITEMS[10] = ItemPainter.sample("iron_pickaxe", 1);
+				SAMPLE_ITEMS[14] = ItemPainter.sample("bread", 12);
+				SAMPLE_ITEMS[25] = ItemPainter.sample("ender_pearl", 8);
 			}
 			System.arraycopy(SAMPLE_ITEMS, 0, stacks, 0, stacks.length);
 			shown = true;
 			return;
 		}
-		LocalPlayer player = Minecraft.getInstance().player;
-		if (!state.bool(Inventory.HUD) || player == null) {
+		if (!state.bool(Inventory.HUD) || HudData.inventoryItem(9) == null) {
 			shown = false;
 			return;
 		}
 		boolean any = false;
 		for (int i = 0; i < stacks.length; i++) {
-			stacks[i] = player.getInventory().getItem(9 + i);
-			any |= !stacks[i].isEmpty();
+			stacks[i] = HudData.inventoryItem(9 + i);
+			any |= !ItemPainter.empty(stacks[i]);
 		}
 		shown = any || state.bool(Inventory.HUD_EMPTY);
 	}
@@ -79,8 +76,8 @@ final class InventoryView extends ModuleView {
 			if (background) {
 				p.fill(cx + 1, cy + 1, cx + cell - 1, cy + cell - 1, 0x30FFFFFF);
 			}
-			ItemStack stack = stacks[i];
-			if (stack != null && !stack.isEmpty()) {
+			Object stack = stacks[i];
+			if (!ItemPainter.empty(stack)) {
 				p.item(stack, cx + inset, cy + inset, item, null);
 			}
 		}

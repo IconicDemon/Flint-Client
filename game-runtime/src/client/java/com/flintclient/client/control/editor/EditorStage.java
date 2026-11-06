@@ -3,6 +3,11 @@ package com.flintclient.client.control.editor;
 import com.flintclient.client.control.hud.ScaleSteps;
 import com.flintclient.client.control.hud.VanillaAreas;
 import com.flintclient.client.control.hud.render.HudScene;
+import com.flintclient.client.platform.Clock;
+import com.flintclient.client.platform.HudData;
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
+import com.flintclient.client.platform.Services;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.render.TextLine;
@@ -10,8 +15,6 @@ import com.flintclient.client.ui.kit.Kit;
 import com.flintclient.client.ui.kit.Node;
 import com.flintclient.client.ui.kit.Tokens2;
 import com.flintclient.client.ui.kit.Type;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -82,8 +85,7 @@ final class EditorStage extends Node {
 	}
 
 	private static boolean shiftDown() {
-		return com.flintclient.client.control.platform.Mc263ControlPlatform.keyDown(com.mojang.blaze3d.platform.InputConstants.KEY_LSHIFT)
-			|| com.flintclient.client.control.platform.Mc263ControlPlatform.keyDown(com.mojang.blaze3d.platform.InputConstants.KEY_RSHIFT);
+		return Services.keyDown(Keys.LEFT_SHIFT) || Services.keyDown(Keys.RIGHT_SHIFT);
 	}
 
 	@Override
@@ -102,7 +104,7 @@ final class EditorStage extends Node {
 	}
 
 	@Override
-	public boolean keyDown(KeyEvent event) {
+	public boolean keyDown(KeyInput event) {
 		// Enter or Space: the next module that is shown (Shift: the previous one), so every module can be reached.
 		if (event.isSelection()) {
 			if (editor.selectNext(event.hasShiftDown() ? -1 : 1) && screen() != null) {
@@ -123,8 +125,18 @@ final class EditorStage extends Node {
 
 	private final float[] box = new float[4];
 
+	/** The editor's marks and words over the HUD; the words in Minecraft's font, as the rest of the Right Shift menu. */
 	@Override
 	protected void paint(Canvas c) {
+		int font = com.flintclient.client.render.PixelFace.begin(com.flintclient.client.render.PixelFace.BY_SIZE);
+		try {
+			paintMarks(c);
+		} finally {
+			com.flintclient.client.render.PixelFace.end(font);
+		}
+	}
+
+	private void paintMarks(Canvas c) {
 		HudScene scene = editor.scene();
 		int hovered = editor.hovered();
 		int selected = editor.selected();
@@ -137,18 +149,16 @@ final class EditorStage extends Node {
 			int y1 = c.px(box[3]) + g;
 			c.ring(x0, y0, x1 - x0, y1 - y0, c.px(2), 1, HOVER_OUTLINE);
 		}
-		if (!editor.chromeHidden()) {
-			// The rest of the selection: a thin ember outline each; the primary gets the brackets and handle.
-			for (int i = 0; i < scene.size(); i++) {
-				if (i != selected && editor.inGroup(i) && scene.state(i) != HudScene.OFF) {
-					rect(scene, i, box);
-					int g = c.px(1);
-					c.ring(c.px(box[0]) - g, c.px(box[1]) - g, c.px(box[2] - box[0]) + 2 * g, c.px(box[3] - box[1]) + 2 * g, c.px(2), 1,
-						Palette.withAlpha(Tokens2.EMBER, 0.8F));
-				}
+		// The rest of the selection: a thin ember outline each; the primary gets the brackets and handle.
+		for (int i = 0; i < scene.size(); i++) {
+			if (i != selected && editor.inGroup(i) && scene.state(i) != HudScene.OFF) {
+				rect(scene, i, box);
+				int g = c.px(1);
+				c.ring(c.px(box[0]) - g, c.px(box[1]) - g, c.px(box[2] - box[0]) + 2 * g, c.px(box[3] - box[1]) + 2 * g, c.px(2), 1,
+					Palette.withAlpha(Tokens2.EMBER, 0.8F));
 			}
 		}
-		if (selected >= 0 && scene.state(selected) != HudScene.OFF && !editor.chromeHidden()) {
+		if (selected >= 0 && scene.state(selected) != HudScene.OFF) {
 			paintSelection(c, scene, selected);
 		}
 		if (editor.selectionBox(box)) {
@@ -198,7 +208,7 @@ final class EditorStage extends Node {
 	 * after a few seconds.
 	 */
 	private void paintHint(Canvas c) {
-		long now = net.minecraft.util.Util.getMillis();
+		long now = Clock.millis();
 		if (hintStart == 0) {
 			hintStart = now;
 			hintShown = !hintSeen;
@@ -213,7 +223,7 @@ final class EditorStage extends Node {
 			return;
 		}
 		// Just above Minecraft's hotbar and health bars, so it never sits on them.
-		int vanilla = (int) Math.round(Minecraft.getInstance().getWindow().getGuiScale()
+		int vanilla = (int) Math.round(HudData.guiScale()
 			* (VanillaAreas.HOTBAR_HEIGHT + VanillaAreas.STATUS_HEIGHT));
 		int center = c.px(y + h) - vanilla - c.px(14);
 		int cx = c.px(x + w / 2);
@@ -229,16 +239,11 @@ final class EditorStage extends Node {
 	private long hintStart;
 	private final TextLine hint = new TextLine(Type.NOTE, "Drag to move · Scroll to resize · Right-drag selects several · ? lists every key");
 
+	/** "1.25×", "2×": a size as the editor shows it. */
 	static String scaleLabel(float scale) {
-		int step = ScaleSteps.index(scale);
-		return switch (step) {
-			case 0 -> "0.5×";
-			case 1 -> "0.75×";
-			case 3 -> "1.25×";
-			case 4 -> "1.5×";
-			case 5 -> "2×";
-			default -> "1×";
-		};
+		String n = String.format(java.util.Locale.ROOT, "%.2f", ScaleSteps.snap(scale));
+		n = n.contains(".") ? n.replaceAll("0+$", "").replaceAll("\\.$", "") : n;
+		return n + "×";
 	}
 
 	/** The focus ring (keyboard focus only): around the selection, or inside the screen's edge with none. */

@@ -257,6 +257,12 @@ public enum Icon {
 	FLAG(() -> new Sdf.Path()
 		.move(5, 21.5F).line(5, 3)
 		.move(5, 3.5F).line(19, 3.5F).line(15.5F, 8.25F).line(19, 13).line(5, 13)),
+	/** A heart: a favourite (off; {@link FilledIcon#HEART} is on). */
+	HEART(() -> new Sdf.Path()
+		.move(12, 20).line(4.82F, 12.18F)
+		.arc(8, 9, 4.5F, 135, 332.75F)
+		.arc(16, 9, 4.5F, 207.25F, 405)
+		.line(12, 20)),
 	/** A heart with a crack through it: hit colour. */
 	HEART_CRACK(() -> new Sdf.Path()
 		.move(12, 20).line(4.82F, 12.18F)
@@ -569,6 +575,25 @@ public enum Icon {
 	}
 
 	/** The star's ten corners (x, y pairs), shared by the outline and {@link FilledIcon#STAR}. */
+	/** The heart's outline as corners (x, y pairs), shared with {@link FilledIcon#HEART}: two arcs meeting at a point. */
+	static float[] heartPoints() {
+		java.util.List<float[]> pts = new java.util.ArrayList<>();
+		pts.add(new float[] {12, 20});
+		for (float a = 135; a <= 332.75F; a += 11) {
+			pts.add(new float[] {8 + 4.5F * (float) Math.cos(Math.toRadians(a)), 9 + 4.5F * (float) Math.sin(Math.toRadians(a))});
+		}
+		for (float a = 207.25F; a <= 405; a += 11) {
+			pts.add(new float[] {16 + 4.5F * (float) Math.cos(Math.toRadians(a)), 9 + 4.5F * (float) Math.sin(Math.toRadians(a))});
+		}
+		pts.add(new float[] {19.18F, 12.18F});
+		float[] xy = new float[pts.size() * 2];
+		for (int i = 0; i < pts.size(); i++) {
+			xy[2 * i] = pts.get(i)[0];
+			xy[2 * i + 1] = pts.get(i)[1];
+		}
+		return xy;
+	}
+
 	static float[] starPoints() {
 		float[] xy = new float[20];
 		for (int i = 0; i < 10; i++) {

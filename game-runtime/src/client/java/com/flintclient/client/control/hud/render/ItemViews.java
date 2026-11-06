@@ -2,9 +2,8 @@ package com.flintclient.client.control.hud.render;
 
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.mods.HudMods;
-import com.flintclient.client.control.platform.Mc263GameData;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import com.flintclient.client.platform.HudData;
+import com.flintclient.client.platform.ItemPainter;
 
 /** The Item Counter and Cooldowns lists. */
 final class ItemViews {
@@ -12,7 +11,7 @@ final class ItemViews {
 	}
 
 	static final class CounterView extends ItemListView {
-		private static final boolean[] ON = new boolean[Mc263GameData.GROUPS];
+		private static final boolean[] ON = new boolean[HudData.GROUPS];
 
 		CounterView(int surface) {
 			super(HudMods.ItemCounter.ID, surface);
@@ -25,37 +24,42 @@ final class ItemViews {
 
 		@Override
 		int collect(ModuleState state, int mode, long nowNanos) {
-			ON[Mc263GameData.ARROWS] = state.bool(HudMods.ItemCounter.ARROWS);
-			ON[Mc263GameData.GOLDEN_APPLES] = state.bool(HudMods.ItemCounter.GOLDEN_APPLES);
-			ON[Mc263GameData.PEARLS] = state.bool(HudMods.ItemCounter.PEARLS);
-			ON[Mc263GameData.TOTEMS] = state.bool(HudMods.ItemCounter.TOTEMS);
-			ON[Mc263GameData.FIREWORKS] = state.bool(HudMods.ItemCounter.FIREWORKS);
-			ON[Mc263GameData.BLOCKS] = state.bool(HudMods.ItemCounter.BLOCKS);
+			ON[HudData.ARROWS] = state.bool(HudMods.ItemCounter.ARROWS);
+			ON[HudData.GOLDEN_APPLES] = state.bool(HudMods.ItemCounter.GOLDEN_APPLES);
+			ON[HudData.PEARLS] = state.bool(HudMods.ItemCounter.PEARLS);
+			ON[HudData.TOTEMS] = state.bool(HudMods.ItemCounter.TOTEMS);
+			ON[HudData.FIREWORKS] = state.bool(HudMods.ItemCounter.FIREWORKS);
+			ON[HudData.BLOCKS] = state.bool(HudMods.ItemCounter.BLOCKS);
 			boolean sample = mode == SAMPLE;
 			boolean skip = state.bool(HudMods.ItemCounter.SKIP_ZERO) && !sample;
-			if (!sample && !Mc263GameData.inWorld()) {
+			if (!sample && !HudData.inWorld()) {
 				return 0;
 			}
 			int n = 0;
-			for (int g = 0; g < Mc263GameData.GROUPS && n < MAX; g++) {
+			for (int g = 0; g < HudData.GROUPS && n < MAX; g++) {
 				if (!ON[g]) {
 					continue;
 				}
-				int count = sample ? 64 - 9 * g : Mc263GameData.groupCount(g);
+				Object icon = HudData.groupIcon(g);
+				if (icon == null) {
+					// A group this game doesn't have (1.8.9 has no totems).
+					continue;
+				}
+				int count = sample ? 64 - 9 * g : HudData.groupCount(g);
 				if (count == 0 && skip) {
 					continue;
 				}
-				stacks[n] = Mc263GameData.groupIcon(g);
+				stacks[n] = icon;
 				text().integer(count);
 				setText(n++);
 			}
-			int extras = Mc263GameData.setExtraItems(state.text(HudMods.ItemCounter.EXTRA));
+			int extras = HudData.setExtraItems(state.text(HudMods.ItemCounter.EXTRA));
 			for (int i = 0; i < extras && n < MAX; i++) {
-				int count = sample ? 8 : Mc263GameData.extraCount(i);
+				int count = sample ? 8 : HudData.extraCount(i);
 				if (count == 0 && skip) {
 					continue;
 				}
-				stacks[n] = Mc263GameData.extraIcon(i);
+				stacks[n] = HudData.extraIcon(i);
 				text().integer(count);
 				setText(n++);
 			}
@@ -69,8 +73,8 @@ final class ItemViews {
 	}
 
 	static final class CooldownView extends ItemListView {
-		private static final ItemStack[] SAMPLE_STACKS = new ItemStack[2];
-		private final ItemStack[] found = new ItemStack[MAX];
+		private static final Object[] SAMPLE_STACKS = new Object[2];
+		private final Object[] found = new Object[MAX];
 		private final float[] left = new float[MAX];
 		private final int[] ticks = new int[MAX];
 
@@ -89,8 +93,8 @@ final class ItemViews {
 			int n;
 			if (mode == SAMPLE) {
 				if (SAMPLE_STACKS[0] == null) {
-					SAMPLE_STACKS[0] = new ItemStack(Items.ENDER_PEARL);
-					SAMPLE_STACKS[1] = new ItemStack(Items.SHIELD);
+					SAMPLE_STACKS[0] = ItemPainter.sample("ender_pearl", 1);
+					SAMPLE_STACKS[1] = ItemPainter.sample("shield", 1);
 				}
 				found[0] = SAMPLE_STACKS[0];
 				found[1] = SAMPLE_STACKS[1];
@@ -100,7 +104,7 @@ final class ItemViews {
 				ticks[1] = 70;
 				n = 2;
 			} else {
-				n = Mc263GameData.cooldowns(found, left, ticks, MAX, 0);
+				n = HudData.cooldowns(found, left, ticks, MAX, 0);
 			}
 			for (int i = 0; i < n; i++) {
 				stacks[i] = found[i];

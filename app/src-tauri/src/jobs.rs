@@ -42,16 +42,26 @@ pub struct Jobs {
 
 impl Default for Jobs {
     fn default() -> Self {
-        Self {
-            map: Mutex::new(Vec::new()),
-            cancel: Mutex::new(HashMap::new()),
-            last_emit: Mutex::new(HashMap::new()),
-            slots: Arc::new(tokio::sync::Semaphore::new(2)),
-        }
+        Self::with_slots(crate::storage::INSTALLS_DEFAULT as usize)
     }
 }
 
 impl Jobs {
+    /// Jobs that run `slots` at a time (Settings → Storage → "Installs at once", read when Flint starts).
+    pub fn with_slots(slots: usize) -> Self {
+        Self {
+            map: Mutex::new(Vec::new()),
+            cancel: Mutex::new(HashMap::new()),
+            last_emit: Mutex::new(HashMap::new()),
+            slots: Arc::new(tokio::sync::Semaphore::new(slots.max(1))),
+        }
+    }
+
+    /// Whether any job is waiting or running.
+    pub fn any_active(&self) -> bool {
+        self.map.lock().unwrap().iter().any(|j| j.state == "queued" || j.state == "running")
+    }
+
     pub fn create(&self, app: &AppHandle, kind: &str, profile_id: Option<&str>, title: &str, items_total: usize) -> (String, Arc<AtomicBool>) {
         let id = format!("j{}", random_hex(5));
         let job = Job {
@@ -124,10 +134,20 @@ impl Jobs {
         });
         self.cancel.lock().unwrap().remove(id);
         self.last_emit.lock().unwrap().remove(id);
+        // Settings → Troubleshooting → Error history.
+        if let (Err(error), false) = (outcome, cancelled) {
+            let title = self.map.lock().unwrap().iter().find(|j| j.id == id).map(|j| j.title.clone()).unwrap_or_default();
+            crate::troubleshoot::record(&app.state::<AppState>().paths.root, "job", &title, error, None);
+        }
     }
 
     pub fn is_cancelled(&self, id: &str) -> bool {
         self.cancel.lock().unwrap().get(id).is_some_and(|f| f.load(Ordering::Relaxed))
+    }
+
+    /// Whether a job for profile `id` is waiting or running.
+    pub fn active_for(&self, id: &str) -> bool {
+        self.map.lock().unwrap().iter().any(|j| j.profile_id.as_deref() == Some(id) && (j.state == "queued" || j.state == "running"))
     }
 
     pub fn list(&self) -> Vec<Job> {
@@ -155,6 +175,19 @@ pub struct Fetch<'a> {
     pub expected: Expected<'a>,
     pub max_bytes: u64,
     pub allowed_hosts: &'a [&'a str],
+    /// One of several downloads running at once for this job: the job's file and byte counts are left to the caller (they
+    /// would jump between files), only cancellation is honoured.
+    pub quiet: bool,
+}
+
+/// Cap for a download whose source publishes no size. Every download is checked against its published hash,
+/// so this only stops a misbehaving host from filling the disk.
+pub const UNLISTED_MAX: u64 = 16 * 1024 * 1024 * 1024;
+
+/// The most a download may be: exactly the size its source lists for it, whatever that is (Flashback is
+/// about 200 MB, some resource packs are gigabytes), or `UNLISTED_MAX` when no size is listed.
+pub fn listed_cap(listed: Option<u64>) -> u64 {
+    listed.filter(|&size| size > 0).unwrap_or(UNLISTED_MAX)
 }
 
 pub fn host_allowed(url: &str, hosts: &[&str]) -> CmdResult<url::Url> {
@@ -184,15 +217,18 @@ pub async fn download_verified(app: &AppHandle, state: &AppState, job: &str, fet
         .map_err(|e| format!("Download failed: {e}"))?;
     let total = response.content_length();
     if total.is_some_and(|t| t > fetch.max_bytes) {
-        return Err(format!("{file_name} is larger than Flint allows for this kind of file"));
+        return Err(format!("{file_name} is larger than its source said it would be, so it wasn't installed"));
     }
-    state.jobs.update(app, job, false, |j| {
-        j.state = "running".into();
-        j.stage = "Downloading".into();
-        j.file = Some(file_name.clone());
-        j.bytes_done = 0;
-        j.bytes_total = total;
-    });
+    let quiet = fetch.quiet;
+    if !quiet {
+        state.jobs.update(app, job, false, |j| {
+            j.state = "running".into();
+            j.stage = "Downloading".into();
+            j.file = Some(file_name.clone());
+            j.bytes_done = 0;
+            j.bytes_total = total;
+        });
+    }
     let result: CmdResult<u64> = async {
         let mut out = std::fs::File::create(&part).map_err(err("Could not write the download"))?;
         let mut sha512 = Sha512::new();
@@ -206,19 +242,23 @@ pub async fn download_verified(app: &AppHandle, state: &AppState, job: &str, fet
             let chunk = chunk.map_err(|e| friendly_network(&e))?;
             done += chunk.len() as u64;
             if done > fetch.max_bytes {
-                return Err(format!("{file_name} is larger than Flint allows for this kind of file"));
+                return Err(format!("{file_name} is larger than its source said it would be, so it wasn't installed"));
             }
             sha512.update(&chunk);
             sha1.update(&chunk);
             out.write_all(&chunk).map_err(err("Could not write the download"))?;
-            state.jobs.update(app, job, true, |j| j.bytes_done = done);
+            if !quiet {
+                state.jobs.update(app, job, true, |j| j.bytes_done = done);
+            }
         }
         out.flush().map_err(err("Could not write the download"))?;
         drop(out);
-        state.jobs.update(app, job, false, |j| {
-            j.stage = "Verifying".into();
-            j.bytes_done = done;
-        });
+        if !quiet {
+            state.jobs.update(app, job, false, |j| {
+                j.stage = "Verifying".into();
+                j.bytes_done = done;
+            });
+        }
         let ok = match fetch.expected {
             Expected::Sha512(h) => hex::encode(sha512.finalize()).eq_ignore_ascii_case(h),
             Expected::Sha1(h) => hex::encode(sha1.finalize()).eq_ignore_ascii_case(h),
@@ -241,13 +281,20 @@ pub fn part_path(target: &Path) -> PathBuf {
     target.with_file_name(format!(".{name}{PART_SUFFIX}"))
 }
 
+/// Whether a folder in `profiles/` is a staging folder Flint made for a profile still being copied in (an import, a
+/// duplicate, a modpack): exactly `<id>.flint-importing` with a 12-character hex id. A profile's own folder can never look
+/// like that (`profilefolder::wanted`), so a player's profile named "... .flint-importing" is never taken for one.
+pub fn is_staging_name(name: &str) -> bool {
+    name.strip_suffix(".flint-importing").is_some_and(|id| id.len() == 12 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// Removes leftovers from downloads that were interrupted by a crash or forced quit.
 pub fn clean_partials(root: &Path) {
     let Ok(profiles) = std::fs::read_dir(root.join("profiles")) else { return };
     for profile in profiles.flatten() {
         let dir = profile.path();
         let name = profile.file_name().to_string_lossy().to_string();
-        if name.ends_with(".flint-importing") && dir.is_dir() {
+        if is_staging_name(&name) && dir.is_dir() {
             let _ = std::fs::remove_dir_all(&dir);
             continue;
         }
@@ -305,4 +352,18 @@ pub fn job_cancel(state: State<'_, AppState>, id: String) {
 #[tauri::command]
 pub fn job_dismiss(state: State<'_, AppState>, id: String) {
     state.jobs.dismiss(&id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_download_may_be_as_large_as_its_source_lists() {
+        // Flashback 0.43.6 for 26.3 is about 200 MB; no kind of content has a fixed ceiling.
+        assert_eq!(listed_cap(Some(205_000_000)), 205_000_000);
+        assert_eq!(listed_cap(Some(3 * 1024 * 1024 * 1024)), 3 * 1024 * 1024 * 1024);
+        assert_eq!(listed_cap(None), UNLISTED_MAX);
+        assert_eq!(listed_cap(Some(0)), UNLISTED_MAX);
+    }
 }

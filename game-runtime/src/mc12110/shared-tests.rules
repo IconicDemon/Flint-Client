@@ -1,0 +1,6 @@
+# The unit tests (src/test/java) as Minecraft 1.21.10 runs them, on top of 1.21.11's: shared-sources.rules' renames, then
+# these (same forms; paths relative to src/test/java's com/flintclient/client).
+
+file render/TextLineTest.java
+# 1.21.10's glyphs make a plain TextRenderable (1.21.11 added TextRenderable.Styled).
+s public TextRenderable\.Styled createGlyph\( => public TextRenderable createGlyph(

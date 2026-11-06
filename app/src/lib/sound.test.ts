@@ -85,6 +85,21 @@ test("interaction cues stay quieter than outcome cues", () => {
   }
 });
 
+test("friends cues are soft, short and below success", () => {
+  const loudest = (cue: keyof typeof CUES) => Math.max(...CUES[cue].map((n) => n.gain));
+  const length = (cue: keyof typeof CUES) => Math.max(...CUES[cue].map((n) => n.at + n.dur));
+  for (const cue of ["message", "request", "online", "sent"] as const) {
+    assert.ok(CUES[cue].length > 0, cue);
+    assert.ok(loudest(cue) < loudest("success"), `${cue} is quieter than success`);
+    assert.ok(length(cue) <= 0.45, `${cue} is short`);
+    assert.ok(CUES[cue].every((n) => (n.type ?? "sine") === "sine"), `${cue} is a soft sine`);
+    const { ui, audio } = engine();
+    assert.equal(ui.play(cue), true);
+    assert.ok(audio.scheduled.length > 0);
+  }
+  assert.ok(loudest("sent") < loudest("message"), "your own send is the quietest");
+});
+
 test("the volume setting scales the master level and Off silences everything", () => {
   const { ui, audio } = engine();
   ui.configure(true, 0.25);

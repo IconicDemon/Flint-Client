@@ -3,7 +3,8 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { api, initBridge } from "./lib/api";
 import { describeBootFailure, withTimeout } from "./lib/boot";
-import { applyAppearance, normalizeSettings, SettingsProvider } from "./lib/settings";
+import { applyAppearance, normalizeSettings, SettingsProvider, useSettings } from "./lib/settings";
+import { setLanguage, useT } from "./lib/i18n";
 import { StoreProvider } from "./lib/store";
 import { ToastProvider } from "./ui/overlays";
 import { PerfArea, perfMark } from "./lib/perf";
@@ -17,6 +18,10 @@ import "./styles/library.css";
 import "./styles/flintai.css";
 import "./styles/profiles.css";
 import "./styles/onboarding.css";
+import "./styles/import.css";
+import "./styles/friends.css";
+import "./styles/store.css";
+import "./styles/partners.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
@@ -38,6 +43,8 @@ async function boot() {
   perfMark("bootData");
   const settings = normalizeSettings(rawSettings);
   applyAppearance(settings, window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  // The first screen appears in the player's language, never English first.
+  await setLanguage(settings.language);
   document.documentElement.dataset.platform = info.platform;
   root.render(
     <React.StrictMode>
@@ -45,6 +52,7 @@ async function boot() {
         <SettingsProvider initial={settings}>
           <StoreProvider info={info}>
             <PerfArea id="app">
+              <LanguageSync />
               <App onboarding={onboarding} />
             </PerfArea>
           </StoreProvider>
@@ -59,7 +67,21 @@ async function boot() {
   }
 }
 
+/** Settings → Language applies at once; "System default" also follows the computer's language when it changes. */
+function LanguageSync() {
+  const { language } = useSettings().settings;
+  React.useEffect(() => {
+    void setLanguage(language);
+    if (language !== "system") return;
+    const onChange = () => void setLanguage("system");
+    window.addEventListener("languagechange", onChange);
+    return () => window.removeEventListener("languagechange", onChange);
+  }, [language]);
+  return null;
+}
+
 function StartupFailure({ error }: { error: unknown }) {
+  const t = useT();
   const failure = describeBootFailure(error);
   const [retrying, setRetrying] = React.useState(false);
   return (
@@ -77,10 +99,10 @@ function StartupFailure({ error }: { error: unknown }) {
           window.location.reload();
         }}
       >
-        {retrying ? "Retrying…" : "Try again"}
+        {retrying ? t("boot.retrying") : t("common.tryAgain")}
       </button>
       <details className="fatal-details">
-        <summary>Show details</summary>
+        <summary>{t("common.showDetails")}</summary>
         <pre>{failure.detail}</pre>
       </details>
     </div>

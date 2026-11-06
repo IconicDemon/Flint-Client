@@ -80,11 +80,13 @@ public final class Backdrop {
 			counted = true;
 			GpuResourceTracker.get().register(GpuResourceTracker.Kind.BACKDROP, ARTWORK_BYTES);
 		}
-		int w = c.px(widthGui);
-		int h = c.px(heightGui);
+		// One unit past each edge: a screen's size in units is the window's rounded down (1080 px at 2.75 px a unit is 392
+		// units, 1078 px), and the strip left over showed the clear colour (Mojang's red after the loading screen on 1.21.1).
+		int w = c.px(widthGui + 1);
+		int h = c.px(heightGui + 1);
 		float[] crop = cover(w, h, CROP);
-		c.graphics().blit(RenderPipelines.GUI_TEXTURED, ARTWORK, 0, 0, crop[0], crop[1], w, h,
-			Math.round(crop[2]), Math.round(crop[3]), ARTWORK_W, ARTWORK_H);
+		c.frame().graphics().blit(RenderPipelines.GUI_TEXTURED, ARTWORK, 0, 0, crop[0], crop[1], w, h,
+			Math.round(crop[2]), Math.round(crop[3]), ARTWORK_W, ARTWORK_H, c.tint(0xFFFFFFFF));
 		c.fill(0, 0, w, h, Palette.withAlpha(Palette.BACKGROUND_TOP, veil));
 	}
 

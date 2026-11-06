@@ -17,4 +17,11 @@ abstract class AbstractClientPlayerMixin {
 			callback.setReturnValue(modifier);
 		}
 	}
+
+	/** Zoom (Zoomify): the spyglass's own zoom (0.1) applies only when the two combine. */
+	@com.llamalad7.mixinextras.injector.ModifyExpressionValue(method = "getFieldOfViewModifier", at = @At(value = "CONSTANT",
+		args = "floatValue=0.1F"))
+	private float flint$spyglassFov(float multiplier) {
+		return com.flintclient.client.control.platform.Mc263Zoom.spyglassFov(multiplier);
+	}
 }

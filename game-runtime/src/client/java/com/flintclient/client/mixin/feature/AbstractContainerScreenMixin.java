@@ -16,10 +16,15 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Inventory: the search box, highlights and lock marks, the lock and search keys, and the click guards. */
+/**
+ * Inventory: the search box, highlights, lock and binding marks and slot decorations, the lock, bind and search keys, the
+ * click guards and bound-slot swaps, and the open/close animations (closing waits for the animation; clicks follow the
+ * moving container and are ignored while it leaves).
+ */
 @Mixin(AbstractContainerScreen.class)
 abstract class AbstractContainerScreenMixin extends Screen {
 	@Shadow
@@ -41,6 +46,7 @@ abstract class AbstractContainerScreenMixin extends Screen {
 
 	@Inject(method = "init", at = @At("TAIL"))
 	private void flint$init(CallbackInfo callback) {
+		Mc263Inventory.opened((AbstractContainerScreen<?>) (Object) this);
 		flint$search = Mc263Inventory.searchBox((AbstractContainerScreen<?>) (Object) this, leftPos, topPos, imageWidth, imageHeight);
 		if (flint$search != null) {
 			addRenderableWidget(flint$search);
@@ -49,7 +55,7 @@ abstract class AbstractContainerScreenMixin extends Screen {
 
 	@Inject(method = "extractSlots", at = @At("TAIL"))
 	private void flint$slots(GuiGraphicsExtractor graphics, int mouseX, int mouseY, CallbackInfo callback) {
-		Mc263Inventory.decorateSlots(graphics, (AbstractContainerScreen<?>) (Object) this);
+		Mc263Inventory.decorateSlots(graphics, (AbstractContainerScreen<?>) (Object) this, hoveredSlot, imageWidth, imageHeight);
 	}
 
 	@Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
@@ -59,8 +65,19 @@ abstract class AbstractContainerScreenMixin extends Screen {
 		}
 	}
 
-	@Inject(method = "mouseClicked", at = @At("HEAD"))
+	@ModifyVariable(method = {"mouseClicked", "mouseReleased", "mouseDragged"}, at = @At("HEAD"), argsOnly = true)
+	private MouseButtonEvent flint$movedPointer(MouseButtonEvent event) {
+		double x = Mc263Inventory.pointer(this, event.x(), false);
+		double y = Mc263Inventory.pointer(this, event.y(), true);
+		return x == event.x() && y == event.y() ? event : new MouseButtonEvent(x, y, event.buttonInfo());
+	}
+
+	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
 	private void flint$click(MouseButtonEvent event, boolean doubleClick, CallbackInfoReturnable<Boolean> callback) {
+		if (Mc263Inventory.closing(this)) {
+			callback.setReturnValue(true);
+			return;
+		}
 		EditBox search = flint$search;
 		if (search != null && search.isFocused() && !search.isMouseOver(event.x(), event.y())) {
 			search.setFocused(false);
@@ -71,7 +88,15 @@ abstract class AbstractContainerScreenMixin extends Screen {
 	@Inject(method = "slotClicked(Lnet/minecraft/world/inventory/Slot;IILnet/minecraft/world/inventory/ContainerInput;)V", at = @At("HEAD"),
 		cancellable = true)
 	private void flint$slotClicked(Slot slot, int slotId, int buttonNum, ContainerInput input, CallbackInfo callback) {
-		if (Mc263Inventory.blockClick((AbstractContainerScreen<?>) (Object) this, slot, slotId, buttonNum, input)) {
+		AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) (Object) this;
+		if (Mc263Inventory.blockClick(screen, slot, slotId, buttonNum, input) || Mc263Inventory.bindingClick(screen, slot, input)) {
+			callback.cancel();
+		}
+	}
+
+	@Inject(method = "onClose", at = @At("HEAD"), cancellable = true)
+	private void flint$close(CallbackInfo callback) {
+		if (Mc263Inventory.deferClose((AbstractContainerScreen<?>) (Object) this)) {
 			callback.cancel();
 		}
 	}

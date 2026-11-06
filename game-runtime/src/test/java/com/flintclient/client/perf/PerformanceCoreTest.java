@@ -125,7 +125,7 @@ class PerformanceCoreTest {
 	void everyModuleHasItsOwnId() {
 		List<String> ids = PerformanceCore.all().stream().map(PerfModule::id).toList();
 		assertEquals(List.of("dev.frameStatsLog", "menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore",
-			"dev.gpuResources", "dev.fontTiming", "networkCore", "dev.network"), ids);
+			"dev.gpuResources", "dev.fontTiming", "networkCore", "dev.network", "networkTuning"), ids);
 		assertEquals(ids.size(), Set.copyOf(ids).size());
 	}
 
@@ -138,24 +138,24 @@ class PerformanceCoreTest {
 
 	@Test
 	void theMenuModulesFollowAutomaticOptimization() {
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"), enabledOfAll("{}", NO_MODS));
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"), enabledOfAll("{}", NO_MODS));
 		assertEquals(List.of("graphicsCore", "networkCore"), enabledOfAll("{\"automaticOptimization\": false}", NO_MODS),
 			"graphicsCore and networkCore only read, so they aren't optimizations");
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{}", Compat.of(id -> true)), "other performance mods don't touch Flint's menu");
 	}
 
 	@Test
 	void eachMenuModuleCanBeSwitchedOnItsOwn() {
-		assertEquals(List.of("menuResources", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"atlasBatching\": false}}", NO_MODS));
-		assertEquals(List.of("atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"menuResources\": false}}", NO_MODS));
-		assertEquals(List.of("menuResources", "atlasBatching", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"decodeExecutor\": false}}", NO_MODS));
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"fontPreload\": false}}", NO_MODS));
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "networkCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"graphicsCore\": false}}", NO_MODS));
 		assertEquals(List.of("decodeExecutor", "graphicsCore", "networkCore"),
 			enabledOfAll("{\"automaticOptimization\": false, \"modules\": {\"decodeExecutor\": true}}", NO_MODS));
@@ -167,26 +167,26 @@ class PerformanceCoreTest {
 
 	@Test
 	void theNetworkCoreOnlyObservesSoItIsAlwaysOnUnlessOverridden() {
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkTuning"),
 			enabledOfAll("{\"modules\": {\"networkCore\": false}}", NO_MODS), "an override switches it off for diagnosis");
 		assertEquals(List.of("graphicsCore", "networkCore", "dev.network"),
 			enabledOfAll("{\"automaticOptimization\": false, \"dev\": {\"network\": true}}", NO_MODS),
 			"its developer log follows its own flag");
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"dev\": {\"network\": true}, \"modules\": {\"dev.network\": false}}", NO_MODS));
 	}
 
 	@Test
 	void theDeveloperLogsFollowTheirFlagsOnly() {
 		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "dev.gpuResources", "dev.fontTiming",
-			"networkCore"), enabledOfAll("{\"dev\": {\"gpuResources\": true, \"fontTiming\": true}}", NO_MODS));
+			"networkCore", "networkTuning"), enabledOfAll("{\"dev\": {\"gpuResources\": true, \"fontTiming\": true}}", NO_MODS));
 		assertEquals(List.of("graphicsCore", "dev.fontTiming", "networkCore"),
 			enabledOfAll("{\"automaticOptimization\": false, \"dev\": {\"fontTiming\": true}}", NO_MODS),
 			"font timing stays available with fontPreload off, for the before and after");
 		assertEquals(List.of("graphicsCore", "dev.gpuResources", "networkCore"),
 			enabledOfAll("{\"automaticOptimization\": false, \"modules\": {\"dev.gpuResources\": true}}", NO_MODS),
 			"a module override (which the launcher keeps) turns one on without the dev flag");
-		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore"),
+		assertEquals(List.of("menuResources", "atlasBatching", "decodeExecutor", "fontPreload", "graphicsCore", "networkCore", "networkTuning"),
 			enabledOfAll("{\"dev\": {\"gpuResources\": true}, \"modules\": {\"dev.gpuResources\": false}}", NO_MODS));
 	}
 

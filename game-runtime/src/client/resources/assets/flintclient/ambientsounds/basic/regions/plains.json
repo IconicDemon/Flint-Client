@@ -1,0 +1,81 @@
+{
+	"name": "plains",
+	"features": [
+		"grass"
+	],
+	"bad-regions": [
+		"ocean",
+		"forest",
+		"savanna",
+		"swamp",
+		"highland",
+		"nether",
+		"rain",
+		"taiga"
+	],
+	"temperature": {
+		"min": 0.2
+	},
+	"biomes": [
+		"plains",
+		"chaparral",
+		"field",
+		"flower",
+		"grass",
+		"oasis",
+		"tundra",
+		"mushroom*fields",
+		"darklands",
+		"badlands",
+		"pasture",
+		"rocky plateau",
+		"tropics plains",
+		"mycelium",
+		"firecracker_chaparral",
+		"pumpkin_valley",
+		"bayou",
+		"skyrise_vale"
+	],
+	"sounds": [
+		{
+			"name": "cricket",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_day",
+			"overall-raining": false,
+			"volume": 0.3,
+			"pause": {
+				"min": 20,
+				"max": 100
+			}
+		},
+		{
+			"name": "cricket-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cricket_night",
+			"overall-raining": false,
+			"volume": 0.4,
+			"pause": {
+				"min": 10,
+				"max": 60
+			}
+		},
+		{
+			"name": "cicadas-night",
+			"files": [
+				"minecraft:block.firefly_bush.idle"
+			],
+			"category": "cicadas",
+			"time": "night",
+			"volume": 0.3,
+			"pause": {
+				"min": 40,
+				"max": 200
+			},
+			"pitch": 1.4
+		}
+	]
+}

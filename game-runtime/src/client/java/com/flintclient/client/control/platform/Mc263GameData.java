@@ -65,6 +65,19 @@ public final class Mc263GameData {
 	}
 
 	/** The overworld clock in ticks (Minecraft's "day time"), or -1 outside a world. */
+	/** The address of the server you're on, "Singleplayer" in a local world (or one opened to LAN), or null outside a world. */
+	public static @Nullable String serverAddress() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
+			return null;
+		}
+		net.minecraft.client.multiplayer.ServerData data = mc.getCurrentServer();
+		if (data != null) {
+			return data.ip;
+		}
+		return mc.hasSingleplayerServer() ? "Singleplayer" : null;
+	}
+
 	public static long dayTicks() {
 		ClientLevel level = Minecraft.getInstance().level;
 		return level == null ? -1 : level.getOverworldClockTime();
@@ -99,7 +112,7 @@ public final class Mc263GameData {
 
 	public static float saturation() {
 		LocalPlayer p = player();
-		return p == null ? Float.NaN : p.getFoodData().getSaturationLevel();
+		return p == null ? Float.NaN : Mc263Food.saturation(p);
 	}
 
 	public static int food() {

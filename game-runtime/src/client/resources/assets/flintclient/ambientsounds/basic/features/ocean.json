@@ -1,0 +1,8 @@
+{
+    "name": "ocean",
+    "groups": [
+        "water"
+    ],
+    "low-count": 10000,
+    "high-count": 17000
+}

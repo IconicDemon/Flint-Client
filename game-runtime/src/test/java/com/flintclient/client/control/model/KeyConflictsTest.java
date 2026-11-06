@@ -18,8 +18,8 @@ class KeyConflictsTest {
 		ModuleState waypoints = layout.module(UtilityMods.Waypoints.ID);
 		zoom.setEnabled(true);
 		waypoints.setEnabled(true);
-		zoom.set(PlayerMods.Zoom.KEY, "key.keyboard.b");
-		List<String> uses = KeyConflicts.flintUses(layout, "key.keyboard.b", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id());
+		zoom.set(PlayerMods.Zoom.KEY, "key.keyboard.n");
+		List<String> uses = KeyConflicts.flintUses(layout, "key.keyboard.n", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id());
 		assertEquals(List.of("Waypoints: Create waypoint"), uses, "the setting itself isn't counted");
 		assertEquals("Also used by Waypoints: Create waypoint", KeyConflicts.warning(uses));
 	}
@@ -28,9 +28,24 @@ class KeyConflictsTest {
 	void offModulesAndNoKeyAreNoConflict() {
 		Layout layout = new Layout("default", "Default");
 		layout.module(UtilityMods.Waypoints.ID).setEnabled(false);
-		assertTrue(KeyConflicts.flintUses(layout, "key.keyboard.b", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id()).isEmpty());
+		assertTrue(KeyConflicts.flintUses(layout, "key.keyboard.n", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id()).isEmpty());
 		assertTrue(KeyConflicts.flintUses(layout, "", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id()).isEmpty());
 		assertNull(KeyConflicts.warning(List.of()));
+	}
+
+	@Test
+	void aKeyReadOnlyInChatSharesWithNothingOutsideChat() {
+		Layout layout = new Layout("default", "Default");
+		ModuleState zoom = layout.module(PlayerMods.Zoom.ID);
+		ModuleState chat = layout.module(UtilityMods.Chat.ID);
+		zoom.setEnabled(true);
+		chat.setEnabled(true);
+		zoom.set(PlayerMods.Zoom.KEY, "key.keyboard.f");
+		chat.set(UtilityMods.Chat.TAB_KEY, "key.keyboard.f");
+		assertEquals(List.of("Chat: Next tab key"),
+			KeyConflicts.flintUses(layout, "key.keyboard.f", UtilityMods.Chat.ID, UtilityMods.Chat.SEARCH_KEY.id()), "another chat key does");
+		assertEquals(List.of(), KeyConflicts.flintUses(layout, "key.keyboard.f", PlayerMods.Zoom.ID, PlayerMods.Zoom.KEY.id()),
+			"chat's keys don't act in play");
 	}
 
 	@Test
@@ -43,11 +58,11 @@ class KeyConflictsTest {
 		ModuleState zoom = new Layout("default", "Default").module(PlayerMods.Zoom.ID);
 		assertTrue(zoom.isDefault(PlayerMods.Zoom.LEVEL));
 		assertTrue(zoom.set(PlayerMods.Zoom.LEVEL, 9));
-		assertTrue(zoom.set(PlayerMods.Zoom.SMOOTH, false));
+		assertTrue(zoom.set(PlayerMods.Zoom.RETAIN, true));
 		assertFalse(zoom.isDefault(PlayerMods.Zoom.LEVEL));
 		assertTrue(zoom.resetSetting(PlayerMods.Zoom.LEVEL));
 		assertTrue(zoom.isDefault(PlayerMods.Zoom.LEVEL));
-		assertFalse(zoom.isDefault(PlayerMods.Zoom.SMOOTH), "the others stay as they were");
+		assertFalse(zoom.isDefault(PlayerMods.Zoom.RETAIN), "the others stay as they were");
 		assertFalse(zoom.resetSetting(PlayerMods.Zoom.LEVEL), "already the default: nothing changes");
 	}
 }

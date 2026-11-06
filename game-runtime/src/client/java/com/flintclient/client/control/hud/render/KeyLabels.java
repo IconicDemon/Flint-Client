@@ -1,5 +1,6 @@
 package com.flintclient.client.control.hud.render;
 
+import com.flintclient.client.platform.Keys;
 import java.util.Locale;
 import java.util.Map;
 
@@ -37,15 +38,16 @@ public final class KeyLabels {
 	}
 
 	/**
-	 * The label for a mouse button numbered as Minecraft numbers them (1 left, 2 middle, 3 right, then 4, 5,
-	 * ...): LMB, MMB, RMB, then M4, M5 and so on.
+	 * The label for a mouse button numbered as this Minecraft numbers them (26.3, SDL: 1 left, 2 middle, 3 right;
+	 * 26.2, GLFW: 0 left, 1 right, 2 middle; then the side buttons): LMB, MMB, RMB, then M4, M5 and so on. The
+	 * button constants are compile-time ints, so this stays pure.
 	 */
 	public static String mouse(int button) {
 		return switch (button) {
-			case 1 -> "LMB";
-			case 2 -> "MMB";
-			case 3 -> "RMB";
-			default -> "M" + button;
+			case Keys.MOUSE_LEFT -> "LMB";
+			case Keys.MOUSE_MIDDLE -> "MMB";
+			case Keys.MOUSE_RIGHT -> "RMB";
+			default -> "M" + (button - Keys.MOUSE_4 + 4);
 		};
 	}
 

@@ -1,11 +1,14 @@
-//! Minecraft settings, Flint's own in-game settings, resource and shader packs and mod settings, kept
-//! consistent between Flint profiles by Auto Sync (`autosync`), the one switch in Settings → General.
+//! Minecraft settings, Flint's own in-game settings, resource and shader packs, mod settings and the game's own
+//! lists (servers, saved hotbars, command history), kept consistent between Flint profiles by Auto Sync
+//! (`autosync`, Settings → Syncing).
 //!
 //! The pieces Auto Sync is built on, each tested on its own:
 //! - `options_txt`: options.txt read and written without losing a byte Flint doesn't change;
 //! - `registry` and `tables`: the real options of each verified Minecraft family, their key names and the
 //!   graphics preset rule; `versions`: which family an installed version is, read from its jar;
 //! - `plan`: whether a value fits another profile's version (key, key name, value, preset), with no I/O;
+//! - `legacy189`: Minecraft 1.8.9's options.txt (LWJGL 2 key codes, its own spellings) translated to and
+//!   from the modern form, key by key;
 //! - `flintfiles`: Flint's HUD layouts, Control Center preferences and server shortcuts;
 //! - `backup` and `apply`: backups, transactional writes with read-back and roll-back, and the start-up
 //!   cleanup of interrupted writes.
@@ -18,13 +21,21 @@ mod apply;
 pub mod autosync;
 mod backup;
 mod flintfiles;
+mod legacy189;
 mod options_txt;
 mod plan;
 mod registry;
+pub mod serverlist;
 mod tables;
 mod versions;
 
 pub use apply::clean_interrupted_writes;
+
+/// The Minecraft release that writes data version `data` (options.txt's `version:`), among the versions whose facts
+/// were read from their jars (`tables`). None for any other number: a profile import never guesses a version from it.
+pub fn release_of_data_version(data: u32) -> Option<&'static str> {
+    tables::FAMILIES.iter().flat_map(|family| family.versions.iter()).find(|(_, d)| *d == data).map(|(version, _)| *version)
+}
 
 #[cfg(test)]
 pub mod testkit {
@@ -37,7 +48,8 @@ pub mod testkit {
 
     /// A minimal client jar for `version` under `game_root/versions/`, whose version.json reports
     /// `data_version` and the resource pack format the way Minecraft's own jars do (the real values, read
-    /// from the 26.1–26.3 jars: 26.1.x 84.0, 26.2 88.0, 26.3 97.1).
+    /// from the 1.21.x and 26.1–26.3 jars: 1.21.1 34, 1.21.10 69.0, 1.21.11 75.0, 26.1.x 84.0, 26.2 88.0,
+    /// 26.3 97.1).
     pub fn install_version(game_root: &Path, version: &str, data_version: u32) {
         use std::io::Write;
         let dir = game_root.join("versions").join(version);
@@ -45,6 +57,9 @@ pub mod testkit {
         let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.join(format!("{version}.jar"))).unwrap());
         zip.start_file("version.json", zip::write::SimpleFileOptions::default()).unwrap();
         let pack = match data_version {
+            3955 => serde_json::json!({ "resource": 34, "data": 48 }),
+            4556 => serde_json::json!({ "resource_major": 69, "resource_minor": 0, "data_major": 88, "data_minor": 0 }),
+            4671 => serde_json::json!({ "resource_major": 75, "resource_minor": 0, "data_major": 94, "data_minor": 1 }),
             4786 | 4788 | 4790 => serde_json::json!({ "resource_major": 84, "resource_minor": 0, "data_major": 101, "data_minor": 1 }),
             4903 => serde_json::json!({ "resource_major": 88, "resource_minor": 0, "data_major": 107, "data_minor": 1 }),
             5023 => serde_json::json!({ "resource_major": 97, "resource_minor": 1, "data_major": 121, "data_minor": 0 }),
@@ -53,6 +68,14 @@ pub mod testkit {
         let json = serde_json::json!({ "id": version, "name": version, "world_version": data_version, "pack_version": pack, "java_version": 25, "stable": true });
         zip.write_all(json.to_string().as_bytes()).unwrap();
         zip.finish().unwrap();
+    }
+
+    /// The test build's stand-in for Mojang's 1.8.9 client jar (`legacy189::known_jar` accepts its SHA-1 in
+    /// tests only), installed under `game_root/versions/1.8.9/`.
+    pub fn install_legacy_189(game_root: &Path) {
+        let dir = game_root.join("versions").join("1.8.9");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("1.8.9.jar"), super::legacy189::TEST_JAR).unwrap();
     }
 
     /// Adds a profile to profiles.json with its folder (and its version installed when `data_version` is

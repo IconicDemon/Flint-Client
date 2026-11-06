@@ -4,13 +4,11 @@ import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.DigitRun;
 import com.flintclient.client.render.Icon;
 import com.flintclient.client.render.TextLine;
+import com.flintclient.client.platform.Frame;
+import com.flintclient.client.platform.ItemPainter;
+import com.flintclient.client.platform.Texture;
 import java.util.Arrays;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.ItemStack;
-import org.joml.Matrix3x2fStack;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Everything a module view draws goes through here, in physical pixels on the current {@link Canvas}: text
@@ -55,8 +53,8 @@ final class HudPen {
 		return c;
 	}
 
-	GuiGraphicsExtractor graphics() {
-		return c.graphics();
+	Frame frame() {
+		return c.frame();
 	}
 
 	// ---------- recording ----------
@@ -186,6 +184,40 @@ final class HudPen {
 		}
 	}
 
+	/**
+	 * {@link #text(HudText, int, int, int, int, int)} with the module's own shadow choice instead of the style's: Minecraft's
+	 * shadow (the colour at a quarter of its brightness, one text pixel down and right) or none.
+	 */
+	int text(HudText text, int role, int x, int baseline, int argb, int maxPx, boolean shadow) {
+		if (text.blank(s.theme)) {
+			return x;
+		}
+		TextLine line = text.line(surface, face(role));
+		boolean nested = enter();
+		try {
+			int w = maxPx == Integer.MAX_VALUE ? c.width(line) : c.width(line, maxPx);
+			if (recording) {
+				int cap = cap(role);
+				record(TEXT, x, baseline - cap, w, cap, argb, 0);
+			} else {
+				if (shadow) {
+					int off = Math.max(1, s.textScale);
+					int dark = argb & 0xFF000000 | (argb >> 16 & 255) / 4 << 16 | (argb >> 8 & 255) / 4 << 8 | (argb & 255) / 4;
+					drawLine(line, x + off, baseline + off, dark, maxPx);
+				}
+				drawLine(line, x, baseline, argb, maxPx);
+			}
+			return x + w;
+		} finally {
+			exit(nested);
+		}
+	}
+
+	/** Width in pixels of {@code text} in {@code role}'s face, at most {@code maxPx} (cut short with an ellipsis). */
+	int width(HudText text, int role, int maxPx) {
+		return Math.min(width(text, role), maxPx);
+	}
+
 	private void drawLine(TextLine line, int x, int baseline, int argb, int maxPx) {
 		if (maxPx == Integer.MAX_VALUE) {
 			c.text(line, x, baseline, argb);
@@ -239,14 +271,11 @@ final class HudPen {
 	}
 
 	private void turned(TextLine line, int cx, int cy, int w, int cap, int quarterTurns, int argb) {
-		Matrix3x2fStack pose = c.graphics().pose();
-		pose.pushMatrix();
+		c.frame().pushTurn(cx, cy, quarterTurns);
 		try {
-			pose.translate(cx, cy);
-			pose.rotate((float) (Math.PI / 2) * (quarterTurns & 3));
 			c.text(line, -w / 2, cap / 2, argb);
 		} finally {
-			pose.popMatrix();
+			c.frame().pop();
 		}
 	}
 
@@ -276,7 +305,7 @@ final class HudPen {
 		if (c.scale() == s.textScale) {
 			return false;
 		}
-		Canvas.begin(c.graphics(), s.textScale);
+		Canvas.begin(c.frame(), s.textScale);
 		return true;
 	}
 
@@ -290,10 +319,12 @@ final class HudPen {
 
 	/** The style's panel behind a module (nothing when the module has its panel off). */
 	void panel(int x, int y, int w, int h) {
-		if (!s.background || w <= 0 || h <= 0) {
+		if (!s.background && !s.borderAlone || w <= 0 || h <= 0) {
 			return;
 		}
-		box(x, y, w, h, s.radius, s.panel);
+		if (s.background) {
+			box(x, y, w, h, s.radius, s.panel);
+		}
 		if (s.outlinePx > 0 && !recording) {
 			c.ringCorners(x, y, w, h, s.radius, s.outlinePx, s.outline);
 		}
@@ -349,34 +380,63 @@ final class HudPen {
 		}
 	}
 
+	/** A Font Awesome Solid glyph filling the {@code size} px square (rasterised for exactly that size, so it stays crisp). */
+	void glyph(int codepoint, int x, int y, int size, int argb) {
+		if (recording) {
+			record(ICON, x, y, size, size, argb, 0);
+		} else {
+			c.glyph(codepoint, x, y, size, argb);
+		}
+	}
+
+	/** A whole {@code texW × texH} texture drawn into the {@code w × h} px box, tinted by {@code argb} (alpha fades it). */
+	void texture(Texture texture, int x, int y, int w, int h, int texW, int texH, int argb) {
+		if (recording) {
+			record(SPRITE, x, y, w, h, argb, 0);
+		} else {
+			c.texture(texture, x, y, w, h, texW, texH, argb);
+		}
+	}
+
+	/** Clips what is drawn until {@link #unclip} to the px box (nothing while recording: the miniature has no clips). */
+	void clip(int x0, int y0, int x1, int y1) {
+		if (!recording) {
+			c.pushClip(x0, y0, x1, y1);
+		}
+	}
+
+	void unclip() {
+		if (!recording) {
+			c.popClip();
+		}
+	}
+
 	/**
 	 * An item drawn {@code size} px square with its decorations (Minecraft's durability bar and stack count),
 	 * as the hotbar draws it. {@code count} is the stack count text (null: Minecraft's own, shown above 1).
 	 * Minecraft builds render state objects for every item it draws; that is its cost, as for the hotbar.
 	 */
-	void item(ItemStack stack, int x, int y, int size, String count) {
+	void item(Object stack, int x, int y, int size, @Nullable String count) {
+		item(stack, x, y, size, count, true);
+	}
+
+	/** {@link #item}, with or without Minecraft's decorations (its durability bar and count). */
+	void item(Object stack, int x, int y, int size, @Nullable String count, boolean decorations) {
 		if (recording) {
 			record(ITEM, x, y, size, size, 0xFFFFFFFF, 0);
 			return;
 		}
-		GuiGraphicsExtractor graphics = c.graphics();
-		Matrix3x2fStack pose = graphics.pose();
-		pose.pushMatrix();
-		pose.translate(x, y);
-		pose.scale(size / 16.0F, size / 16.0F);
-		graphics.item(stack, 0, 0);
-		graphics.itemDecorations(Minecraft.getInstance().font, stack, 0, 0, count);
-		pose.popMatrix();
+		ItemPainter.item(c.frame(), stack, x, y, size, count, decorations);
 	}
 
 	/** A GUI sprite (an effect icon), {@code size} px square, tinted (alpha fades it). */
-	void sprite(Identifier sprite, int x, int y, int size, int argb) {
+	void sprite(Object sprite, int x, int y, int size, int argb) {
 		if (recording) {
 			record(SPRITE, x, y, size, size, argb, 0);
 		} else {
 			int color = c.tint(argb);
 			if ((color >>> 24) != 0) {
-				c.graphics().blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, size, size, color);
+				ItemPainter.sprite(c.frame(), sprite, x, y, size, color);
 			}
 		}
 	}

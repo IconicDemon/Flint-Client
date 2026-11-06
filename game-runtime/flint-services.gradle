@@ -1,0 +1,68 @@
+// Where Flint's online services are, written into the runtime jar as assets/flintclient/flint-services.json (read by
+// control/store/FlintServices). Applied by every game-runtime build (26.x here, 1.21.x in legacy/, 1.8.9 in legacy189/).
+//
+// The address and the PUBLISHABLE key come from the build's environment, never from the repository:
+//   FLINT_SUPABASE_URL       https://<project ref>.supabase.co
+//   FLINT_SUPABASE_ANON_KEY  the project's publishable (anon) key: public by design, limited by the database
+// Set both for a release build. With neither, the jar says {"configured": false} and Share falls back to long codes.
+// A secret (service role) key is refused: it must never ship in a game.
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+def servicesUrl = providers.environmentVariable("FLINT_SUPABASE_URL").orElse("")
+def servicesKey = providers.environmentVariable("FLINT_SUPABASE_ANON_KEY").orElse("")
+def servicesResources = layout.buildDirectory.dir("generated/flint-services")
+
+def generateFlintServices = tasks.register("generateFlintServices") {
+	inputs.property("servicesUrl", servicesUrl)
+	inputs.property("servicesKey", servicesKey)
+	outputs.dir(servicesResources)
+	doLast {
+		def url = servicesUrl.get().trim()
+		def key = servicesKey.get().trim()
+		if (url.isEmpty() != key.isEmpty()) {
+			throw new GradleException("Set both FLINT_SUPABASE_URL and FLINT_SUPABASE_ANON_KEY, or neither.")
+		}
+		if (!url.isEmpty()) {
+			if (!(url ==~ /https:\/\/[A-Za-z0-9.-]+(:\d+)?\/?/) && !(url ==~ /http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?/)) {
+				throw new GradleException("FLINT_SUPABASE_URL must be the project's https address, e.g. https://<ref>.supabase.co")
+			}
+			// The "role" claim of a JWT-shaped key (Supabase's older keys).
+			def role = null
+			def parts = key.split("\\.")
+			if (parts.length == 3) {
+				try {
+					def claims = new JsonSlurper().parseText(new String(Base64.getUrlDecoder().decode(parts[1].replaceAll('=+$', '')), "UTF-8"))
+					role = claims instanceof Map ? claims.role : null
+				} catch (Exception ignored) {
+				}
+			}
+			if (key.startsWith("sb_secret_") || role == "service_role") {
+				throw new GradleException("FLINT_SUPABASE_ANON_KEY is a secret (service role) key. Use the publishable (anon) key.")
+			}
+		}
+		def root = servicesResources.get().asFile
+		root.deleteDir()
+		def target = new File(root, "assets/flintclient/flint-services.json")
+		target.parentFile.mkdirs()
+		def json = url.isEmpty() ? [configured: false]
+			: [configured: true, supabaseUrl: url.replaceAll('/+$', ''), supabaseAnonKey: key]
+		target.setText(JsonOutput.toJson(json), "UTF-8")
+		logger.lifecycle(url.isEmpty() ? "Flint services: not configured (profiles share as long codes)"
+			: "Flint services: ${url.replaceAll('/+$', '')}")
+	}
+}
+
+// The client source set where Loom splits the environments (26.x, 1.21.x); 1.8.9's single main one otherwise.
+def servicesSourceSet = sourceSets.findByName("client") ?: sourceSets.main
+servicesSourceSet.resources.srcDir(servicesResources)
+
+tasks.named(servicesSourceSet.processResourcesTaskName) {
+	dependsOn generateFlintServices
+}
+
+tasks.configureEach { task ->
+	if (task.name.toLowerCase().contains("sourcesjar")) {
+		task.dependsOn generateFlintServices
+	}
+}

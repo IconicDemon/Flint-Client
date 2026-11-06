@@ -138,6 +138,60 @@ class ModuleMigrationsTest {
 		assertEquals(LabelPosition.HIDDEN, cps.choice(ModuleSettings.Cps.LABEL_POSITION));
 	}
 
+	/** Effects as read from a file written before its Tiles layout: at {@code placement}, with {@code json} as its settings. */
+	private static ModuleState effectsAt(com.flintclient.client.control.hud.HudPlacement placement, String json) {
+		ModuleState effects = new ModuleState(ModuleRegistry.get(ModuleId.EFFECTS));
+		JsonObject settings = JsonParser.parseString(json).getAsJsonObject();
+		for (SettingDescriptor<?> setting : effects.descriptor().settings()) {
+			effects.setFromJson(setting, settings.get(setting.id()));
+		}
+		effects.setPlacement(placement);
+		ModuleMigrations.apply(effects, settings);
+		return effects;
+	}
+
+	@Test
+	void effectsNeverMovedGoToMinecraftsCornerAsTiles() {
+		com.flintclient.client.control.hud.HudPlacement corner = ModuleRegistry.get(ModuleId.EFFECTS).defaultPlacement();
+		assertEquals(com.flintclient.client.control.hud.HudPlacement.of(com.flintclient.client.control.hud.Anchor.TOP_RIGHT, 1, 1), corner);
+		ModuleState old = effectsAt(ModuleMigrations.EFFECTS_OLD_DEFAULT, "{\"layout\": \"vertical\", \"showNames\": true}");
+		assertEquals(corner, old.placement(), "the list's old default spot becomes the corner");
+		assertEquals(ModuleSettings.Effects.TILES, old.option(ModuleSettings.Effects.VIEW), "and the look is the tiles");
+		com.flintclient.client.control.hud.HudPlacement bigger = new com.flintclient.client.control.hud.HudPlacement(
+			com.flintclient.client.control.hud.Anchor.LEFT, 4, 0, 1.5F);
+		assertEquals(new com.flintclient.client.control.hud.HudPlacement(corner.anchor(), corner.x(), corner.y(), bigger.scale()),
+			effectsAt(bigger, "{}").placement(), "a resized list keeps its size");
+	}
+
+	@Test
+	void effectsThePlayerPlacedStayWhereTheyAre() {
+		com.flintclient.client.control.hud.HudPlacement placed = com.flintclient.client.control.hud.HudPlacement.of(
+			com.flintclient.client.control.hud.Anchor.BOTTOM_LEFT, 6, 30);
+		assertEquals(placed, effectsAt(placed, "{\"layout\": \"vertical\"}").placement());
+		assertEquals(ModuleMigrations.EFFECTS_OLD_DEFAULT, effectsAt(ModuleMigrations.EFFECTS_OLD_DEFAULT, "{\"view\": \"list\"}").placement(),
+			"a file from the Tiles era is never moved: the player put it there");
+	}
+
+	@Test
+	void effectsTimeMovesOntoTheTileWithTheLevel() {
+		com.flintclient.client.control.hud.HudPlacement corner = ModuleRegistry.get(ModuleId.EFFECTS).defaultPlacement();
+		assertEquals(1, effectsAt(corner, "{\"view\": \"tiles\", \"tileTime\": \"below\"}").option(ModuleSettings.Effects.TILE_TIME),
+			"the old default, below, becomes on the tile");
+		assertEquals(0, effectsAt(corner, "{\"view\": \"tiles\", \"tileTime\": \"below\", \"tileLevel\": \"roman\"}")
+			.option(ModuleSettings.Effects.TILE_TIME), "chosen after the level arrived, below stays");
+		assertEquals(1, new ModuleState(ModuleRegistry.get(ModuleId.EFFECTS)).option(ModuleSettings.Effects.TILE_LEVEL), "the numeral by default");
+	}
+
+	@Test
+	void theInventorySearchBarStartsOffAndItsOldKeyIsRetired() {
+		ModuleState inventory = read(com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID, "{\"search\": true}");
+		assertFalse(inventory.bool(com.flintclient.client.control.model.mods.UtilityMods.Inventory.SEARCH), "the old on-by-default value isn't read");
+		assertTrue(ModuleMigrations.retiredKeys(ModuleRegistry.get(com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID))
+			.contains("search"));
+		assertTrue(read(com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID, "{\"searchBar\": true}")
+			.bool(com.flintclient.client.control.model.mods.UtilityMods.Inventory.SEARCH), "turned on again, it stays on");
+	}
+
 	@Test
 	void retiredKeysAreListedPerModule() {
 		assertEquals(List.of("showRight"), ModuleMigrations.retiredKeys(ModuleRegistry.get(ModuleId.CPS)));

@@ -1,0 +1,12 @@
+{
+	"name": "betweenlands",
+	"dimension-names": [
+		"betweenlands"
+	],
+	"average-height": 0,
+	"surface-selector": {
+		"regions": [
+			"surface"
+		]
+	}
+}

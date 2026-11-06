@@ -128,6 +128,30 @@ class LayoutStoreTest {
 	}
 
 	@Test
+	void aNewProfileStartsWithEveryModOffWhateverIsInUse() {
+		LayoutStore store = store();
+		store.active().module(ModuleId.CPS).setEnabled(true);
+		store.active().setAppearance(store.active().appearance().withTheme(HudThemeId.CLASSIC));
+		LayoutResult made = store.createBlank("  Fresh  ");
+		assertTrue(made.succeeded());
+		Layout fresh = store.get(made.id());
+		assertNotNull(fresh);
+		assertEquals("Fresh", fresh.name());
+		assertEquals(0, fresh.enabledCount(), "every mod off");
+		assertEquals(new Layout("x", "x").appearance(), fresh.appearance(), "the default look, not the one in use");
+		assertEquals("default", store.activeId(), "creating doesn't switch");
+		assertEquals("Another layout is already called \"Fresh\"", store.createBlank("fresh").error());
+	}
+
+	@Test
+	void everyModIsOffInANewLayout() {
+		Layout layout = new Layout("new", "New");
+		for (com.flintclient.client.control.model.ModuleState module : layout.modules()) {
+			assertFalse(module.enabled(), module.id() + " starts off");
+		}
+	}
+
+	@Test
 	void namesAreValidatedAndIdsKeptUnique() {
 		LayoutStore store = store();
 		assertEquals("Enter a name", store.create("   ", null, null).error());
@@ -378,7 +402,7 @@ class LayoutStoreTest {
 	}
 
 	@Test
-	void anOnlyDamagedLayoutStillCountsForOnboardingButTheDefaultIsUsed() throws IOException {
+	void anOnlyDamagedLayoutStillCountsAsALayoutFileButTheDefaultIsUsed() throws IOException {
 		writeLayout("broken", "nope");
 		LayoutStore store = store();
 		assertTrue(store.anyLayoutFileExists());

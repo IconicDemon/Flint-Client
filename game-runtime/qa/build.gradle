@@ -1,6 +1,12 @@
 plugins {
-	id "net.fabricmc.fabric-loom" version "${loom_version}"
+	// 26.x is unobfuscated (fabric-loom); 1.21.x needs Loom's remap variant with Mojang's names (the QA mod isn't shipped, so one
+	// build switches between them).
+	id "net.fabricmc.fabric-loom" version "${loom_version}" apply false
+	id "net.fabricmc.fabric-loom-remap" version "${loom_version}" apply false
 }
+
+def obfuscated = project.minecraft_version.startsWith("1.")
+apply plugin: obfuscated ? "net.fabricmc.fabric-loom-remap" : "net.fabricmc.fabric-loom"
 
 base {
 	archivesName = project.archive_base_name
@@ -9,23 +15,111 @@ base {
 version = project.mod_version
 group = project.maven_group
 
+// The Minecraft version the tour runs in: 26.3 by default, another with -Pminecraft_version=26.2 (as the runtime's own build).
+// The few version-specific pieces (keys: 26.3 is SDL, 26.2 GLFW) live in src/mc263 or src/mc262; other versions build in
+// build/mc-<version> and name their jar flint-qa-1.0.0+<version>.jar.
+def mcVersion = project.minecraft_version
+def mainLine = mcVersion == "26.3"
+def mcLine = mcVersion.startsWith("26.1") ? "26.1" : mcVersion
+// As the runtime's legacy build names them: a patch release's number in two digits (1.21.1: mc12101).
+def lineParts = mcLine.tokenize(".")
+def mcOverlay = lineParts.size() > 2 ? "mc" + lineParts[0] + lineParts[1] + lineParts[2].padLeft(2, "0") : "mc" + mcLine.replace(".", "")
+if (!mainLine) {
+	layout.buildDirectory = file("build/mc-${mcLine}")
+}
+sourceSets.main.java.srcDir("src/${mcOverlay}/java")
+sourceSets.main.resources.srcDir("src/${mcOverlay}/resources")
+// A file the overlay has replaces src/main's of the same path (QaSkin on 1.21.10, say).
+def overlayDir = file("src/${mcOverlay}/java")
+def mainDir = file("src/main/java")
+sourceSets.main.java.exclude { element ->
+	element.file.toPath().startsWith(mainDir.toPath()) && new File(overlayDir, element.relativePath.pathString).isFile()
+}
+
 // Dev-only QA tour mod (never shipped). Minecraft 26.x is unobfuscated: no mappings line, no Fabric API.
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	if (obfuscated) {
+		mappings loom.officialMojangMappings()
+		modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+		// 1.21.10 and older don't bring jspecify (1.21.11 does, the same version).
+		compileOnly "org.jspecify:jspecify:1.0.0"
+	} else {
+		implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	}
+}
+if (obfuscated) {
+	repositories {
+		mavenCentral()
+	}
+}
+
+if (obfuscated) {
+	// 1.21.x runs under intermediary names, but the tour names Minecraft's classes and members as Mojang does (expect-screen
+	// ChatScreen, option fov, a handler's private method): every class, and the members of the classes it reaches by
+	// reflection, from Loom's mappings into flintqa-names.tsv (QaNames reads it).
+	def reflected = ["net/minecraft/client/Options", "net/minecraft/client/OptionInstance", "net/minecraft/client/MouseHandler",
+		"net/minecraft/client/KeyboardHandler", "net/minecraft/client/Minecraft", "net/minecraft/client/gui/components/ChatComponent",
+		"net/minecraft/client/gui/screens/multiplayer/JoinMultiplayerScreen", "net/minecraft/world/food/FoodData"] as Set
+	def namesDir = layout.buildDirectory.dir("generated/qa-names")
+	def qaNames = tasks.register("qaNames") {
+		def tiny = net.fabricmc.loom.LoomGradleExtension.get(project).mappingConfiguration.tinyMappings.toFile()
+		inputs.file(tiny)
+		inputs.property("reflected", reflected.sort().join(","))
+		outputs.dir(namesDir)
+		doLast {
+			def lines = tiny.readLines("UTF-8")
+			def header = lines[0].split("\t")
+			int from = header.findIndexOf { it == "intermediary" } - 3
+			int to = header.findIndexOf { it == "named" } - 3
+			def out = new StringBuilder()
+			String owner = null
+			for (String line : lines.drop(1)) {
+				def p = line.split("\t", -1)
+				if (p[0] == "c") {
+					owner = p[1 + to] in reflected ? p[1 + from].replace('/', '.') : null
+					out.append("c\t").append(p[1 + from].replace('/', '.')).append('\t').append(p[1 + to].replace('/', '.')).append('\n')
+				} else if (owner != null && p.length > 3 && p[0] == "" && (p[1] == "f" || p[1] == "m")) {
+					out.append(p[1]).append('\t').append(owner).append('\t').append(p[3 + to]).append('\t').append(p[3 + from]).append('\n')
+				}
+			}
+			def file = namesDir.get().file("flintqa-names.tsv").asFile
+			file.parentFile.mkdirs()
+			file.setText(out.toString(), "UTF-8")
+		}
+	}
+	sourceSets.main.resources.srcDir(qaNames)
 }
 
 processResources {
 	def modVersion = project.version
+	// As the runtime: the newest line also loads on later Minecraft releases (forward-compatibility tours).
+	def minecraftRange = obfuscated ? mcVersion : mcVersion == "26.3" ? ">=26.3" : "~" + mcLine
 	inputs.property "version", modVersion
+	inputs.property "minecraftRange", minecraftRange
 
 	filesMatching("fabric.mod.json") {
-		expand "version": modVersion
+		expand "version": modVersion, "minecraftRange": minecraftRange
+		if (obfuscated) {
+			filter { it.replace('"java": ">=25"', '"java": ">=21"') }
+		}
+	}
+	if (obfuscated) {
+		// 1.21.x runs on Java 21, and Mixin refuses a higher compatibility level.
+		filesMatching("*.mixins.json") {
+			filter { it.replace('"JAVA_25"', '"JAVA_21"') }
+		}
+	}
+}
+
+if (!mainLine) {
+	tasks.matching { it.name in ["jar", "sourcesJar", "remapJar", "remapSourcesJar"] }.configureEach {
+		archiveVersion = "${project.version}+${mcLine}"
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	options.release = 25
+	options.release = obfuscated ? 21 : 25
 }
 
 java {

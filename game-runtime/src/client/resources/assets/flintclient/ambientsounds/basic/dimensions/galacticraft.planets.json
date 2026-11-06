@@ -1,0 +1,22 @@
+{
+	"name": "galacticraft.planets",
+	"dimension-names": [
+		"mars",
+		"venus"
+	],
+	"biome-selector": {
+		"always": false
+	},
+	"regions": [
+		{
+			"name": "wind",
+			"volume": 0.3,
+			"bad-regions": [
+				"cave-ambience"
+			],
+			"sound-collections": [
+				"wind"
+			]
+		}
+	]
+}

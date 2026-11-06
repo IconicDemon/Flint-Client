@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "flintclient",
+  "version": "0",
+  "custom": {
+    "loom:injected_interfaces": {
+      "net/minecraft/client/gui/Gui": ["com/flintclient/client/compat/GuiBridge"]
+    }
+  }
+}

@@ -1,58 +1,66 @@
 package com.flintclient.client.control.hud;
 
 /**
- * The HUD sizes a module can have. Text is rasterised per size, so a fixed handful of steps keeps the number
- * of font sets small and every size crisp.
+ * The HUD sizes a module can have: from {@link #min()} to {@link #max()} in steps of five hundredths, typed in the HUD page's
+ * inspector or stepped with the wheel (by the Scaling step game option). Text is rasterised per size, so sizes stay on this
+ * grid: a fixed set of font sizes, each crisp, made only when first drawn.
  */
 public final class ScaleSteps {
-	private static final float[] STEPS = {0.5F, 0.75F, 1.0F, 1.25F, 1.5F, 2.0F};
+	private static final float MIN = 0.25F;
+	private static final float MAX = 4.0F;
+	private static final float QUANTUM = 0.05F;
+	private static final int COUNT = Math.round((MAX - MIN) / QUANTUM) + 1;
 	public static final float DEFAULT = 1.0F;
+	/** The wheel's step when none is given: a quarter, as the old fixed sizes were apart. */
+	public static final float NOTCH = 0.25F;
 
 	private ScaleSteps() {
 	}
 
 	public static int count() {
-		return STEPS.length;
+		return COUNT;
 	}
 
 	public static float step(int index) {
-		return STEPS[Math.clamp(index, 0, STEPS.length - 1)];
+		return Math.round((MIN + QUANTUM * Math.clamp(index, 0, COUNT - 1)) * 100) / 100.0F;
 	}
 
-	/** The index of the step nearest {@code scale} (ties go to the smaller step; NaN means the default). */
+	/** The index of the size nearest {@code scale} (NaN means the default). */
 	public static int index(float scale) {
 		if (Float.isNaN(scale)) {
 			return index(DEFAULT);
 		}
-		int best = 0;
-		for (int i = 1; i < STEPS.length; i++) {
-			if (Math.abs(STEPS[i] - scale) < Math.abs(STEPS[best] - scale)) {
-				best = i;
-			}
-		}
-		return best;
+		return Math.clamp(Math.round((scale - MIN) / QUANTUM), 0, COUNT - 1);
 	}
 
-	/** The step nearest {@code scale}. */
+	/** The size nearest {@code scale}, in range. */
 	public static float snap(float scale) {
-		return STEPS[index(scale)];
+		return step(index(scale));
 	}
 
-	/** The next larger step, or the largest. */
+	/** {@code by} larger (a wheel notch), or the largest. */
+	public static float next(float scale, float by) {
+		return snap(scale + Math.max(QUANTUM, by));
+	}
+
+	/** {@code by} smaller, or the smallest. */
+	public static float previous(float scale, float by) {
+		return snap(scale - Math.max(QUANTUM, by));
+	}
+
 	public static float next(float scale) {
-		return step(index(scale) + 1);
+		return next(scale, NOTCH);
 	}
 
-	/** The next smaller step, or the smallest. */
 	public static float previous(float scale) {
-		return step(index(scale) - 1);
+		return previous(scale, NOTCH);
 	}
 
 	public static float min() {
-		return STEPS[0];
+		return MIN;
 	}
 
 	public static float max() {
-		return STEPS[STEPS.length - 1];
+		return MAX;
 	}
 }

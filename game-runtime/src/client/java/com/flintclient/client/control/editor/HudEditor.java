@@ -1,21 +1,22 @@
 package com.flintclient.client.control.editor;
 
-import com.flintclient.client.FlintClient;
-import com.flintclient.client.control.ControlCenter;
+import com.flintclient.client.FlintLog;
 import com.flintclient.client.control.ControlState;
-import com.flintclient.client.control.center.CenterPrefs;
 import com.flintclient.client.control.hud.HudPlacement;
 import com.flintclient.client.control.hud.ScaleSteps;
 import com.flintclient.client.control.hud.Snapper;
 import com.flintclient.client.control.hud.render.HudRenderer;
 import com.flintclient.client.control.hud.render.HudScene;
-import com.flintclient.client.control.menu.MenuScreen;
 import com.flintclient.client.control.model.Layout;
 import com.flintclient.client.control.model.ModuleRegistry;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.platform.HookGuard;
-import com.flintclient.client.control.platform.Mc263ControlPlatform;
 import com.flintclient.client.control.store.LayoutInfo;
+import com.flintclient.client.platform.HudData;
+import com.flintclient.client.platform.KeyInput;
+import com.flintclient.client.platform.Keys;
+import com.flintclient.client.platform.MenuHost;
+import com.flintclient.client.platform.Services;
 import com.flintclient.client.control.store.LayoutStore;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.FlintFonts;
@@ -28,17 +29,12 @@ import com.flintclient.client.ui.kit.Dialog;
 import com.flintclient.client.ui.kit.KitScreen;
 import com.flintclient.client.ui.kit.Node;
 import com.flintclient.client.ui.kit.Tokens2;
-import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.platform.Window;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.KeyEvent;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The HUD editor's behaviour, for {@code HudEditorScreen}: the layout being edited (in place, with undo and a
- * copy to cancel back to), the selection, dragging with snapping, scaling, nudging, and drawing the editing
- * surface under the toolbar, inspector, hub and widget palette.
+ * The HUD editor's behaviour, for the Right Shift HUD page ({@code rshift.HudPageScreen}): the layout being edited (in place,
+ * with undo and a copy to cancel back to), the selection, dragging with snapping, scaling, nudging, and drawing the editing
+ * surface under the page's own controls.
  *
  * <p>The game stays visible under a light dim and a faint 16-unit dot grid; the modules are drawn live by
  * {@link HudRenderer#drawScene} exactly where the HUD draws them. A press on a module selects it and a drag
@@ -52,16 +48,8 @@ import org.jspecify.annotations.Nullable;
  * re-anchored to the third of the screen its centre is in and kept fully on screen
  * ({@code HudPlacement.fromAbsolute}), once the next frame has measured it.
  *
- * <p>The toolbar sits at the top centre, or at the bottom centre while a module sits under its place at the
- * top (and none under the bottom one), so no module is hidden behind it; when both are taken it stays at the
- * top and steps back while the selected module is under it.
- *
- * <p>In the middle sits Flint's hub ({@link HubPanel}: EDIT FLINT MODS, WIDGETS and shortcuts into the module menu),
- * the widget palette docks at the right ({@link WidgetPalette}) and the controls are listed under "?" ({@link KeyLegend}).
- * Going to the module menu saves first; coming back, the editor carries on from what was saved.
- *
- * <p>Done, Right Shift and Escape (once the palette is closed and nothing is selected) write the stores once and return
- * to the game (or say why they couldn't); Cancel puts the copy back. If drawing the editor ever throws, the error is logged once, the
+ * <p>Right Shift and Escape (once nothing is selected) write the stores once and return to the game (or say why they
+ * couldn't); leaving for the window or another screen saves first. If drawing the editor ever throws, the error is logged once, the
  * editor closes at the next tick without its unconfirmed changes, and stays off for the session (as every
  * Control Center path does), so Minecraft keeps running. Render thread.
  */
@@ -69,7 +57,7 @@ public final class HudEditor {
 	static final int NONE = -1;
 	private static final HookGuard GUARD = new HookGuard("hud editor", HudEditor::turnedOff);
 	/** A light dim over the game (14 % black): the world stays the stage. */
-	private static final int DIM = Palette.withAlpha(0xFF000000, 0.08F);
+	private static final int DIM = Palette.withAlpha(0xFF000000, 0.30F);
 	/** The dot grid: white at 4 %, every 16 units. */
 	private static final int DOT = 0x08FFFFFF;
 	private static final int OUTLINE = Palette.withAlpha(Tokens2.TEXT, 0.45F);
@@ -87,7 +75,7 @@ public final class HudEditor {
 	}
 
 	private final KitScreen screen;
-	private final @Nullable Screen parent;
+	private final @Nullable Object parent;
 	/** Remade when the profile in use changed while the module menu was open (it then edits that profile). */
 	private EditorSession session;
 	private final HudScene scene = new HudScene();
@@ -96,35 +84,24 @@ public final class HudEditor {
 	private final EditorPatterns patterns = new EditorPatterns();
 	private final TextLine[] reasons = new TextLine[ModuleRegistry.size()];
 	private EditorStage stage;
-	private EditorToolbar toolbar;
-	private EditorInspector inspector;
-	private WidgetPalette palette;
-	private HubPanel hub;
-	private KeyLegend legend;
 
 	private int selected = NONE;
 	/** A module to select once the first frame has placed it ("Edit position" in the Control Center). */
 	private int pendingSelect = NONE;
-	/** The inspector is open (only from the mini-bar's gear or I; closed by default so arranging is unobstructed). */
-	private boolean inspectorOpen;
-	/** H: every tool tucked away but a small pill, so the HUD can be judged as it will look. */
-	private boolean chromeHidden;
 	/** Snapping to edges, centres, other modules and Minecraft's HUD (Alt turns it off for one drag). */
 	private boolean snapping = true;
-	private MiniBar miniBar;
 	private int hovered = NONE;
-	private boolean showAreas = CenterPrefs.editorAreas();
-	private boolean toolbarBottom;
 	private boolean leaving;
 	/** Drawing failed: leave at the next tick. */
 	private boolean failed;
 	/** A module that changed: re-anchor and clamp it once the next frame has measured it (NONE: nothing to do). */
 	private int settleIndex = NONE;
-	private long seenRevision = -1;
 	private float screenW = 1;
 	private float screenH = 1;
 
 	private Drag drag = Drag.NONE;
+	/** How visible the snapping guides are, 0..1 (eased). */
+	private float guidesShown;
 	private boolean moved;
 	private float pressX;
 	private float pressY;
@@ -157,7 +134,7 @@ public final class HudEditor {
 	private float guideHFrom;
 	private float guideHTo;
 
-	public HudEditor(KitScreen screen, @Nullable Screen parent, Layout layout) {
+	public HudEditor(KitScreen screen, @Nullable Object parent, Layout layout) {
 		this.screen = screen;
 		this.parent = parent;
 		this.session = new EditorSession(layout);
@@ -176,15 +153,6 @@ public final class HudEditor {
 
 	public void build(Node root) {
 		stage = root.add(new EditorStage(this));
-		miniBar = root.add(new MiniBar(this));
-		toolbar = root.add(new EditorToolbar(this));
-		inspector = root.add(new EditorInspector(this));
-		hub = root.add(new HubPanel(this));
-		palette = root.add(new WidgetPalette(this));
-		legend = root.add(new KeyLegend());
-		miniBar.setVisible(false);
-		inspector.setVisible(false);
-		palette.setVisible(false);
 	}
 
 	/**
@@ -213,38 +181,6 @@ public final class HudEditor {
 		pendingSelect = ModuleRegistry.indexOf(moduleId);
 	}
 
-	boolean chromeHidden() {
-		return chromeHidden;
-	}
-
-	/** H: hides every tool but a small pill, or brings them back. */
-	void toggleChrome() {
-		chromeHidden = !chromeHidden;
-		if (chromeHidden) {
-			closePalette();
-		}
-		syncPanels();
-		stage.invalidate();
-	}
-
-	boolean inspectorOpen() {
-		return inspectorOpen;
-	}
-
-	/** The gear or I: opens or closes the inspector for the selected module. */
-	void toggleInspector() {
-		setInspectorOpen(!inspectorOpen);
-	}
-
-	void setInspectorOpen(boolean open) {
-		inspectorOpen = open;
-		if (open && selected >= 0) {
-			inspector.bind(selected);
-		}
-		syncPanels();
-		stage.invalidate();
-	}
-
 	boolean snapping() {
 		return snapping;
 	}
@@ -253,22 +189,9 @@ public final class HudEditor {
 		snapping = on;
 	}
 
-	/** Which floating pieces show: the inspector (open, with a selection), the mini-bar (a selection). */
-	private void syncPanels() {
-		inspector.setVisible(inspectorOpen && selected != NONE && !chromeHidden);
-		miniBar.setVisible(selected != NONE && !chromeHidden);
-		hub.setVisible(!chromeHidden);
-		legend.setVisible(!chromeHidden);
-	}
-
-	/** Places the toolbar, inspector, hub and palette for a screen of {@code width × height} UI units. */
+	/** Places the editing surface over a screen of {@code width × height} UI units. */
 	public void layout(float width, float height) {
 		stage.setBounds(0, 0, width, height);
-		toolbar.place(width, height, toolbarBottom);
-		inspector.place(width, height, selected >= 0 && inspectorLeft(), toolbarBottom);
-		palette.place(width, height, toolbarBottom);
-		hub.place(width, height);
-		legend.place(height);
 	}
 
 	KitScreen screen() {
@@ -295,15 +218,6 @@ public final class HudEditor {
 		return drag != Drag.NONE && (drag == Drag.SCALE || moved);
 	}
 
-	boolean showAreas() {
-		return showAreas;
-	}
-
-	void setShowAreas(boolean on) {
-		showAreas = on;
-		CenterPrefs.setEditorAreas(on);
-	}
-
 	/** The module under the pointer (not dragging), for its hover outline; {@link #NONE} when there is none. */
 	int hovered() {
 		return hovered;
@@ -317,23 +231,19 @@ public final class HudEditor {
 
 	/** UI units (the kit's) to GUI units (the HUD's), the inverse of {@code KitScreen.toUiX}. */
 	float toGuiX(float ui) {
-		Window window = Minecraft.getInstance().getWindow();
-		return ui * screen.uiScale() * window.getGuiScaledWidth() / Math.max(1, window.getWidth());
+		return ui * screen.uiScale() * HudData.guiWidth() / Math.max(1, HudData.windowWidth());
 	}
 
 	float toGuiY(float ui) {
-		Window window = Minecraft.getInstance().getWindow();
-		return ui * screen.uiScale() * window.getGuiScaledHeight() / Math.max(1, window.getHeight());
+		return ui * screen.uiScale() * HudData.guiHeight() / Math.max(1, HudData.windowHeight());
 	}
 
 	float toUiX(float gui) {
-		Window window = Minecraft.getInstance().getWindow();
-		return gui * window.getWidth() / Math.max(1, window.getGuiScaledWidth()) / screen.uiScale();
+		return gui * HudData.windowWidth() / Math.max(1, HudData.guiWidth()) / screen.uiScale();
 	}
 
 	float toUiY(float gui) {
-		Window window = Minecraft.getInstance().getWindow();
-		return gui * window.getHeight() / Math.max(1, window.getGuiScaledHeight()) / screen.uiScale();
+		return gui * HudData.windowHeight() / Math.max(1, HudData.guiHeight()) / screen.uiScale();
 	}
 
 	// ---------- selection ----------
@@ -353,12 +263,9 @@ public final class HudEditor {
 		setPrimary(index);
 	}
 
-	/** Makes {@code index} the primary selection (the one the inspector and mini-bar follow), keeping the group. */
+	/** Makes {@code index} the primary selection (the one with the corner handle), keeping the group. */
 	private void setPrimary(int index) {
 		selected = index;
-		inspector.bind(index);
-		miniBar.bind(index);
-		syncPanels();
 		stage.invalidate();
 	}
 
@@ -417,7 +324,6 @@ public final class HudEditor {
 
 	/** A right press on the surface: starts a selection box. */
 	boolean pressSecondary(float gx, float gy) {
-		closePalette();
 		cancelDrag();
 		boxing = true;
 		boxX0 = boxX1 = gx;
@@ -465,50 +371,8 @@ public final class HudEditor {
 		return selected == next;
 	}
 
-	private boolean inspectorLeft() {
-		if (selected < 0 || scene.state(selected) == HudScene.OFF) {
-			return false;
-		}
-		return EditorMath.inspectorOnLeft(scene.x(selected) + scene.width(selected) / 2.0F, screenW);
-	}
-
-	/** WIDGETS: opens or closes the palette, with focus in its search. */
-	void togglePalette() {
-		if (palette.visible()) {
-			closePalette();
-			return;
-		}
-		palette.setVisible(true);
-		stage.invalidate();
-		// Typing goes straight to the search (the editor's letter keys wait until it closes).
-		if (screen.focusVisible()) {
-			screen.focusFromKeyboard(palette.first());
-		} else {
-			screen.focus(palette.first());
-		}
-	}
-
-	/** Closes the palette; keyboard focus inside it goes back to the toolbar's Widgets button. */
-	void closePalette() {
-		if (!palette.visible()) {
-			return;
-		}
-		Node focused = screen.focused();
-		boolean focusInside = focused != null && palette.contains(focused);
-		boolean keyboard = screen.focusVisible();
-		palette.setVisible(false);
-		palette.clearSearch();
-		if (focusInside) {
-			if (keyboard) {
-				screen.focusFromKeyboard(toolbar.widgetsButton());
-			} else {
-				screen.focus(null);
-			}
-		}
-	}
-
-	/** Puts keyboard focus on the editing surface (after choosing a widget from the palette by keyboard). */
-	void focusStage() {
+	/** Puts keyboard focus on the editing surface (after choosing a widget from the HUDs palette by keyboard). */
+	public void focusStage() {
 		screen.focusFromKeyboard(stage);
 	}
 
@@ -519,7 +383,6 @@ public final class HudEditor {
 	 * selection; a press on a module already in a selection of several moves them all.
 	 */
 	boolean press(float gx, float gy, boolean shift) {
-		closePalette();
 		if (selected >= 0 && scene.state(selected) != HudScene.OFF && groupSize() <= 1 && onHandle(gx, gy)) {
 			beginDrag(Drag.SCALE, gx, gy);
 			startDistance = EditorMath.distance(startLeft, startTop, gx, gy);
@@ -557,9 +420,31 @@ public final class HudEditor {
 		startTop = scene.y(selected);
 		startW = scene.width(selected);
 		startH = scene.height(selected);
-		startScale = module(selected).placement().scale();
+		startScale = drawnScale(selected);
 		grabX = gx - startLeft;
 		grabY = gy - startTop;
+	}
+
+	/** The size step a module is drawn at: its placement's, or 1 while its own settings place it (Armor against the hotbar). */
+	private float drawnScale(int index) {
+		return scene.pinned(index) ? 1.0F : module(index).placement().scale();
+	}
+
+	/**
+	 * Before the editor moves or sizes a module its own settings place (Armor against the hotbar): it becomes free, its HUD
+	 * placement put exactly where it is drawn at size 1, so the change starts from there and the HUD keeps it where it is put.
+	 * Inside the gesture's undo step.
+	 */
+	private void free(int index) {
+		if (index < 0 || !scene.pinned(index) || scene.state(index) == HudScene.OFF) {
+			return;
+		}
+		ModuleState state = module(index);
+		if (com.flintclient.client.control.model.ModuleSettings.free(state)) {
+			state.setPlacement(HudPlacement.at(state.placement().anchor(), scene.x(index), scene.y(index), screenW, screenH, scene.width(index),
+				scene.height(index), 1.0F));
+		}
+		scene.unpin(index);
 	}
 
 	private boolean onHandle(float gx, float gy) {
@@ -578,8 +463,9 @@ public final class HudEditor {
 		ModuleState state = module(selected);
 		if (drag == Drag.SCALE) {
 			float next = EditorMath.scaleForDrag(startScale, startDistance, EditorMath.distance(startLeft, startTop, gx, gy));
-			if (next != state.placement().scale()) {
+			if (next != drawnScale(selected)) {
 				session.begin();
+				free(selected);
 				float ratio = next / startScale;
 				state.setPlacement(HudPlacement.at(state.placement().anchor(), startLeft, startTop, screenW, screenH, startW * ratio,
 					startH * ratio, next));
@@ -592,6 +478,11 @@ public final class HudEditor {
 			}
 			moved = true;
 			session.begin();
+			for (int i = 0; i < group.length; i++) {
+				if (group[i] || i == selected) {
+					free(i);
+				}
+			}
 		}
 		float w = scene.width(selected);
 		float h = scene.height(selected);
@@ -601,9 +492,7 @@ public final class HudEditor {
 				snapper.addModule(scene.x(i), scene.y(i), scene.width(i), scene.height(i));
 			}
 		}
-		if (showAreas) {
-			guides.addTo(snapper);
-		}
+		guides.addTo(snapper);
 		snapper.snap(gx - grabX, gy - grabY, w, h, altDown() || !snapping);
 		float left = EditorMath.clampInto(snapper.left(), screenW - w);
 		float top = EditorMath.clampInto(snapper.top(), screenH - h);
@@ -649,7 +538,7 @@ public final class HudEditor {
 
 	/** Holding Alt (Option on a Mac) turns snapping off while dragging. */
 	private static boolean altDown() {
-		return Mc263ControlPlatform.keyDown(InputConstants.KEY_LALT) || Mc263ControlPlatform.keyDown(InputConstants.KEY_RALT);
+		return Services.keyDown(Keys.LEFT_ALT) || Services.keyDown(Keys.RIGHT_ALT);
 	}
 
 	/** The wheel over a module steps its size (the one under the pointer, selected or not); returns whether it did. */
@@ -678,16 +567,86 @@ public final class HudEditor {
 			return;
 		}
 		ModuleState state = module(index);
-		float current = state.placement().scale();
-		float next = direction > 0 ? ScaleSteps.next(current) : ScaleSteps.previous(current);
+		float current = drawnScale(index);
+		float by = com.flintclient.client.control.ControlState.settings().game(com.flintclient.client.control.model.GameOptions.HUD_SCALE_STEP);
+		float next = direction > 0 ? ScaleSteps.next(current, by) : ScaleSteps.previous(current, by);
 		if (next == current) {
 			return;
 		}
 		session.continueRun(System.nanoTime());
+		free(index);
 		float ratio = next / current;
 		state.setPlacement(HudPlacement.at(state.placement().anchor(), scene.x(index), scene.y(index), screenW, screenH,
 			scene.width(index) * ratio, scene.height(index) * ratio, next));
 		settleIndex = index;
+	}
+
+	// ---------- typed values (the HUD page's inspector) ----------
+
+	/** A size as a box shows it: "1", "1.25". */
+	public static String scaleText(float scale) {
+		String n = String.format(java.util.Locale.ROOT, "%.2f", ScaleSteps.snap(scale));
+		return n.replaceAll("0+$", "").replaceAll("\\.$", "");
+	}
+
+	/** The one module selected, for typed values, or -1 when none (or several) are. */
+	public int single() {
+		return selected >= 0 && groupSize() <= 1 && drag == Drag.NONE && scene.state(selected) != HudScene.OFF ? selected : NONE;
+	}
+
+	public String moduleName(int index) {
+		return module(index).descriptor().name();
+	}
+
+	/** Its left and top edges on screen, in GUI units, as it is drawn. */
+	public float left(int index) {
+		return scene.x(index);
+	}
+
+	public float top(int index) {
+		return scene.y(index);
+	}
+
+	public float scale(int index) {
+		return drawnScale(index);
+	}
+
+	/** Moves it so its top-left corner is at ({@code left}, {@code top}) in GUI units (kept on screen); one undo step. */
+	public void placeAt(int index, float left, float top) {
+		if (index < 0 || drag != Drag.NONE) {
+			return;
+		}
+		if (scene.pinned(index) && Math.abs(left - scene.x(index)) < 0.5F && Math.abs(top - scene.y(index)) < 0.5F) {
+			// Where its own anchor already has it: it stays theirs.
+			return;
+		}
+		session.begin();
+		free(index);
+		ModuleState state = module(index);
+		state.setPlacement(HudPlacement.at(state.placement().anchor(), left, top, screenW, screenH, scene.width(index), scene.height(index),
+			state.placement().scale()));
+		settleIndex = index;
+		settleGroup = false;
+	}
+
+	/** Resizes it to {@code scale} (the nearest size step), keeping its top-left corner; one undo step. */
+	public void sizeTo(int index, float scale) {
+		if (index < 0 || drag != Drag.NONE) {
+			return;
+		}
+		ModuleState state = module(index);
+		float current = drawnScale(index);
+		float next = ScaleSteps.snap(scale);
+		if (next == current) {
+			return;
+		}
+		session.begin();
+		free(index);
+		float ratio = next / current;
+		state.setPlacement(HudPlacement.at(state.placement().anchor(), scene.x(index), scene.y(index), screenW, screenH,
+			scene.width(index) * ratio, scene.height(index) * ratio, next));
+		settleIndex = index;
+		settleGroup = false;
 	}
 
 	/** Space: every selected module back to its normal size (1x), keeping its top-left corner. */
@@ -701,7 +660,7 @@ public final class HudEditor {
 				continue;
 			}
 			ModuleState state = module(i);
-			float current = state.placement().scale();
+			float current = drawnScale(i);
 			if (current == 1.0F) {
 				continue;
 			}
@@ -713,23 +672,6 @@ public final class HudEditor {
 		settleGroup = groupSize() > 1;
 	}
 
-	/** Sets the selection's size step from the inspector. */
-	void setScale(float step) {
-		if (selected < 0) {
-			return;
-		}
-		ModuleState state = module(selected);
-		float current = state.placement().scale();
-		if (step == current) {
-			return;
-		}
-		session.begin();
-		float ratio = step / current;
-		state.setPlacement(HudPlacement.at(state.placement().anchor(), scene.x(selected), scene.y(selected), screenW, screenH,
-			scene.width(selected) * ratio, scene.height(selected) * ratio, step));
-		settleIndex = selected;
-	}
-
 	/** Moves the selection; a burst of presses (a held arrow key) is one undo step. */
 	private void nudge(float dx, float dy) {
 		if (selected < 0 || drag != Drag.NONE) {
@@ -738,6 +680,7 @@ public final class HudEditor {
 		session.continueRun(System.nanoTime());
 		for (int i = 0; i < group.length; i++) {
 			if (group[i]) {
+				free(i);
 				module(i).setPlacement(module(i).placement().moved(dx, dy));
 			}
 		}
@@ -790,7 +733,6 @@ public final class HudEditor {
 		if (selected >= 0 && !module(selected).enabled()) {
 			select(NONE);
 		}
-		inspector.bind(selected);
 		stage.invalidate();
 	}
 
@@ -808,17 +750,11 @@ public final class HudEditor {
 		}
 	}
 
-	void askReset() {
-		screen.showModal(new Dialog("Reset all positions to the layout's defaults?",
-			"Every module goes back to its default place and size. Undo brings them back.", "Reset positions", Button.Variant.DANGER,
-			() -> {
-				cancelDrag();
-				session.resetPositions();
-				inspector.bind(selected);
-			}));
+	/** Turns a module on or off (the HUDs palette); turning one on selects it. */
+	public void setEnabled(String moduleId, boolean on) {
+		setEnabled(ModuleRegistry.indexOf(moduleId), on);
 	}
 
-	/** Turns a module on or off (the palette); turning one on selects it. */
 	void setEnabled(int index, boolean on) {
 		cancelDrag();
 		session.edit(() -> module(index).setEnabled(on));
@@ -829,39 +765,20 @@ public final class HudEditor {
 		}
 	}
 
-	void hideSelected() {
-		if (selected >= 0) {
-			setEnabled(selected, false);
-		}
-	}
-
-	/** Saves the editor's changes, then opens the module menu on the selected module's settings; Escape there comes back. */
-	void openFullSettings() {
-		if (selected < 0) {
-			return;
-		}
-		openSettings(selected);
-	}
-
-	/** Saves the editor's changes, then opens the module menu on {@code index}'s settings. */
-	void openSettings(int index) {
-		String id = module(index).id();
-		toMenu();
-		ControlCenter.openModuleSettings(screen, id);
-	}
-
-	/** EDIT FLINT MODS and the hub's shortcuts: saves, then opens the module menu on {@code start}; Escape there comes back. */
-	void openMenu(MenuScreen.Start start) {
-		toMenu();
-		MenuScreen.open(screen, start);
-	}
-
-	private void toMenu() {
-		closePalette();
+	/**
+	 * Before the page leaves for another screen (the window, Minecraft's settings): ends the gesture and saves; coming
+	 * back, the editor carries on from what was saved ({@link #shown}).
+	 */
+	public void prepareToLeave() {
 		cancelDrag();
 		session.end();
 		ControlState.saveAll();
 		leaving = true;
+	}
+
+	/** Whether a drag or a selection box is under way (the page's controls step back meanwhile). */
+	public boolean busy() {
+		return dragging() || boxing;
 	}
 
 	/** Right Shift: saves and returns to the game. */
@@ -905,18 +822,10 @@ public final class HudEditor {
 	}
 
 	/**
-	 * Escape: the palette closes first, then the selection is let go, then the editor saves and returns to the game
-	 * (changes are kept, as with Right Shift; Cancel on the toolbar is the way to throw them away).
+	 * Escape (after the page's own layers): a drag is cancelled, then the selection is let go, then the editor saves and
+	 * returns to the game (changes are kept, as with Right Shift; Ctrl+Z undoes them).
 	 */
 	public void requestLeave() {
-		if (palette.visible()) {
-			closePalette();
-			return;
-		}
-		if (legend.open()) {
-			legend.close();
-			return;
-		}
 		if (drag != Drag.NONE || boxing) {
 			cancelDrag();
 			return;
@@ -930,7 +839,14 @@ public final class HudEditor {
 
 	private void leave() {
 		leaving = true;
-		Minecraft.getInstance().gui.setScreen(parent);
+		exit.accept(() -> MenuHost.show(parent));
+	}
+
+	/** How leaving happens: at once, or (the HUD page) after its closing fade; it is handed the step that leaves. */
+	private java.util.function.Consumer<Runnable> exit = Runnable::run;
+
+	public void exitWith(java.util.function.Consumer<Runnable> how) {
+		exit = how;
 	}
 
 	/**
@@ -952,14 +868,14 @@ public final class HudEditor {
 		}
 	}
 
-	private static void turnedOff(String path, RuntimeException error) {
-		FlintClient.LOGGER.warn("Flint Control Center: the {} failed while drawing; it's off for the rest of this session", path, error);
+	private static void turnedOff(String path, Throwable error) {
+		FlintLog.LOGGER.warn("Flint Control Center: the {} failed while drawing; it's off for the rest of this session", path, error);
 	}
 
 	// ---------- keys ----------
 
 	/** Editor keys, before the kit's own handling; returns true when used. */
-	public boolean keyPressed(KeyEvent event) {
+	public boolean keyPressed(KeyInput event) {
 		if (screen.hasModal() || screen.typing() || screen.capturingKeys()) {
 			return false;
 		}
@@ -973,28 +889,18 @@ public final class HudEditor {
 		}
 		Node focused = screen.focused();
 		boolean free = focused == null || focused == stage;
-		if (free && !event.hasControlDownWithQuirk() && !event.hasAltDown()) {
-			if (event.key() == InputConstants.KEY_H) {
-				toggleChrome();
-				return true;
-			}
-			if (event.key() == InputConstants.KEY_I && selected >= 0) {
-				toggleInspector();
-				return true;
-			}
-		}
 		if (!free) {
 			return false;
 		}
 		// Tab (Shift+Tab): the next (previous) module, once one is selected; else Tab moves focus as usual.
-		if (event.key() == InputConstants.KEY_TAB && selected >= 0) {
+		if (event.key() == Keys.TAB && selected >= 0) {
 			selectNext(event.hasShiftDown() ? -1 : 1);
 			return true;
 		}
 		if (selected < 0) {
 			return false;
 		}
-		if (event.key() == InputConstants.KEY_SPACE) {
+		if (event.key() == Keys.SPACE) {
 			resetSize();
 			return true;
 		}
@@ -1007,79 +913,14 @@ public final class HudEditor {
 			nudge(0, -step);
 		} else if (event.isDown()) {
 			nudge(0, step);
-		} else if (event.shortcutKey() == '[' || event.key() == InputConstants.KEY_LBRACKET) {
+		} else if (event.shortcutKey() == '[' || event.key() == Keys.LEFT_BRACKET) {
 			stepScale(-1);
-		} else if (event.shortcutKey() == ']' || event.key() == InputConstants.KEY_RBRACKET) {
+		} else if (event.shortcutKey() == ']' || event.key() == Keys.RIGHT_BRACKET) {
 			stepScale(1);
 		} else {
 			return false;
 		}
 		return true;
-	}
-
-	// ---------- toolbar ----------
-
-	/** Whether a shown module overlaps the toolbar's place at the top or at the bottom of the screen. */
-	private boolean toolbarCovers(boolean bottom) {
-		float uiTop = EditorToolbar.top(screen.uiHeight(), bottom);
-		for (int i = 0; i < scene.size(); i++) {
-			if (scene.state(i) != HudScene.OFF && underToolbar(i, uiTop)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private boolean underToolbar(int index, float uiTop) {
-		return EditorMath.overlaps(scene.x(index), scene.y(index), scene.width(index), scene.height(index), toGuiX(toolbar.x()),
-			toGuiY(uiTop), toGuiX(toolbar.width()), toGuiY(EditorToolbar.HEIGHT));
-	}
-
-	/**
-	 * Whether the toolbar steps back (fades): while a module is dragged, and while the selected module is under
-	 * it and the pointer isn't on it (both of the toolbar's places are taken).
-	 */
-	boolean toolbarFaded() {
-		if (dragging()) {
-			return true;
-		}
-		if (selected < 0 || scene.state(selected) == HudScene.OFF) {
-			return false;
-		}
-		return !toolbar.containsPoint(screen.mouseX(), screen.mouseY()) && underToolbar(selected, toolbar.y());
-	}
-
-	/** Whether the palette of widgets is open. */
-	boolean paletteOpen() {
-		return palette.visible();
-	}
-
-	/**
-	 * Whether the hub steps back (fades): while a module is dragged or a box drawn, and while a selected module is under
-	 * it and the pointer isn't on it.
-	 */
-	boolean hubFaded() {
-		if (dragging() || boxing) {
-			return true;
-		}
-		if (hub.containsPoint(screen.mouseX(), screen.mouseY())) {
-			return false;
-		}
-		float hx = toGuiX(hub.x());
-		float hy = toGuiY(hub.y());
-		float hw = toGuiX(hub.width());
-		float hh = toGuiY(hub.height());
-		for (int i = 0; i < group.length; i++) {
-			if (group[i] && scene.state(i) != HudScene.OFF && EditorMath.overlaps(scene.x(i), scene.y(i), scene.width(i), scene.height(i), hx, hy, hw, hh)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** The wheel over the toolbar's own background: as over the module under it. */
-	boolean scrollAt(float uiX, float uiY, double amount) {
-		return scroll(toGuiX(uiX), toGuiY(uiY), amount);
 	}
 
 	// ---------- drawing (GUI units) ----------
@@ -1090,7 +931,7 @@ public final class HudEditor {
 			try {
 				paintSurface(c, guiWidth, guiHeight);
 				return;
-			} catch (RuntimeException e) {
+			} catch (RuntimeException | LinkageError e) {
 				GUARD.fail(e);
 			}
 		}
@@ -1110,11 +951,13 @@ public final class HudEditor {
 		int wPx = c.px(guiWidth) + g;
 		int hPx = c.px(guiHeight) + g;
 		c.fill(0, 0, wPx, hPx, DIM);
-		int spacing = EditorMath.gridSpacingPx(g);
-		patterns.dots(c, spacing, spacing, wPx, hPx, spacing, Math.max(1, g / 2), DOT);
+		// The dot grid and Minecraft's HUD areas are snapping guides: they fade in only while something is dragged.
+		guidesShown = com.flintclient.client.ui.kit.Kit.approach(guidesShown, drag != Drag.NONE ? 1 : 0, 0.05F);
 		guides.update(screenW, screenH, now);
-		if (showAreas) {
-			guides.paint(c, patterns);
+		if (guidesShown > 0.01F) {
+			int spacing = EditorMath.gridSpacingPx(g);
+			patterns.dots(c, spacing, spacing, wPx, hPx, spacing, Math.max(1, g / 2), Palette.withAlpha(DOT, 8 / 255F * guidesShown));
+			guides.paint(c, patterns, guidesShown);
 		}
 		Layout layout = session.layout();
 		HudRenderer.drawScene(c, layout, screenW, screenH, scene);
@@ -1133,23 +976,6 @@ public final class HudEditor {
 			select(pendingSelect);
 			pendingSelect = NONE;
 		}
-		if (selected >= 0 && miniBar.visible()) {
-			miniBar.placeFor(toUiX(scene.x(selected)), toUiY(scene.y(selected)), toUiX(scene.x(selected) + scene.width(selected)),
-				toUiY(scene.y(selected) + scene.height(selected)), screen.uiWidth(), screen.uiHeight());
-		}
-		long revision = layout.revision();
-		// Not while a pointer gesture (a slider, a drag) is under way: the control being moved is the truth then.
-		if (revision != seenRevision && (!session.editing() || session.inRun())) {
-			seenRevision = revision;
-			inspector.bind(selected);
-		}
-		if (drag == Drag.NONE) {
-			boolean bottom = toolbarCovers(false) && !toolbarCovers(true);
-			if (bottom != toolbarBottom) {
-				toolbarBottom = bottom;
-				stage.invalidate();
-			}
-		}
 		hovered = drag == Drag.NONE && screen.hovered() == stage ? scene.hit(toGuiX(screen.mouseX()), toGuiY(screen.mouseY())) : NONE;
 		int line = VanillaGuides.lineFor(g);
 		for (int i = 0; i < scene.size(); i++) {
@@ -1161,9 +987,16 @@ public final class HudEditor {
 			int y0 = Math.round(scene.y(i) * g);
 			int x1 = Math.round((scene.x(i) + scene.width(i)) * g);
 			int y1 = Math.round((scene.y(i) + scene.height(i)) * g);
-			if (state == HudScene.OUTLINE) {
+			// A module with nothing to show stays out of sight (the page stays clean) until it is pointed at or chosen: then
+			// its outline and why it is empty.
+			if (state == HudScene.OUTLINE && (i == hovered || i == selected || group[i])) {
 				patterns.dashed(c, x0, y0, x1, y1, line, VanillaGuides.dashFor(g), VanillaGuides.gapFor(g), OUTLINE);
-				paintReason(c, i, x0, y0, x1, y1, g);
+				int font = com.flintclient.client.render.PixelFace.begin(com.flintclient.client.render.PixelFace.BY_SIZE);
+				try {
+					paintReason(c, i, x0, y0, x1, y1, g);
+				} finally {
+					com.flintclient.client.render.PixelFace.end(font);
+				}
 			}
 			boolean warn = guides.overlap(scene.x(i), scene.y(i), scene.width(i), scene.height(i)) >= 0;
 			if (warn) {
@@ -1172,8 +1005,14 @@ public final class HudEditor {
 				c.icon(Icon.WARNING, x1 - icon / 2, y0 - icon / 2, icon, Tokens2.WARN);
 			}
 		}
-		// The hover outline and the selection's marks are drawn by the stage, in the kit's units, over this.
-		paintGuides(c, g);
+		// The hover outline and the selection's marks are drawn by the stage, in the kit's units, over this; the editor's
+		// words are in Minecraft's font, as the rest of the Right Shift menu.
+		int font = com.flintclient.client.render.PixelFace.begin(com.flintclient.client.render.PixelFace.BY_SIZE);
+		try {
+			paintGuides(c, g);
+		} finally {
+			com.flintclient.client.render.PixelFace.end(font);
+		}
 	}
 
 	/** A hidden module's reason, just below its outline (above it near the bottom of the screen). */

@@ -28,7 +28,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 TEMPLATE = os.path.join(REPO, "artifacts", "perf-core", "launch-template.json")
-APP_DATA = os.path.expanduser("~/Library/Application Support/com.flintclient.desktop")
+# The installed app's data ("Flint Client"; older versions of Flint kept it in "com.flintclient.desktop").
+APP_DATA = next((d for d in (os.path.expanduser("~/Library/Application Support/" + n) for n in ("Flint Client", "com.flintclient.desktop")) if os.path.isdir(d)), os.path.expanduser("~/Library/Application Support/Flint Client"))
 QA_ROOT = os.path.expanduser("~/FlintQA")
 RUNTIME_JAR = os.path.join(REPO, "game-runtime", "build", "libs", "flint-game-runtime-%s.jar" % json.load(open(os.path.join(REPO, "app", "package.json")))["version"])
 QA_JAR = os.path.join(HERE, "build", "libs", "flint-qa-1.0.0.jar")

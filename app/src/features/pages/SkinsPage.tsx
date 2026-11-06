@@ -1,6 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IdleAnimation, SkinViewer, WalkingAnimation, type PlayerObject } from "skinview3d";
 import { api, errorText, type SkinProfile } from "../../lib/api";
+import type { ShownCape } from "../../lib/capeSource";
+import { createCapeDriver, useDisplayedCape, type CapeDriver } from "../../lib/displayedCape";
+import { bytes } from "../../lib/format";
+import { useT, type Translate } from "../../lib/i18n";
 import { approach, createRenderLoop, motionWanted, pacedDelay, smoothstep, type Next } from "../../lib/renderLoop";
 import { useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
@@ -79,21 +83,24 @@ function detectVariant(img: HTMLImageElement): Variant | null {
   return "slim";
 }
 
-function readPng(file: File): Promise<Pending> {
+/** Mojang's limit for an uploaded skin file. */
+const MAX_SKIN_BYTES = 64 * 1024;
+
+function readPng(file: File, t: Translate): Promise<Pending> {
   return new Promise((resolve, reject) => {
-    if (file.type && file.type !== "image/png") return reject(new Error(`“${file.name}” isn't a PNG. Minecraft skins are PNG images.`));
-    if (file.size > 64 * 1024) return reject(new Error(`“${file.name}” is ${Math.round(file.size / 1024)} KB. Skin files must be smaller than 64 KB.`));
+    if (file.type && file.type !== "image/png") return reject(new Error(t("skins.file.notPng", { name: file.name })));
+    if (file.size > MAX_SKIN_BYTES) return reject(new Error(t("skins.file.tooLarge", { name: file.name, size: bytes(file.size), limit: bytes(MAX_SKIN_BYTES) })));
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("That file couldn't be read."));
+    reader.onerror = () => reject(new Error(t("skins.file.unreadable")));
     reader.onload = () => {
       const dataUrl = String(reader.result);
       const img = new Image();
       img.onload = () => {
         const ok = img.width === 64 && (img.height === 64 || img.height === 32);
-        if (!ok) return reject(new Error(`Minecraft skins are 64×64 or 64×32 pixels. This image is ${img.width}×${img.height}.`));
+        if (!ok) return reject(new Error(t("skins.file.wrongSize", { width: img.width, height: img.height })));
         resolve({ dataUrl, base64: dataUrl.split(",")[1] ?? "", name: file.name, legacy: img.height === 32, detected: detectVariant(img) });
       };
-      img.onerror = () => reject(new Error("That isn't a valid PNG image."));
+      img.onerror = () => reject(new Error(t("skins.file.invalid")));
       img.src = dataUrl;
     };
     reader.readAsDataURL(file);
@@ -101,6 +108,7 @@ function readPng(file: File): Promise<Pending> {
 }
 
 export default function SkinsPage({ navigate }: { navigate: Navigate }) {
+  const t = useT();
   const store = useStore();
   const toast = useToast();
   const { motionOk } = useSettings();
@@ -129,6 +137,13 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
   const accountUuid = account?.uuid ?? null;
   const accountQa = !!account?.qa;
   const profileRequest = useRef(0);
+  // The Flint Store cape the account wears, else its Minecraft cape (fresher here once its capes list loaded: the cached skin
+  // can lag a cape change), else none. Right after an account switch the list is still the previous account's: not used.
+  const ownProfile = profile && account && profile.name.toLowerCase() === account.username.toLowerCase() ? profile : null;
+  const activeCapeUrl = ownProfile ? (ownProfile.capes.find((c) => c.active)?.dataUrl ?? null) : undefined;
+  const displayedCape = useDisplayedCape(accountUuid, { minecraftCape: activeCapeUrl });
+  /** A Minecraft cape hovered in the list is previewed as it is; otherwise the cape shown everywhere. */
+  const shownCape = useMemo<ShownCape<ImageBitmap>>(() => (capePreview === undefined ? displayedCape : capePreview ? { source: "minecraft", url: capePreview } : { source: "none" }), [capePreview, displayedCape]);
 
   /** Opening the page never asks macOS for the saved sign-in; "Show my capes" (interactive) may. */
   const loadProfile = useCallback(
@@ -166,7 +181,7 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
     if (!file) return;
     setFileError(null);
     try {
-      const next = await readPng(file);
+      const next = await readPng(file, t);
       setPending(next);
       setVariant(next.detected ?? accountVariant);
     } catch (e) {
@@ -207,7 +222,7 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
       const result = await api.skinUpload(account.uuid, pending.base64, variant);
       setPending(null);
       setConfirming(false);
-      await after(result, "Skin updated");
+      await after(result, t("skins.toast.updated"));
     } catch (e) {
       setUploadError(errorText(e));
     } finally {
@@ -221,9 +236,9 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
     try {
       const result = await api.skinReset(account.uuid);
       setResetting(false);
-      await after(result, "Skin reset to the default");
+      await after(result, t("skins.toast.reset"));
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't reset the skin", body: errorText(e) });
+      toast({ tone: "danger", title: t("skins.toast.resetFailed"), body: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -233,9 +248,9 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
     if (!account) return;
     setBusy(`cape:${id ?? "none"}`);
     try {
-      await after(await api.capeSet(account.uuid, id), id ? "Cape equipped" : "Cape hidden");
+      await after(await api.capeSet(account.uuid, id), id ? t("skins.toast.capeEquipped") : t("skins.toast.capeHidden"));
     } catch (e) {
-      toast({ tone: "danger", title: "Couldn't change the cape", body: errorText(e) });
+      toast({ tone: "danger", title: t("skins.toast.capeFailed"), body: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -244,14 +259,14 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
   if (!account) {
     return (
       <div className="page-body">
-        <PageHeader title="Skins" subtitle="Preview and change how you look in game." />
+        <PageHeader title={t("skins.page.title")} subtitle={t("skins.page.subtitleSignedOut")} />
         <EmptyState
           icon="shirt"
-          title="Sign in to manage your skin"
-          body="Your skin and capes belong to your Minecraft account. Sign in with Microsoft to see and change them."
+          title={t("skins.signIn.title")}
+          body={t("skins.signIn.body")}
           action={
             <Button variant="primary" onClick={() => navigate("settings", "accounts")}>
-              Manage accounts
+              {t("skins.signIn.manageAccounts")}
             </Button>
           }
         />
@@ -261,7 +276,6 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
 
   const shownSkin = pending?.dataUrl ?? current?.dataUrl ?? null;
   const activeCape = profile?.capes.find((c) => c.active) ?? null;
-  const shownCape = capePreview !== undefined ? capePreview : (activeCape?.dataUrl ?? current?.capeUrl ?? null);
   const shownVariant = pending ? variant : accountVariant;
   const previewCape = (url: string | null) => ({
     onPointerEnter: () => setCapePreview(url),
@@ -273,15 +287,15 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
   return (
     <div className="page-body skins-page">
       <PageHeader
-        title="Skins"
-        subtitle="Drag to turn your character. Changes apply to your Minecraft account everywhere."
+        title={t("skins.page.title")}
+        subtitle={t("skins.page.subtitle")}
         actions={
           store.accounts.length > 1 && (
             <Dropdown
-              label="Account"
+              label={t("skins.account.label")}
               value={account.uuid}
               onChange={(uuid) => void store.switchAccount(uuid)}
-              options={store.accounts.map((a) => ({ value: a.uuid, label: a.username, hint: a.qa ? "Test account" : undefined }))}
+              options={store.accounts.map((a) => ({ value: a.uuid, label: a.username, hint: a.qa ? t("skins.account.testHint") : undefined }))}
             />
           )
         }
@@ -289,19 +303,26 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
 
       <div className="skins-layout">
         <section className={`skins-stage ${dragging ? "is-drop" : ""}`} {...drop}>
-          {pending && <span className="skins-preview-tag">Preview · not applied yet</span>}
-          <SkinViewport skin={shownSkin} cape={shownCape} model={shownVariant} animate={motionOk} showBack={capePreview !== undefined && !!capePreview} label={`${account.username}'s skin`} />
+          {pending && <span className="skins-preview-tag">{t("skins.stage.previewTag")}</span>}
+          <SkinViewport
+            skin={shownSkin}
+            cape={shownCape}
+            model={shownVariant}
+            animate={motionOk}
+            showBack={capePreview !== undefined && !!capePreview}
+            label={t("skins.stage.viewerLabel", { name: account.username })}
+          />
           {!shownSkin && !dragging && (
             <div className="skins-drop is-hint">
               <Icon name="shirt" size={26} />
-              {current === undefined ? "Loading skin…" : "No skin loaded for this account"}
-              <span className="faint">Choose or drop a 64×64 or 64×32 PNG to preview it here.</span>
+              {current === undefined ? t("skins.stage.loading") : t("skins.stage.noSkin")}
+              <span className="faint">{t("skins.stage.dropHint")}</span>
             </div>
           )}
           {dragging && (
             <div className="skins-drop">
               <Icon name="upload" size={26} />
-              Drop to preview — nothing is uploaded yet
+              {t("skins.stage.dropping")}
             </div>
           )}
         </section>
@@ -311,48 +332,55 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
             <Avatar account={account} size={40} />
             <span>
               <strong>{account.username}</strong>
-              <span className="faint">{previewOnly ? "Local test account" : "Minecraft: Java Edition"}</span>
+              {/* The edition's name, which Mojang doesn't translate. */}
+              <span className="faint">{previewOnly ? t("skins.who.localTest") : "Minecraft: Java Edition"}</span>
             </span>
-            {previewOnly ? <Badge tone="warning">Preview only</Badge> : <Badge>{accountVariant === "slim" ? "Slim arms" : "Classic arms"}</Badge>}
+            {previewOnly ? (
+              <Badge tone="warning">{t("skins.who.previewOnly")}</Badge>
+            ) : (
+              <Badge>{accountVariant === "slim" ? t("skins.who.slimArms") : t("skins.who.classicArms")}</Badge>
+            )}
             {loadError && (
               <p className="skins-error" role="alert">
                 <Icon name="alert" size={14} /> {loadError}
                 <button type="button" onClick={() => void loadProfile(true)}>
-                  Retry
+                  {t("common.retry")}
                 </button>
               </p>
             )}
           </div>
 
           <div className="skins-card">
-            <h2 className="skins-h">{pending ? "Preview" : "Change skin"}</h2>
+            <h2 className="skins-h">{pending ? t("skins.change.previewTitle") : t("skins.change.title")}</h2>
             {pending ? (
               <>
                 <div className="skins-file">
                   <img src={pending.dataUrl} alt="" />
                   <span>
                     <strong title={pending.name}>{pending.name}</strong>
-                    <span className="faint">{pending.legacy ? "64×32 legacy skin" : "64×64 skin"}</span>
+                    <span className="faint">{pending.legacy ? t("skins.change.legacySkin") : t("skins.change.modernSkin")}</span>
                   </span>
                 </div>
-                <span className="skins-label">Arm style</span>
+                <span className="skins-label">{t("skins.change.armStyle")}</span>
                 <Segmented
-                  label="Arm style"
+                  label={t("skins.change.armStyle")}
                   value={variant}
                   onChange={setVariant}
                   options={[
-                    { value: "classic", label: "Classic" },
-                    { value: "slim", label: "Slim" },
+                    { value: "classic", label: t("skins.change.classic") },
+                    { value: "slim", label: t("skins.change.slim") },
                   ]}
                 />
                 <p className="faint skins-note">
-                  {pending.detected
-                    ? `This image looks like a ${pending.detected} skin. Change it if the arms look wrong in the preview.`
-                    : "Older 64×32 skins only work with classic arms."}
+                  {pending.detected === "slim"
+                    ? t("skins.change.detectedSlim")
+                    : pending.detected === "classic"
+                      ? t("skins.change.detectedClassic")
+                      : t("skins.change.legacyNote")}
                 </p>
                 <div className="skins-actions">
                   <Button variant="ghost" onClick={() => setPending(null)}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                   <Button
                     variant="primary"
@@ -363,10 +391,10 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
                       setConfirming(true);
                     }}
                   >
-                    Apply skin
+                    {t("skins.change.apply")}
                   </Button>
                 </div>
-                {previewOnly && <p className="faint skins-note">Test accounts can preview skins, but can't upload them.</p>}
+                {previewOnly && <p className="faint skins-note">{t("skins.change.testNote")}</p>}
               </>
             ) : (
               <>
@@ -375,13 +403,13 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
                     <Icon name="shirt" size={22} />
                   </span>
                   <span className="skins-upload-text">
-                    <strong>Upload a new skin</strong>
-                    <span className="faint">PNG · 64×64, or classic 64×32 · up to 64 KB</span>
+                    <strong>{t("skins.upload.title")}</strong>
+                    <span className="faint">{t("skins.upload.formats", { limit: bytes(MAX_SKIN_BYTES) })}</span>
                   </span>
                   <Button variant="primary" icon="upload" className="skins-upload-btn" onClick={() => fileInput.current?.click()}>
-                    Choose file
+                    {t("skins.upload.choose")}
                   </Button>
-                  <span className="skins-upload-hint">You can also drop a file on the preview. Nothing is uploaded until you confirm.</span>
+                  <span className="skins-upload-hint">{t("skins.upload.hint")}</span>
                 </div>
                 {fileError && (
                   <p className="skins-error" role="alert">
@@ -390,7 +418,7 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
                 )}
                 {!previewOnly && (
                   <button type="button" className="skins-link" onClick={() => setResetting(true)}>
-                    <Icon name="undo" size={14} /> Reset to a default skin
+                    <Icon name="undo" size={14} /> {t("skins.upload.reset")}
                   </button>
                 )}
               </>
@@ -410,23 +438,23 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
           {!previewOnly && (
             <div className="skins-card">
               <h2 className="skins-h">
-                Capes
-                {profile && profile.capes.length > 0 && <span className="faint"> · {profile.capes.length} owned</span>}
+                {t("skins.capes.title")}
+                {profile && profile.capes.length > 0 && <span className="faint"> · {t("skins.capes.owned", { count: profile.capes.length })}</span>}
               </h2>
               {locked && !profile ? (
                 <>
-                  <p className="faint skins-note">Your capes load from your Minecraft account. macOS may ask once to let Flint use your saved sign-in.</p>
+                  <p className="faint skins-note">{t("skins.capes.locked")}</p>
                   <Button size="sm" onClick={() => void loadProfile(true)}>
-                    Show my capes
+                    {t("skins.capes.show")}
                   </Button>
                 </>
               ) : !profile && !loadError ? (
                 <Spinner />
               ) : profile && profile.capes.length === 0 ? (
-                <p className="faint skins-note">This account doesn't own any capes. Capes come from Minecraft events, promotions and purchases.</p>
+                <p className="faint skins-note">{t("skins.capes.empty")}</p>
               ) : profile ? (
                 <>
-                  <div className="cape-grid" role="radiogroup" aria-label="Cape">
+                  <div className="cape-grid" role="radiogroup" aria-label={t("skins.capes.groupLabel")}>
                     <button
                       type="button"
                       role="radio"
@@ -439,7 +467,7 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
                       <span className="cape-none">
                         <Icon name="x" size={16} />
                       </span>
-                      <span>None</span>
+                      <span>{t("skins.capes.none")}</span>
                     </button>
                     {profile.capes.map((c) => (
                       <button
@@ -464,7 +492,8 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
                       </button>
                     ))}
                   </div>
-                  <p className="faint skins-note">Hover a cape to see it on your character. Click to wear it.</p>
+                  <p className="faint skins-note">{t("skins.capes.hint")}</p>
+                  {displayedCape.source === "flint" && !displayedCape.pending && <p className="faint skins-note">{t("skins.capes.flintWorn")}</p>}
                 </>
               ) : null}
             </div>
@@ -475,21 +504,21 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
       <Modal
         open={confirming}
         onClose={() => busy !== "upload" && setConfirming(false)}
-        title="Apply this skin?"
+        title={t("skins.apply.title")}
         width={440}
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy === "upload"}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" loading={busy === "upload"} onClick={() => void upload()}>
-              {uploadError ? "Try again" : `Apply to ${account.username}`}
+              {uploadError ? t("common.tryAgain") : t("skins.apply.confirm", { name: account.username })}
             </Button>
           </>
         }
       >
         <p className="muted modal-copy">
-          This replaces the skin on your Minecraft account with <strong>{pending?.name}</strong> ({variant === "slim" ? "slim" : "classic"} arms). It shows everywhere you play, not just in Flint.
+          {t.rich(variant === "slim" ? "skins.apply.bodySlim" : "skins.apply.bodyClassic", { file: <strong>{pending?.name}</strong> })}
         </p>
         {uploadError && (
           <p className="install-warn" role="alert">
@@ -502,20 +531,20 @@ export default function SkinsPage({ navigate }: { navigate: Navigate }) {
       <Modal
         open={resetting}
         onClose={() => busy !== "reset" && setResetting(false)}
-        title="Reset to a default skin?"
+        title={t("skins.reset.title")}
         width={440}
         footer={
           <>
             <Button variant="ghost" onClick={() => setResetting(false)} disabled={busy === "reset"}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="danger" loading={busy === "reset"} onClick={() => void reset()}>
-              Reset skin
+              {t("skins.reset.confirm")}
             </Button>
           </>
         }
       >
-        <p className="muted modal-copy">Your account goes back to one of Minecraft's default characters. Keep a copy of your current skin file if you want to use it again.</p>
+        <p className="muted modal-copy">{t("skins.reset.body")}</p>
       </Modal>
     </div>
   );
@@ -532,10 +561,12 @@ type Stage = {
 };
 const INERT_STAGE: Stage = { request() {}, wake() {}, turnTo() {} };
 
-const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, showBack, label }: { skin: string | null; cape: string | null; model: Variant; animate: boolean; showBack: boolean; label: string }) {
+const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, showBack, label }: { skin: string | null; cape: ShownCape<ImageBitmap>; model: Variant; animate: boolean; showBack: boolean; label: string }) {
+  const t = useT();
   const host = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<SkinViewer | null>(null);
   const stage = useRef<Stage>(INERT_STAGE);
+  const capeDriver = useRef<CapeDriver | null>(null);
   const images = useRef(new Map<string, Promise<HTMLImageElement>>());
   /** The skin texture currently in the viewer, so an arm-style change doesn't reload it. */
   const loadedSkin = useRef<{ viewer: SkinViewer; url: string } | null>(null);
@@ -586,9 +617,9 @@ const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, sh
 
     const step = (now: number, dt: number): Next => {
       if (tween) {
-        const t = Math.min(1, Math.max(0, (now - tween.start) / TURN_MS));
-        viewer.playerWrapper.rotation.y = tween.from + (tween.to - tween.from) * (1 - Math.pow(1 - t, 3));
-        if (t >= 1) tween = null;
+        const progress = Math.min(1, Math.max(0, (now - tween.start) / TURN_MS));
+        viewer.playerWrapper.rotation.y = tween.from + (tween.to - tween.from) * (1 - Math.pow(1 - progress, 3));
+        if (progress >= 1) tween = null;
       }
       const animation = viewer.animation;
       const want = wanted(now);
@@ -612,6 +643,8 @@ const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, sh
       return null;
     };
     const loop = createRenderLoop(step);
+    // The cape (an animated one draws its frames at their own timings; each asks for one render).
+    capeDriver.current = createCapeDriver(viewer, () => loop.request());
 
     /** Any input resets the deep-idle clock and restarts ambient motion if it had come to rest. */
     const onInput = () => {
@@ -690,6 +723,8 @@ const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, sh
 
     return () => {
       stage.current = INERT_STAGE;
+      capeDriver.current?.dispose();
+      capeDriver.current = null;
       loop.dispose();
       offFocus();
       viewer.controls.removeEventListener("change", onChange);
@@ -745,26 +780,14 @@ const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, sh
   }, [skin, model, failed]);
 
   useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    if (!cape) {
-      viewer.loadCape(null);
-      stage.current.wake();
-      return;
-    }
-    let stale = false;
-    decodeImage(images.current, cape).then(
-      (img) => {
-        if (stale || viewer.disposed) return;
-        viewer.loadCape(img);
-        stage.current.wake();
-      },
-      () => {},
-    );
-    return () => {
-      stale = true;
-    };
+    capeDriver.current?.show(cape);
+    stage.current.wake();
   }, [cape, failed]);
+
+  // An animated cape plays while motion is on (the page's viewer exists only while it is open).
+  useEffect(() => {
+    capeDriver.current?.setPlaying(animate);
+  }, [animate, failed]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -800,29 +823,29 @@ const SkinViewport = memo(function SkinViewport({ skin, cape, model, animate, sh
     spin(YAW);
   };
 
-  if (failed) return <EmptyState icon="shirt" title="3D preview unavailable" body="This computer couldn't start the 3D renderer. Your skin can still be changed." />;
+  if (failed) return <EmptyState icon="shirt" title={t("skins.viewer.unavailableTitle")} body={t("skins.viewer.unavailableBody")} />;
   return (
     <>
       <div className="skins-floor" aria-hidden />
       <div ref={host} className="skins-canvas" role="img" aria-label={label} />
-      <div className="skins-tools" role="toolbar" aria-label="Preview controls">
-        <IconButton icon="chevronLeft" label="Turn left" onClick={() => turn(-Math.PI / 4)} />
-        <IconButton icon="chevronRight" label="Turn right" onClick={() => turn(Math.PI / 4)} />
+      <div className="skins-tools" role="toolbar" aria-label={t("skins.viewer.controls")}>
+        <IconButton icon="chevronLeft" label={t("skins.viewer.turnLeft")} onClick={() => turn(-Math.PI / 4)} />
+        <IconButton icon="chevronRight" label={t("skins.viewer.turnRight")} onClick={() => turn(Math.PI / 4)} />
         <span className="skins-tools-sep" />
-        <IconButton icon="zoomOut" label="Zoom out" onClick={() => zoomBy(-ZOOM.step)} />
-        <IconButton icon="zoomIn" label="Zoom in" onClick={() => zoomBy(ZOOM.step)} />
-        <IconButton icon="rotate" label="Reset view" onClick={reset} />
+        <IconButton icon="zoomOut" label={t("skins.viewer.zoomOut")} onClick={() => zoomBy(-ZOOM.step)} />
+        <IconButton icon="zoomIn" label={t("skins.viewer.zoomIn")} onClick={() => zoomBy(ZOOM.step)} />
+        <IconButton icon="rotate" label={t("skins.viewer.resetView")} onClick={reset} />
         {animate && (
           <>
             <span className="skins-tools-sep" />
             <Segmented
-              label="Pose"
+              label={t("skins.viewer.pose")}
               value={pose}
               onChange={setPose}
               options={[
-                { value: "idle", label: "Idle" },
-                { value: "walk", label: "Walk" },
-                { value: "still", label: "Still" },
+                { value: "idle", label: t("skins.viewer.idle") },
+                { value: "walk", label: t("skins.viewer.walk") },
+                { value: "still", label: t("skins.viewer.still") },
               ]}
             />
           </>

@@ -1,0 +1,29 @@
+{
+	"name": "beach",
+	"biomes": [
+		"#is_beach",
+		"beach",
+		"shore",
+		"tropics beach",
+		"tidepools"
+	],
+	"bad-biomes": [
+		"gravel_beach"
+	],
+	"temperature": {
+		"min": 0
+	},
+	"sounds": [
+		{
+			"name": "beach",
+			"files": [
+				"minecraft:block.water.ambient"
+			],
+			"volume": 0.3,
+			"pause": {
+				"min": 20,
+				"max": 80
+			}
+		}
+	]
+}
