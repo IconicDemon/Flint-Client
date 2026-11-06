@@ -29,6 +29,7 @@ import net.minecraft.client.model.Model;
 import net.minecraft.client.multiplayer.ClientAdvancements;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.Identifier;
@@ -353,6 +354,20 @@ public final class McCompat {
 	public static <S> void submitTinted(SubmitNodeCollector collector, Model<? super S> model, S state, PoseStack pose, RenderType type, int light,
 		int overlay, int tint) {
 		collector.submitModel(model, state, pose, type, light, overlay, tint, null, 0, null);
+	}
+
+	/**
+	 * The cape-derived elytra (control/platform/Mc263CapeElytra): the elytra model with the cape texture in a back-face-culled
+	 * cut-out pass (entityCutout, which culls here), then the glint pass when the elytra is enchanted (armorEntityGlint), as the elytra layer orders its own.
+	 */
+	public static <S> void submitCapeWings(SubmitNodeCollector collector, Model<? super S> model, S state, PoseStack pose, Identifier texture,
+		int light, int outline, boolean foil) {
+		collector.order(0).submitModel(model, state, pose, RenderTypes.entityCutout(texture), light,
+			net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, -1, null, outline, null);
+		if (foil) {
+			collector.order(1).submitModel(model, state, pose, RenderTypes.armorEntityGlint(), light,
+				net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, -1, null, 0, null);
+		}
 	}
 
 	// ---------- Custom F3 (BetterF3): what its lines read that each version keeps elsewhere ----------

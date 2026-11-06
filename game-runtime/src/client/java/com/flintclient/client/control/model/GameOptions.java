@@ -58,6 +58,13 @@ public final class GameOptions {
 	public static final BoolSetting STORE_CAPES = new BoolSetting("storeCapes", "Flint Store capes",
 		"Capes equipped in the Flint Store, on you and other Flint players. Off: Minecraft's capes only, and the Store isn't asked", true);
 
+	/**
+	 * A Flint Store cape on the elytra (control/platform/Mc263CapeElytra): a player who wears one and an elytra has wings made of
+	 * the cape's own design, animated with it, as the Flint Store previews them. Off: Minecraft's elytra. For everyone you see.
+	 */
+	public static final BoolSetting CAPE_ELYTRA = new BoolSetting("capeElytra", "Cape design on elytra",
+		"An elytra shows the wearer's Flint Store cape, animated with it, as the Flint Store previews it. Off: Minecraft's elytra", true);
+
 	/** Minecraft's own title screen (with a small Flint button to come back) instead of Flint's main menu. */
 	public static final BoolSetting VANILLA_MAIN_MENU = new BoolSetting("vanillaMainMenu", "Vanilla main menu",
 		"Minecraft's own title screen instead of Flint's; its Flint button switches back", false);
@@ -72,7 +79,7 @@ public final class GameOptions {
 	/** Every option, in the order the file keeps them. */
 	public static final List<SettingDescriptor<?>> ALL = List.of(NO_HOTBAR_LOOPING, MINIMAL_BOBBING, CLOCK_24H, LEAVE_KEY, LEAVE_CONFIRM, MOD_KEYS,
 		INACTIVE_FPS, LIMIT_UNFOCUSED, LIMIT_IDLE, IDLE_MINUTES, IDLE_SECONDS, HUD_SCALE_STEP, MENU_SCALE, MENU_SOUND, FLINT_BADGE,
-		SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES);
+		SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES, CAPE_ELYTRA);
 
 	private GameOptions() {
 	}

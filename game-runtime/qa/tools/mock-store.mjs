@@ -4,7 +4,8 @@
 // animation}}}}}, Cache-Control: public, max-age=60) and serves the cape texture itself.
 //
 // usage: node qa/tools/mock-store.mjs [--port 8787] [--cape FILE.png] [--only UUID] [--revoke-after SECONDS] [--bad-hash]
-//        [--handoff GAME_DIR] [--equip-after SECONDS] [--animated standard|hd|long] [--bad-strip]
+//        [--handoff GAME_DIR] [--equip-after SECONDS] [--animated standard|hd|long|region|region-fast] [--bad-strip]
+//        [--region-cape SCALE] [--asset FILE.json]
 //
 // - Listens on 127.0.0.1 only. Point the game at it with -Dflint.store.baseUrl=http://127.0.0.1:8787 (for QA tours:
 //   FLINTQA_JVM="-Dflint.store.baseUrl=http://127.0.0.1:8787" node qa/run_qa_windows.mjs ...). A Store on loopback may be
@@ -23,6 +24,12 @@
 //   standard: 10 frames at 16 px per unit (352x272); hd: 8 frames at 32 (704x544, poster halved); long: 120 frames of 100 ms at
 //   16 (more than one cape's frame budget: the game keeps them at 8). --bad-strip serves a strip that isn't its hash (the game
 //   must keep the poster).
+// - --animated region / region-fast, --region-cape SCALE: the websites' region-coloured cape (Store scripts/e2e-cape-elytra.mjs,
+//   regionPixel): front quadrants red, yellow, green, blue with a transparent 2x2 hole at front columns 2-3, rows 5-6; the
+//   lining magenta, cyan, orange, purple; every frame turns the hues 45 degrees. region: its 8 frames and durations at 16 px per
+//   unit; region-fast: 120 frames in a 4 s loop (about 30 per second, as the Snowfall Cape plays); --region-cape: static.
+// - --asset FILE.json: answers with that asset as it is (a real cape's, from the Store's public lookup: its own Supabase
+//   addresses), for checking a production cape in game.
 // Logs one line per request.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -124,7 +131,26 @@ function syntheticFrame(i, n, scale) {
 	for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px.set(unitColor(i, n, Math.floor(x / scale), Math.floor(y / scale)), (y * w + x) * 4);
 	return px;
 }
+/* ---------- the websites' region-coloured cape: Store scripts/e2e-cape-elytra.mjs, regionPixel, the same colours ---------- */
+const hsv = (h, sat = 0.85, v = 0.95) => { const f = (n) => { const k = (n + h / 60) % 6; return Math.round(255 * v * (1 - sat * Math.max(0, Math.min(k, 4 - k, 1)))); }; return [f(5), f(3), f(1), 255]; };
+const REGION_FRONT = { TL: 0, TR: 55, BL: 125, BR: 228 };
+const REGION_BACK = { TL: 300, TR: 180, BL: 30, BR: 262 };
+const quadrant = (c, r) => (r < 8 ? (c < 5 ? "TL" : "TR") : c < 5 ? "BL" : "BR");
+function regionPixel(ax, ay, k = 0) {
+	const x = Math.floor(ax), y = Math.floor(ay), turn = (h) => hsv((h + 45 * k) % 360);
+	if (x >= 22 || y >= 17) return [0, 0, 0, 0];
+	if (y >= 1 && x >= 1 && x < 11) { const c = x - 1, r = y - 1; return c >= 2 && c < 4 && r >= 5 && r < 7 ? [0, 0, 0, 0] : turn(REGION_FRONT[quadrant(c, r)]); }
+	if (y >= 1 && x >= 12) return turn(REGION_BACK[quadrant(x - 12, y - 1)]);
+	return [245, 245, 245, 255];
+}
+function regionFrame(i, n, scale) {
+	const w = 22 * scale, h = 17 * scale, px = new Uint8Array(w * h * 4);
+	for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px.set(regionPixel(x / scale, y / scale, i), (y * w + x) * 4);
+	return px;
+}
 const ANIMATIONS = {
+	region: { scale: 16, durations: [120, 60, 180, 90, 150, 240, 75, 105], frame: regionFrame },
+	'region-fast': { scale: 16, durations: Array.from({ length: 120 }, (_, i) => (i % 3 === 0 ? 34 : 33)), frame: regionFrame },
 	standard: { scale: 16, durations: [40, 80, 120, 60, 260, 50, 90, 150, 70, 110] },
 	hd: { scale: 32, durations: [60, 120, 90, 150, 45, 260, 80, 100] },
 	long: { scale: 16, durations: Array(120).fill(100) },
@@ -136,17 +162,17 @@ let animation = null;
 let animatedPoster = null;
 if (animatedName) {
 	const spec = ANIMATIONS[animatedName];
-	if (!spec) throw new Error("--animated standard|hd|long");
+	if (!spec) throw new Error("--animated standard|hd|long|region|region-fast");
 	const { scale, durations } = spec, n = durations.length, w = 22 * scale, h = 17 * scale, per = framesPerStrip(h);
 	const strips = [];
 	for (let first = 0; first < n; first += per) {
 		const count = Math.min(per, n - first), px = new Uint8Array(w * h * count * 4);
-		for (let k = 0; k < count; k++) px.set(syntheticFrame(first + k, n, scale), k * w * h * 4);
+		for (let k = 0; k < count; k++) px.set((spec.frame ?? syntheticFrame)(first + k, n, scale), k * w * h * 4);
 		const strip = encodePng(w, h * count, px), hash = crypto.createHash("sha256").update(strip).digest("hex");
 		files.set(`/test-capes/animated/${hash}.png`, badStrip && first > 0 ? Buffer.concat([strip.subarray(0, strip.length - 1), Buffer.from([0])]) : strip);
 		strips.push({ path: `animated/${hash}.png`, sha256: hash, bytes: strip.length, frames: count, url: `http://127.0.0.1:${port}/test-capes/animated/${hash}.png` });
 	}
-	const s = Math.min(scale, 16), step = scale / s, pw = 64 * s, ph = 32 * s, frame0 = syntheticFrame(0, n, scale), poster = new Uint8Array(pw * ph * 4);
+	const s = Math.min(scale, 16), step = scale / s, pw = 64 * s, ph = 32 * s, frame0 = (spec.frame ?? syntheticFrame)(0, n, scale), poster = new Uint8Array(pw * ph * 4);
 	for (let y = 0; y < 17 * s; y++) for (let x = 0; x < 22 * s; x++) {
 		const o = (y * step * w + x * step) * 4;
 		poster.set(frame0.subarray(o, o + 4), (y * pw + x) * 4);
@@ -158,7 +184,13 @@ if (animatedName) {
 }
 
 const capeFile = option("--cape", null);
-const png = animatedPoster ?? (capeFile ? fs.readFileSync(capeFile) : testCape());
+const regionScale = Number(option("--region-cape", 0));
+const regionCape = regionScale ? (() => { const w = 64 * regionScale, h = 32 * regionScale, px = new Uint8Array(w * h * 4);
+	for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px.set(regionPixel(x / regionScale, y / regionScale), (y * w + x) * 4);
+	return encodePng(w, h, px); })() : null;
+const assetFile = option("--asset", null);
+const realAsset = assetFile ? JSON.parse(fs.readFileSync(assetFile, "utf8")) : null;
+const png = animatedPoster ?? regionCape ?? (capeFile ? fs.readFileSync(capeFile) : testCape());
 const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
 const sha256 = badHash ? "0".repeat(64) : crypto.createHash("sha256").update(png).digest("hex");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -188,6 +220,7 @@ http.createServer((req, res) => {
 		const players = {};
 		for (const id of uuids) {
 			if (revoked || !equipped || (only && id !== only)) continue;
+			if (realAsset) { players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555556", kind: "cape", asset: realAsset } }; continue; }
 			players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555555", kind: "cape", asset: {
 				id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff", version: 1, path: "/test-capes/qa-cape.png", sha256, width, height,
 				url: `http://127.0.0.1:${port}/test-capes/qa-cape.png`, animation } } };

@@ -15,6 +15,7 @@
     "bridge.ContainerContentsBridgeMixin",
     "bridge.CullFrustumMixin",
     "bridge.DebugScreenOverlayAccessor",
+    "bridge.ElytraModelWingsAccessor",
     "bridge.GameBridgeMixin",
     "bridge.GuiGraphicsInvoker",
     "bridge.InventoryBridgeMixin",

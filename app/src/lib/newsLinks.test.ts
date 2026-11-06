@@ -24,28 +24,29 @@ test("news is this build's own releases when the feed can't be read", () => {
 });
 
 test("a release this build doesn't know comes from the feed, newest first, and opens its own page", () => {
-  const shown = newsReleases(notes, [feedRelease("1.0.2"), feedRelease("0.9.1", { title: "Changed" })]);
-  assert.deepEqual(versions(shown), ["1.0.2", notes[0].version, notes[1].version]);
-  assert.equal(releasePage(shown[0]), "https://flintclient.com/releases/1.0.2/");
+  // 9.x: newer than any release this build ships notes for.
+  const shown = newsReleases(notes, [feedRelease("9.0.2"), feedRelease("0.9.1", { title: "Changed" })]);
+  assert.deepEqual(versions(shown), ["9.0.2", notes[0].version, notes[1].version]);
+  assert.equal(releasePage(shown[0]), "https://flintclient.com/releases/9.0.2/");
   assert.equal(newsReleases(notes, [feedRelease("0.9.1", { title: "Changed" })], 9).find((n) => n.version === "0.9.1")?.title, notes.find((n) => n.version === "0.9.1")?.title, "this build's own notes win for a version both have");
-  assert.deepEqual(versions(newsReleases(notes, [feedRelease("1.0.9"), feedRelease("1.0.10")])).slice(0, 2), ["1.0.10", "1.0.9"], "by number, not text");
-  assert.equal(releasePage(newsReleases(notes, [feedRelease("1.0.2", { page_url: null })])[0]), null, "no page: shown, not clickable");
+  assert.deepEqual(versions(newsReleases(notes, [feedRelease("9.0.9"), feedRelease("9.0.10")])).slice(0, 2), ["9.0.10", "9.0.9"], "by number, not text");
+  assert.equal(releasePage(newsReleases(notes, [feedRelease("9.0.2", { page_url: null })])[0]), null, "no page: shown, not clickable");
 });
 
 test("a feed release that fails any check is left out", () => {
   const own = versions(notes.slice(0, 3));
   for (const bad of [
-    feedRelease("1.0.2-beta"),
-    feedRelease("../1.0.2"),
+    feedRelease("9.0.2-beta"),
+    feedRelease("../9.0.2"),
     feedRelease("1.0"),
-    feedRelease("1.0.2", { date: "2026-11-2" }),
-    feedRelease("1.0.2", { date: undefined }),
-    feedRelease("1.0.2", { title: " " }),
-    feedRelease("1.0.2", { title: "x".repeat(121) }),
-    feedRelease("1.0.2", { summary: { html: "<b>x</b>" } }),
-    feedRelease("1.0.2", { summary: "x".repeat(401) }),
+    feedRelease("9.0.2", { date: "2026-11-2" }),
+    feedRelease("9.0.2", { date: undefined }),
+    feedRelease("9.0.2", { title: " " }),
+    feedRelease("9.0.2", { title: "x".repeat(121) }),
+    feedRelease("9.0.2", { summary: { html: "<b>x</b>" } }),
+    feedRelease("9.0.2", { summary: "x".repeat(401) }),
     null,
-    "1.0.2",
+    "9.0.2",
     7,
   ]) {
     assert.deepEqual(versions(newsReleases(notes, [bad])), own, JSON.stringify(bad));

@@ -266,17 +266,10 @@ final class HudPage extends Node {
 			mods = add(new Big("EDIT FLINT MODS", Glyph.GRID, true, screen::openWindow));
 			widgets = add(new Big("HUDS", Glyph.PLUS, false, HudPage.this::toggleHuds));
 			tiles.add(add(new Tile("MC Settings", Glyph.GEAR, () -> screen.openScreen(MenuHost.optionsScreen(screen)))));
-			tiles.add(add(new Tile("Resource Packs", Glyph.LAYERS, () -> {
-				if (MenuHost.packOrganizer()) {
-					ModMenuScreen.showModule(com.flintclient.client.control.model.mods.UtilityMods.PackOrganizer.ID);
-					screen.openWindow();
-				} else {
-					Object packs = MenuHost.packsScreen(screen);
-					if (packs != null) {
-						screen.openScreen(packs);
-					}
-				}
-			})));
+			// Your Flint Store cosmetics, over the game: what you wear changes in game as you pick it, without leaving the world
+			// or the server (the Cosmetics window, as the main menu opens it); closing it comes back here. Resource packs stay one
+			// click away in MC Settings (and in Pack Organizer).
+			tiles.add(add(new Tile("Cosmetics", Glyph.GEM, () -> screen.openScreen(new FlintCosmeticsScreen(screen)))));
 			tiles.add(add(new Tile("Screenshots", Glyph.CAMERA, () -> {
 				Object shots = MenuHost.screenshotsScreen(screen);
 				if (shots != null) {

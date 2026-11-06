@@ -4,6 +4,7 @@ import meritStar2x from "../../assets/brand/merit-star-46.png";
 import meritStar3x from "../../assets/brand/merit-star-69.png";
 import wallpaper from "../../assets/wallpapers/26_3.jpg";
 import { api, errorText, type Account } from "../../lib/api";
+import { capeNoticeKey, type CapeConflict } from "../../lib/capeConflict";
 import { NO_CAPE, type ShownCape } from "../../lib/capeSource";
 import { joinRewards } from "../../lib/community";
 import { useDisplayedCape } from "../../lib/displayedCape";
@@ -33,6 +34,7 @@ import { Icon, type IconName } from "../../ui/Icon";
 import { FlintMark } from "../../ui/Logo";
 import { Menu, Popover, Tooltip, useToast, type MenuItem } from "../../ui/overlays";
 import type { Navigate } from "../shell/Shell";
+import { CapeConflictDialog } from "../store/CapeConflictDialog";
 import { StoreActivityPanel, type Activity, type ActivityTab } from "../store/StoreActivity";
 import { StoreApproveDialog } from "../store/StoreApprove";
 import { StoreInventoryCard, type Wearing } from "../store/StoreInventory";
@@ -185,6 +187,9 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
   const [activityRun, setActivityRun] = useState(0);
   const [panel, setPanel] = useState<ActivityTab | null>(null);
   const [approving, setApproving] = useState(false);
+  /** Profiles where a cape mod can hide the cape just put on (shown once per visit for the same mods in the same profiles). */
+  const [capeConflicts, setCapeConflicts] = useState<CapeConflict[] | null>(null);
+  const noticed = useRef(new Set<string>());
   const now = useNow(30_000);
   const storeUrl = view?.storeUrl ?? info?.storeUrl ?? "https://store.flintclient.com";
   const host = storeHost(storeUrl);
@@ -273,13 +278,20 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
       setActivityRun((n) => n + 1);
     });
 
-  /** Shown at once; the Store's answer then replaces it, or the previous state comes back with the reason. */
+  /**
+   * Shown at once; the Store's answer then replaces it, or the previous state comes back with the reason. A cape put on
+   * is the account's everywhere, but a mod that shows its own capes can hide it in its profile: once worn, a small notice
+   * names those mods and profiles (lib/capeConflict.ts), asked for while the Store answers.
+   */
   const wear = async (slot: StoreSlot, cosmeticId: string | null) => {
     if (pending) return;
     setPending({ slot, cosmeticId });
     setWearError(null);
+    const conflicts = slot === "cape" && cosmeticId ? api.capeModConflicts().catch((): CapeConflict[] => []) : null;
+    let worn = false;
     try {
       show(await api.storeEquip(uuid, slot, cosmeticId));
+      worn = true;
     } catch (e) {
       const text = errorText(e);
       setWearError({ slot, text });
@@ -287,6 +299,12 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
       await reload(false);
     } finally {
       setPending(null);
+    }
+    const found = worn && conflicts ? await conflicts : [];
+    const key = capeNoticeKey(found);
+    if (found.length && !noticed.current.has(key)) {
+      noticed.current.add(key);
+      setCapeConflicts(found);
     }
   };
 
@@ -402,6 +420,7 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
         onRetry={() => setActivityRun((n) => n + 1)}
       />
       <StoreApproveDialog open={approving} onClose={() => setApproving(false)} uuid={uuid} name={account.username} host={host} disabled={offline} />
+      <CapeConflictDialog conflicts={capeConflicts} onClose={() => setCapeConflicts(null)} />
     </>
   );
 

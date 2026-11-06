@@ -1,6 +1,6 @@
 [package]
 name = "flint-app"
-version = "1.0.1"
+version = "1.0.2"
 description = "The Flint Client desktop application"
 authors = ["Flint Client"]
 license = "GPL-3.0-only"

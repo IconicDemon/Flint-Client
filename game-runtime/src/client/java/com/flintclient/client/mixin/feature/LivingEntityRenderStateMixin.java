@@ -12,13 +12,26 @@ import org.spongepowered.asm.mixin.Unique;
 
 /**
  * Room on a living thing's render state for Mob Overlay's fill ({@link MobFillState}), Nametags' chat bubbles
- * ({@link NametagState}), Health Indicators' hearts and the entity itself for Animations.
+ * ({@link NametagState}), Health Indicators' hearts, the entity itself for Animations, and whether its elytra is drawn as its
+ * Flint Store cape ({@link com.flintclient.client.control.platform.CapeWingsState}).
  */
 @Mixin(LivingEntityRenderState.class)
 abstract class LivingEntityRenderStateMixin implements MobFillState, NametagState, com.flintclient.client.control.platform.Mc263HealthIndicators.Health,
-	com.flintclient.client.control.platform.EntityRef {
+	com.flintclient.client.control.platform.EntityRef, com.flintclient.client.control.platform.CapeWingsState {
 	@Unique
 	private net.minecraft.world.entity.@Nullable LivingEntity flint$entity;
+	@Unique
+	private boolean flint$capeWings;
+
+	@Override
+	public boolean flint$capeWings() {
+		return flint$capeWings;
+	}
+
+	@Override
+	public void flint$capeWings(boolean capeWings) {
+		flint$capeWings = capeWings;
+	}
 
 	@Override
 	public net.minecraft.world.entity.@Nullable LivingEntity flint$entity() {

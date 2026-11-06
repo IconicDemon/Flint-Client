@@ -12,6 +12,7 @@ word RenderTypes RenderType
 replace net.minecraft.client.model.player.PlayerModel net.minecraft.client.model.PlayerModel
 replace net.minecraft.client.model.player.PlayerCapeModel net.minecraft.client.model.PlayerCapeModel
 replace net.minecraft.client.model.object.skull. net.minecraft.client.model.
+replace net.minecraft.client.model.object.equipment.ElytraModel net.minecraft.client.model.ElytraModel
 replace net.minecraft.world.entity.projectile.arrow. net.minecraft.world.entity.projectile.
 replace net.minecraft.world.entity.animal.equine. net.minecraft.world.entity.animal.horse.
 replace net.minecraft.world.entity.npc.villager.VillagerType net.minecraft.world.entity.npc.VillagerType

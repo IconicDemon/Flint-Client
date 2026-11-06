@@ -32,6 +32,8 @@ import org.jspecify.annotations.Nullable;
  * algorithms became the whole list) needs nothing here: an option key the list no longer has reads as the default, Velocity
  * based, Natural Motion Blur's recommended one. Every other Motion Blur setting kept its id and meaning; the two new ones
  * ({@code quality}, {@code movementBlur}) start at their defaults.</li>
+ * <li>Wavy Capes {@code capeMovement} → {@code movement}, whose new default is Realistic: the old default, Simulation 3D, becomes
+ * Realistic (a file can't tell it from a choice); Vanilla, Simulation and Dungeons, which were chosen, stay.</li>
  * <li>The style's "Show label" off → {@code labelPosition} Hidden (Ping, CPS), {@code showLabel} off (FPS) or
  * {@code labels} off (Coordinates), when the file has no such setting yet. Those modules' own setting decides the label from then
  * on, so the override is dropped then (it leaves the file on the next save).</li>
@@ -67,6 +69,8 @@ public final class ModuleMigrations {
 		"colorBlockHitResult", "colorEntityHitResult", "animate", "animateAlpha", "animatePos", "animationDuration",
 		"showPieByDefault", "showHelpTips");
 	private static final List<String> TOASTS_RETIRED = List.of("enabled", "advancement", "recipe", "system", "tutorial");
+	/** Wavy Capes' movement was {@code capeMovement} (Simulation 3D by default); it is {@code movement} now, Realistic by default. */
+	private static final List<String> WAVY_CAPES_RETIRED = List.of("capeMovement");
 
 	private ModuleMigrations() {
 	}
@@ -99,6 +103,7 @@ public final class ModuleMigrations {
 					module.set(com.flintclient.client.control.model.mods.UtilityMods.Titles.DISABLE, !shown);
 				}
 			}
+			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> wavyCapes(module, settings);
 			case com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.ID -> {
 				// Shulker Preview {@code show}: Holding Shift is now the hold switch (the key stays Shift).
 				if ("shift".equals(string(settings, "show")) && !has(settings, com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.HOLD)) {
@@ -180,8 +185,28 @@ public final class ModuleMigrations {
 			case com.flintclient.client.control.model.mods.LookMods.Hearts.ID -> HEARTS_RETIRED;
 			case com.flintclient.client.control.model.mods.VisualMods.ParticleChanger.ID -> PARTICLES_RETIRED;
 			case com.flintclient.client.control.model.mods.ToolMods.DropPrevention.ID -> DROP_RETIRED;
+			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> WAVY_CAPES_RETIRED;
 			default -> NONE;
 		};
+	}
+
+	/**
+	 * Wavy Capes' older {@code capeMovement}: a movement other than its default (Simulation 3D) was chosen and stays; the default
+	 * becomes the new one, Realistic. Only when the file has no {@code movement} yet.
+	 */
+	private static void wavyCapes(ModuleState module, @Nullable JsonObject settings) {
+		OptionSetting movement = com.flintclient.client.control.model.mods.VisualMods.WavyCapes.MOVEMENT;
+		String old = string(settings, "capeMovement");
+		if (old == null || has(settings, movement)) {
+			return;
+		}
+		int chosen = switch (old) {
+			case "vanilla" -> com.flintclient.client.control.model.mods.VisualMods.WavyCapes.VANILLA;
+			case "basic_simulation" -> com.flintclient.client.control.model.mods.VisualMods.WavyCapes.SIMULATION;
+			case "dungeons" -> com.flintclient.client.control.model.mods.VisualMods.WavyCapes.DUNGEONS;
+			default -> com.flintclient.client.control.model.mods.VisualMods.WavyCapes.REALISTIC;
+		};
+		module.set(movement, chosen);
 	}
 
 	/**

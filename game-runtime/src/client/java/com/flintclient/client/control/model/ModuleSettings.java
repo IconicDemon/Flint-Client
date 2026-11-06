@@ -631,10 +631,11 @@ public final class ModuleSettings {
 		if (setting == VisualMods.WavyCapes.GRAVITY || setting == VisualMods.WavyCapes.HEIGHT || setting == VisualMods.WavyCapes.SIDEWAYS
 			|| setting == VisualMods.WavyCapes.GRAVITY_VECTOR) {
 			int movement = module.option(VisualMods.WavyCapes.MOVEMENT);
-			if (movement == 0) {
+			if (movement == VisualMods.WavyCapes.VANILLA) {
 				return "Only with a simulated movement";
 			}
-			return setting == VisualMods.WavyCapes.SIDEWAYS && movement == 1 ? "Simulation (2D) doesn't swing sideways" : null;
+			return setting == VisualMods.WavyCapes.SIDEWAYS && movement == VisualMods.WavyCapes.SIMULATION
+				? "Simulation (2D) doesn't swing sideways" : null;
 		}
 		if (setting == VisualMods.Hotbar.EXPERIENCE_SCALE) {
 			return module.bool(VisualMods.Hotbar.EXPERIENCE_FOLLOWS) ? "Following the hotbar's size" : null;

@@ -1,9 +1,24 @@
 [
   {
+    "version": "1.0.2",
+    "date": "2026-11-06",
+    "page_url": "https://flintclient.com/releases/1.0.2/",
+    "title": "Your cape on your elytra, and smoother capes",
+    "summary": "Your Flint Store cape now covers your elytra wings, animated with it, as the Flint Store previews it. Change what you wear from the Right Shift menu without leaving your server, Wavy Capes moves like a real cloak, and Flint tells you when another cape mod can hide your cape.",
+    "points": [
+      "Cape design on elytra: wear an elytra and your Flint Store cape becomes your wings, its design outside and its lining inside, and an animated cape plays on the wings in step with the cape. Other Flint players see it too; turn it off in Right Shift, Settings, Cosmetics",
+      "Right Shift menu: Cosmetics takes the place of Resource Packs. Pick a cape and it changes in game right away, without leaving the world or the server; other Flint players see it within a minute. Resource packs stay in MC Settings",
+      "Wavy Capes: a new Realistic movement, now the default, moves your cape smoothly at any frame rate, with natural gravity as you walk, run, jump, crouch and swim, and no more jitter or popping",
+      "A short notice when another mod that shows its own capes, such as Capes or Essential, is on and can hide your Flint cape, in the Flint app and in game",
+      "The news on Home is smaller: one compact row per release",
+      "The What’s new card in game names the version, and its notes scroll all the way down"
+    ]
+  },
+  {
     "version": "1.0.1",
     "date": "2026-11-08",
     "page_url": "https://flintclient.com/releases/1.0.1/",
-    "title": "Flint 1.0",
+    "title": "First public release",
     "summary": "The first general release: Flint Friends and Flint capes inside Minecraft on every version, a redesigned Store page, a smaller and faster launcher, and fixes for the bugs players told us about.",
     "points": [
       "Flint Friends inside Minecraft on every version, 1.8.9 included: chat, answer requests, pin friends and send gifts from the title screen, with a short note when a friend comes online or messages you",

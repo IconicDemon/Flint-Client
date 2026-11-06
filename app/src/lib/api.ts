@@ -6,6 +6,7 @@ import type { MemoryLimits } from "./memory";
 import { storeFeed, type StoreChanges, type StoreInfo, type StoreOrder, type StoreSlot, type StoreView, type StoreWallet } from "./storeSync";
 import type { ChatMessage, Me, MyStatus, SearchPlayer, SocialSnapshot } from "./social";
 import type { AttemptView, CommunityCatalog, ConnectionsView, LinkStart, Recheck, RewardsView } from "./community";
+import type { CapeConflict } from "./capeConflict";
 
 export type Account = {
   uuid: string;
@@ -852,6 +853,8 @@ export const api = {
   storeSignOut: (uuid: string) => call<void>("store_sign_out", { uuid }).then(() => storeFeed.publish({ kind: "signedOut", uuid })),
   storeChanges: (uuid: string, since: number | null) => call<StoreChanges>("store_changes", { uuid, since }),
   storeEquip: (uuid: string, slot: StoreSlot, cosmeticId: string | null) => call<StoreView>("store_equip", { uuid, slot, cosmeticId }).then(fed),
+  /** The profiles where a mod that shows its own capes is on (src-tauri/src/capemods.rs): they can hide a Flint cape there. */
+  capeModConflicts: () => call<CapeConflict[]>("cape_mod_conflicts"),
   /** The texture of an item this account owns, checked against the Store's SHA-256 (a data URL). */
   storeAsset: (uuid: string, cosmeticId: string) => call<string>("store_asset", { uuid, cosmeticId }),
   /** Strip `index` of an animated cape this account owns (PNG bytes), checked against the Store's SHA-256 and size. */

@@ -426,29 +426,43 @@ public final class VisualMods {
 
 	public static final class WavyCapes {
 		public static final String ID = "wavy_capes";
-		// Wavey Capes (tr7zw; behaviour only, Flint's own code): its settings, with its ranges and defaults.
+		/** The movements ({@link #MOVEMENT}'s indices). */
+		public static final int REALISTIC = 0;
+		public static final int VANILLA = 1;
+		public static final int SIMULATION = 2;
+		public static final int SIMULATION_3D = 3;
+		public static final int DUNGEONS = 4;
+		// Wavey Capes (tr7zw; behaviour only, Flint's own code): its settings, with its ranges and defaults; and Realistic, the owner's
+		// Feather client's realistic cloaks (control/feature/CapeCloth), the default. Its gravity, height and strafe settings shape
+		// Realistic too, at Feather's own values by default.
 		public static final OptionSetting STYLE = new OptionSetting("capeStyle", "Cape style", "Smooth bends like cloth; Blocky bends pixel by pixel",
 			0, "smooth", "Smooth", "blocky", "Blocky");
 		public static final OptionSetting WIND_MODE = new OptionSetting("windMode", "Wind mode", "Waves: ripples run down the cape", 0, "none",
 			"None", "waves", "Waves");
-		public static final OptionSetting MOVEMENT = new OptionSetting("capeMovement", "Cape movement",
-			"Vanilla: Minecraft's own. Simulation: cloth physics; 3D swings sideways too. Dungeons: stiff, bending at the middle", 2,
-			"vanilla", "Vanilla", "basic_simulation", "Simulation", "basic_simulation_3d", "Simulation 3D", "dungeons", "Dungeons");
+		/** {@code movement} (Realistic first) replaced {@code capeMovement}, whose default was Simulation 3D: see ModuleMigrations. */
+		public static final OptionSetting MOVEMENT = new OptionSetting("movement", "Cape movement",
+			"Realistic: soft cloth that trails, lifts and settles smoothly. Vanilla: Minecraft's own. Simulation: Wavey Capes' cloth; 3D swings "
+				+ "sideways too. Dungeons: stiff, bending at the middle", REALISTIC,
+			"realistic", "Realistic", "vanilla", "Vanilla", "basic_simulation", "Simulation", "basic_simulation_3d", "Simulation 3D", "dungeons",
+			"Dungeons");
 		public static final BoolSetting OTHERS = new BoolSetting("others", "Other players' capes", "Off: only your own cape moves", true);
-		public static final IntSetting GRAVITY = new IntSetting("gravity", "Gravity", "How quickly it falls back to hanging", 25, 5, 32, 1, "");
+		public static final IntSetting GRAVITY = new IntSetting("gravity", "Gravity", "How quickly it falls back to hanging; more lifts it less", 25,
+			5, 32, 1, "");
 		public static final IntSetting HEIGHT = new IntSetting("heightMultiplier", "Height multiplier",
 			"How much going up and down lifts or drops it", 6, 4, 16, 1, "");
-		public static final IntSetting SIDEWAYS = new IntSetting("straveMultiplier", "Strafe multiplier", "How much moving sideways swings it", 2,
-			0, 10, 1, "");
+		public static final IntSetting SIDEWAYS = new IntSetting("straveMultiplier", "Strafe multiplier",
+			"How much strafing (and in Realistic, turning) swings it sideways", 2, 0, 10, 1, "");
 		public static final BoolSetting GRAVITY_VECTOR = new BoolSetting("computeGravityVector", "Compute gravity vector",
-			"Hangs along the body however it's turned (flying, swimming), not straight down", false);
+			"Hangs towards the ground however your body is turned (crouching, swimming), not along your body", false);
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Wavy Capes", "Capes that move with you")
-			.keywords("cape", "capes", "wavy", "physics", "cloth", "minecon", "wind").icon(IconId.GAUGE).category(Category.VISUAL)
+			.keywords("cape", "capes", "wavy", "physics", "cloth", "minecon", "wind", "realistic", "cloak").icon(IconId.GAUGE)
+			.category(Category.VISUAL)
 			.section("Cape", STYLE, WIND_MODE, MOVEMENT, OTHERS).section("Physics", GRAVITY, HEIGHT, SIDEWAYS, GRAVITY_VECTOR)
 			.needs(Requirement.WORLD)
-			.note("The capes Minecraft already shows (Mojang and Minecon capes) hang and move like cloth: they stream out behind as you run, "
-				+ "lift as you fall, swing round as you turn and never pass into your back or a 3D jacket. Elytras and capes in menus are "
-				+ "unchanged. Flint adds no capes of its own.").build();
+			.note("Capes players wear (Mojang, Minecon and Flint Store capes) hang and move like cloth: they stream out behind as you run, "
+				+ "lift as you fall, swing as you strafe and turn, settle when you stop and never pass into your back or a 3D jacket, "
+				+ "smoothly at any frame rate. Elytras and capes in menus are unchanged. Wavy Capes gives no one a cape: it moves the ones "
+				+ "players already wear.").build();
 	}
 
 	public static final class Momentum {

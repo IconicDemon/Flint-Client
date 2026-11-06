@@ -121,6 +121,7 @@
     "feature.OptionsFeatureMixin",
     "feature.PlayerInfoMixin",
     "feature.WingsLayerMixin",
+    "feature.ElytraModelMixin",
     "feature.PlayerMixin",
     "feature.PlayerTabOverlayMixin",
     "feature.ScreenEffectRendererMixin",

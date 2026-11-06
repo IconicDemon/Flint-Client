@@ -58,6 +58,30 @@ if (params.has("demo")) {
     db.active = null;
   }
 }
+// `?demo&capes`: the Capes mod (it shows capes of its own) is on in the 26.2 profile, so wearing a Flint cape on the Store
+// page (`&store=in`) says it can hide the cape there. `&capes=2`: Essential is on in Iconic too, beside a switched-off MinecraftCapes
+// (which doesn't count). The mock's `modId` stands in for the jar's fabric.mod.json id (src-tauri/src/capemods.rs).
+if (params.has("demo") && params.has("capes")) {
+  const mod = (title: string, fileName: string, modId: string, enabled = true) => ({
+    kind: "mod", title, projectId: `mock-${modId}`, fileName, versionNumber: "1.0.0", versionId: `v-${modId}`, iconUrl: null, source: "manual", size: 90_000, enabled, missing: false, tracked: false, identified: true, requires: [], modId,
+  });
+  db.mods.demo262 = [...(db.mods.demo262 ?? []), mod("Capes", "capes-1.5.10+26.2.jar", "capes")];
+  if (params.get("capes") === "2") {
+    db.mods.demoiconic = [mod("Essential", "Essential (fabric_26.3).jar", "essential-container"), mod("MinecraftCapes", "minecraftcapes-fabric-26.3-1.1.0.jar", "minecraftcapes", false)];
+    db.profiles = db.profiles.map((p) => (p.id === "demoiconic" ? { ...p, lastPlayed: Date.now() / 1000 - 3600 } : p));
+  }
+}
+/** The mock's cape mods by id (the real list: src-tauri/src/capemods.rs `CAPE_MODS`). */
+const MOCK_CAPE_MODS: Record<string, string> = { capes: "Capes", "essential-container": "Essential", minecraftcapes: "MinecraftCapes" };
+/** `cape_mod_conflicts` over the mock's profiles: Fabric ones, the selected first, then the latest played. */
+function capeModConflicts() {
+  const order = [...db.profiles].filter((p) => p.loader === "fabric").sort((a, b) => Number(b.id === db.selected) - Number(a.id === db.selected) || (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));
+  return order.flatMap((p) => {
+    const mods = [...new Set(((db.mods[p.id] ?? []) as any[]).filter((m) => m.enabled && MOCK_CAPE_MODS[m.modId]).map((m) => MOCK_CAPE_MODS[m.modId]))];
+    return mods.length ? [{ profileId: p.id, profileName: p.name, gameVersion: p.gameVersion, mods }] : [];
+  });
+}
+
 // `?ob=<step>`: onboarding opened at that step (2 is Import), already signed in. `flow` is Onboarding.tsx's FLOW_VERSION.
 if (params.has("ob")) {
   const player = { uuid: "069a79f444e94726a5befca90e38aaf5", username: "IconicDemon", addedAt: Date.now() / 1000 };
@@ -1200,6 +1224,8 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
       return { path: "C:\\Users\\Steve\\Downloads\\Flint diagnostics 2026-11-02-19-27.zip", size: 1_840_000, files: 14 };
     case "diagnostics_reveal":
       return;
+    case "cape_mod_conflicts":
+      return capeModConflicts();
     // The Flint Store: devMockStore.ts (`?store=…` flags pick its state).
     case "store_info":
     case "store_inventory":

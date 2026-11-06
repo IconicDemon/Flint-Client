@@ -743,18 +743,16 @@
   filter: drop-shadow(0 0 3px rgba(255, 140, 60, 0.35)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
 }
 
-/* A release's own banner (1.0.1): the panel's full width above the text, always whole at 16:9 (never cropped, dimmed or
-   covered: its logo is top left and its text runs down the left half), framed by a hairline on every theme. */
-.news-item.is-featured {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
+/* Every Flint release is one compact row: a 16:9 picture beside its text, the same width for every row so the text lines
+   up and the panel stays small. */
+.news-item.is-flint > .news-art {
+  width: calc(46px * 16 / 9);
+  height: 46px;
 }
 
-.news-item.is-featured > .news-art.is-banner {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
+/* A release's own banner (1.0.1) as its row's picture: always whole at 16:9 (never cropped, dimmed or covered: its logo is
+   top left and its text runs down the left half), framed by a hairline on every theme. */
+.news-item > .news-art.is-banner {
   background: #000;
   box-shadow: none;
 }
@@ -768,12 +766,6 @@
   border-radius: inherit;
   box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.1);
   pointer-events: none;
-}
-
-/* The open-in-browser arrow stays by the text, off the banner. */
-.news-item.is-featured .news-go {
-  top: auto;
-  bottom: 9px;
 }
 
 .news-text {
@@ -897,26 +889,6 @@
   }
 }
 
-/* Windows under 880px tall have no room above the news for the full banner (the side column would pass the top bar):
-   it sits beside the text like the other pictures, still whole at 16:9, and every news picture takes the same 16:9
-   width so the text lines up. */
-@media (max-height: 880px) {
-  .news-item.is-featured {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 11px;
-  }
-  .news-item.is-flint > .news-art,
-  .news-item.is-featured > .news-art.is-banner {
-    width: calc(46px * 16 / 9);
-    height: 46px;
-  }
-  .news-item.is-featured .news-go {
-    top: 9px;
-    bottom: auto;
-  }
-}
-
 @media (max-height: 780px) {
   .home-layout {
     padding-top: 60px;
@@ -930,8 +902,7 @@
     width: 40px;
     height: 40px;
   }
-  .news-item.is-flint > .news-art,
-  .news-item.is-featured > .news-art.is-banner {
+  .news-item.is-flint > .news-art {
     width: calc(40px * 16 / 9);
     height: 40px;
   }

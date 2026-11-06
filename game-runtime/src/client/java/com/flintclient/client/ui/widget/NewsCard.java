@@ -8,7 +8,10 @@ import com.flintclient.client.render.TextLine;
 import java.util.Locale;
 import net.minecraft.network.chat.Component;
 
-/** The small "What's new" card: the bundled notes for this Flint version. Opens the full notes. */
+/**
+ * The small "What's new" card: the bundled notes for this Flint version, named by the version itself ("Flint 1.0.2"), with the
+ * release's title under it (its summary when it has none). Opens the full notes.
+ */
 public final class NewsCard extends FlintButton {
 	public static final float PAD_X = 6.8F;
 
@@ -20,10 +23,11 @@ public final class NewsCard extends FlintButton {
 	private int fittedFor = -1;
 
 	public NewsCard(WhatsNew.Note note, Runnable action) {
-		super(Component.translatable("flintclient.news.open", note.title()), action);
+		super(Component.translatable("flintclient.news.open", "Flint " + note.version()), action);
 		this.heading = new TextLine(FlintFonts.CAPS, Component.translatable("flintclient.news.heading").getString().toUpperCase(Locale.ROOT), 0.22F);
-		this.fullTitle = note.title();
-		this.fullSummary = note.summary().isEmpty() && !note.points().isEmpty() ? note.points().getFirst() : note.summary();
+		this.fullTitle = "Flint " + note.version();
+		String summary = note.summary().isEmpty() && !note.points().isEmpty() ? note.points().getFirst() : note.summary();
+		this.fullSummary = note.title().isEmpty() ? summary : note.title();
 		this.title = new TextLine(FlintFonts.STRONG, fullTitle);
 		this.summary = new TextLine(FlintFonts.SMALL, fullSummary);
 	}

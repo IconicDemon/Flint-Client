@@ -193,6 +193,26 @@ class ModuleMigrationsTest {
 	}
 
 	@Test
+	void wavyCapesOldDefaultMovementBecomesRealisticAndChosenOnesStay() {
+		String id = com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID;
+		OptionSetting movement = com.flintclient.client.control.model.mods.VisualMods.WavyCapes.MOVEMENT;
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.REALISTIC,
+			read(id, "{\"capeMovement\": \"basic_simulation_3d\"}").option(movement), "the old default becomes the new one");
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.VANILLA,
+			read(id, "{\"capeMovement\": \"vanilla\"}").option(movement));
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.SIMULATION,
+			read(id, "{\"capeMovement\": \"basic_simulation\"}").option(movement));
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.DUNGEONS,
+			read(id, "{\"capeMovement\": \"dungeons\"}").option(movement));
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.SIMULATION_3D,
+			read(id, "{\"capeMovement\": \"vanilla\", \"movement\": \"basic_simulation_3d\"}").option(movement),
+			"a file that has the new setting keeps it");
+		assertEquals(com.flintclient.client.control.model.mods.VisualMods.WavyCapes.REALISTIC, read(id, "{}").option(movement),
+			"nothing old: Realistic");
+		assertTrue(ModuleMigrations.retiredKeys(ModuleRegistry.get(id)).contains("capeMovement"), "the old key leaves the file");
+	}
+
+	@Test
 	void retiredKeysAreListedPerModule() {
 		assertEquals(List.of("showRight"), ModuleMigrations.retiredKeys(ModuleRegistry.get(ModuleId.CPS)));
 		assertEquals(List.of("showMouse", "showSpace"), ModuleMigrations.retiredKeys(ModuleRegistry.get(ModuleId.KEYSTROKES)));

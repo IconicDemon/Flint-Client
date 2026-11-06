@@ -2,6 +2,7 @@ package com.flintclient.client.control.rshift;
 
 import static com.flintclient.client.control.rshift.MenuStyle.d;
 
+import com.flintclient.client.control.feature.CapeMods;
 import com.flintclient.client.control.feature.CapePng;
 import com.flintclient.client.control.rshift.MenuStyle.Label;
 import com.flintclient.client.control.rshift.MenuStyle.Type;
@@ -35,6 +36,10 @@ import org.jspecify.annotations.Nullable;
  * and wears, from the Flint app that started the game (the Store session stays the app's). Capes show their front, as the
  * app's Store page shows them; a click wears one (or None takes it off), which the Store decides, and your cape in game
  * changes with it. "Get more" opens the Flint Store after Minecraft's link confirmation. Same window on every Minecraft line.
+ *
+ * <p>While a mod that puts its own capes on players is loaded ({@link CapeMods}), it can hide a Flint cape in this game: a
+ * quiet line under the note says so, and wearing a cape shows a small notice (once per window) naming the mod. The cape is
+ * worn all the same, as it is the account's.
  */
 public final class FlintCosmeticsScreen extends WindowScreen {
 	private final CosmeticsPage page = new CosmeticsPage();
@@ -93,6 +98,10 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 		private final Label title = new Label(Type.HEADER_TITLE, "COSMETICS");
 		private final Lines note = new Lines(Type.ROW_NOTE, "Click one to wear it: other Flint players see it on you in game. The Flint Store decides what you own.");
 		private final Label stale = new Label(Type.CAPTION, "OFFLINE · THE STORE'S LAST LIST");
+		/** The cape mods loaded in this game: while there are any, they can hide a Flint cape here. */
+		private final List<String> capeMods = CapeMods.inThisGame();
+		private final Lines capeHint = new Lines(Type.ROW_NOTE, capeMods.isEmpty() ? "" : CapeMods.hint(capeMods));
+		private boolean noticeShown;
 		private final Label emptyTitle = new Label(Type.EMPTY, "");
 		private final Lines emptyBody = new Lines(Type.EMPTY_NOTE, "");
 		private final Button more;
@@ -161,6 +170,10 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			if (java.util.Objects.equals(now.worn(slot), id)) {
 				return;
 			}
+			if ("cape".equals(slot) && id != null && !capeMods.isEmpty() && !noticeShown) {
+				noticeShown = true;
+				FlintCosmeticsScreen.this.showModal(new CapeNotice(capeMods));
+			}
 			wearing.put(slot, id == null ? "" : id);
 			client.run(() -> link.equip(who, slot, id), got -> {
 				shown = got;
@@ -219,8 +232,13 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			more.setBounds(right - mw, y + pad + (d(HEAD) - bh) / 2, mw, bh);
 			float rw = Math.max(d(150), retry.prefWidth());
 			retry.setBounds(x + (w - rw) / 2, y + h / 2 + d(70), rw, bh);
-			float listY = y + pad + d(HEAD) + d(6) + note.height(measure(), w - 2 * pad) + d(14);
+			float listY = y + pad + d(HEAD) + d(6) + note.height(measure(), w - 2 * pad) + hintHeight(w - 2 * pad) + d(14);
 			view.setBounds(x + pad - d(6), listY, w - 2 * pad + d(12), Math.max(0, y + h - pad - listY));
+		}
+
+		/** The cape-mod line's height with its gap above (none without a cape mod). */
+		private float hintHeight(float width) {
+			return capeMods.isEmpty() ? 0 : d(8) + capeHint.height(measure(), width - d(22));
 		}
 
 		void rebuild() {
@@ -274,7 +292,13 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				c.popOffset();
 			}
 			if (now != null && !empty) {
-				note.paint(c, x + pad, y + pad + d(HEAD) + d(6), w - 2 * pad, MenuStyle.NEUTRAL);
+				float noteY = y + pad + d(HEAD) + d(6);
+				note.paint(c, x + pad, noteY, w - 2 * pad, MenuStyle.NEUTRAL);
+				if (!capeMods.isEmpty()) {
+					float hintY = noteY + note.height(c, w - 2 * pad) + d(8);
+					Glyph.INFO.draw(c, x + pad + d(7), hintY + Lines.pitch(c) / 2, d(13), MenuStyle.WARN_TEXT);
+					capeHint.paint(c, x + pad + d(22), hintY, w - 2 * pad - d(22), MenuStyle.WARN_TEXT);
+				}
 				if (now.stale()) {
 					MenuStyle.text(c, stale, x + pad + 1.5F * title.width(c) + d(24), cy, MenuStyle.WARN_TEXT);
 				}
@@ -446,6 +470,99 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				}
 				MenuStyle.focusRing(c, x, y, w, h, rad, focus);
 			}
+		}
+	}
+
+	/**
+	 * The small notice a cape worn here gets while a cape mod is loaded: what is on, that it can hide the Flint cape, what to
+	 * do, and OK. In the window's look (a block, Minecraft's font), over the screen's dimmed backdrop; it rises in over
+	 * 160 ms. OK, Escape or a click beside it closes it; the cape is worn either way.
+	 */
+	private static final class CapeNotice extends Node {
+		private static final float W = 600;
+		private static final float PAD = 32;
+		private static final float ICON = 44;
+
+		private final Label title;
+		private final Lines body;
+		private final Button ok;
+		private final long openedAt = Clock.millis();
+		private int rise;
+		private float opacity = 1;
+		private float cardX;
+		private float cardY;
+		private float cardW;
+		private float cardH;
+
+		CapeNotice(List<String> mods) {
+			title = new Label(Type.EMPTY, CapeMods.noticeTitle(mods));
+			body = new Lines(Type.EMPTY_NOTE, CapeMods.notice(mods));
+			ok = add(new Button("OK", null, PageControls.Look.ACCENT, this::close));
+			name(title.text());
+		}
+
+		private void close() {
+			if (screen() != null) {
+				screen().closeModal(this);
+			}
+		}
+
+		@Override
+		public boolean interactive() {
+			return true;
+		}
+
+		@Override
+		public String narration() {
+			return title.text() + ". " + body.text();
+		}
+
+		@Override
+		public boolean mouseDown(float mx, float my, int button) {
+			if (mx < cardX || mx > cardX + cardW || my < cardY || my > cardY + cardH) {
+				close();
+			}
+			return false;
+		}
+
+		private float textW() {
+			return cardW - 2 * d(PAD) - d(ICON) - d(18);
+		}
+
+		@Override
+		protected void layout() {
+			cardW = Math.min(d(W), w - 2 * d(24));
+			float textH = d(26) + d(10) + body.height(measure(), textW());
+			cardH = d(PAD) + Math.max(d(ICON), textH) + d(28) + d(Button.H) + d(PAD);
+			cardX = x + Math.round((w - cardW) / 2);
+			cardY = y + Math.round((h - cardH) / 2);
+			float bw = Math.max(d(120), ok.prefWidth());
+			ok.setBounds(cardX + cardW - d(PAD) - bw, cardY + cardH - d(PAD) - d(Button.H), bw, d(Button.H));
+		}
+
+		/** Drawn from {@link #paint} (which moves and fades the card and its button) to {@link #paintOver} (which undoes it). */
+		@Override
+		protected void paint(Canvas c) {
+			float t = Kit.reduced() ? 1 : Math.min(1, (Clock.millis() - openedAt) / 160.0F);
+			float eased = 1 - (1 - t) * (1 - t) * (1 - t);
+			rise = Math.round(c.px(d(10)) * (1 - eased));
+			opacity = c.opacity();
+			c.setOpacity(opacity * eased);
+			c.pushOffset(0, rise);
+			MenuStyle.block(c, cardX, cardY, cardW, cardH, MenuStyle.radius(), 0, 0);
+			float ix = cardX + d(PAD);
+			float iy = cardY + d(PAD);
+			MenuStyle.box(c, ix, iy, d(ICON), d(ICON), d(ICON) / 2, Palette.withAlpha(MenuStyle.ACCENT, 0.14F));
+			Glyph.INFO.draw(c, ix + d(ICON) / 2, iy + d(ICON) / 2, d(20), MenuStyle.ACCENT);
+			float tx = ix + d(ICON) + d(18);
+			MenuStyle.text(c, title, tx, iy + d(13), MenuStyle.EMPTY_TEXT);
+			body.paint(c, tx, iy + d(26) + d(10), textW(), MenuStyle.SENTENCE_TEXT);
+		}
+
+		@Override
+		protected void paintOver(Canvas c) {
+			c.popOffset();
+			c.setOpacity(opacity);
 		}
 	}
 

@@ -385,14 +385,15 @@ function LaunchPanel({ profile, navigate }: { profile: Profile | null; navigate:
   );
 }
 
-/** A release's own banner, by version. A release without one keeps the sparks picture beside its text. */
+/** A release's own banner, by version: its row's picture. A release without one has the sparks picture. */
 const RELEASE_BANNERS: Record<string, string | undefined> = { "1.0.1": banner101 };
 
 /**
  * Home's news is Flint's own updates only (owner, 1.0.1), newest first: the releases this build ships notes for, shown at
  * once, plus any newer ones from Flint's public release feed once it arrives (lib/newsLinks.ts `newsReleases`; without
- * the feed, this build's own notes stay). The latest is featured with its banner when it has one; two more follow.
- * Minecraft's patch notes aren't shown.
+ * the feed, this build's own notes stay). Three compact rows of the same size (owner, 1.0.2: the full-width banner made
+ * the panel too big), each with its 16:9 picture: a release's own banner where it has one. Minecraft's patch notes aren't
+ * shown.
  */
 function NewsSection() {
   const t = useT();
@@ -412,13 +413,12 @@ function NewsSection() {
       <header>
         <h2 id="news-title">{t("home.news.title")}</h2>
       </header>
-      {newsReleases(RELEASE_NOTES, feed).map((note, i) => {
-        const banner = i === 0 ? RELEASE_BANNERS[note.version] : undefined;
+      {newsReleases(RELEASE_NOTES, feed).map((note) => {
+        const banner = RELEASE_BANNERS[note.version];
         return (
           <NewsItem
             key={note.version}
             flint
-            featured={!!banner}
             href={releasePage(note)}
             label={t("home.news.openFlint", { version: note.version })}
             art={
@@ -449,10 +449,9 @@ function NewsSection() {
 /**
  * One news item: picture, title (two lines at most), source and date, and a line of its description. With a page to
  * open it is a button (pointer, hover and press feedback, keyboard focus, Enter or Space) that opens it in the browser.
- * A featured item (a release with its own banner) puts its picture above the text, the news panel's full width.
  */
-function NewsItem({ href, label, art, title, meta, description, flint = false, featured = false }: { href: string | null; label: string; art: ReactNode; title: string; meta: string; description: string; flint?: boolean; featured?: boolean }) {
-  const kind = `${flint ? "is-flint" : ""} ${featured ? "is-featured" : ""}`;
+function NewsItem({ href, label, art, title, meta, description, flint = false }: { href: string | null; label: string; art: ReactNode; title: string; meta: string; description: string; flint?: boolean }) {
+  const kind = flint ? "is-flint" : "";
   const body = (
     <>
       {art}

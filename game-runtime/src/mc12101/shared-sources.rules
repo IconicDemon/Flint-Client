@@ -243,8 +243,11 @@ file control/platform/Mc263Capes.java
 # 1.21.1 keeps the cloak's trailing position on the player itself.
 s import net\.minecraft\.client\.entity\.ClientAvatarEntity;\n =>
 s living instanceof ClientAvatarEntity avatar => living instanceof net.minecraft.world.entity.player.Player avatar
-s avatar\.avatarState\(\)\.getInterpolatedCloakX\(partial\) => net.minecraft.util.Mth.lerp(partial, avatar.xCloakO, avatar.xCloak)
-s avatar\.avatarState\(\)\.getInterpolatedCloakZ\(partial\) => net.minecraft.util.Mth.lerp(partial, avatar.zCloakO, avatar.zCloak)
+s avatar\.avatarState\(\)\.getInterpolatedCloakX\(1\) => avatar.xCloak
+s avatar\.avatarState\(\)\.getInterpolatedCloakZ\(1\) => avatar.zCloak
+# 1.21.1 hangs the cape from the model, upright (the layer leans it; PlayerCapeModelMixin keeps only its turn), not from the body:
+# crouching doesn't lean it.
+s CROUCH_LEAN = 28\.647888F; => CROUCH_LEAN = 0F;
 
 file control/platform/Mc263Crosshair.java
 s Minecraft\.getInstance\(\)\.debugEntries\.isF3Visible\(\) => Minecraft.getInstance().gui.getDebugOverlay().showDebugScreen()
@@ -321,6 +324,9 @@ skip mixin/feature/FallingLeavesVanillaMixin.java
 # (java/) draws the nametag with Nametags' look, size and shadow.
 skip mixin/feature/ItemEntityRenderStateMixin.java
 skip mixin/feature/LivingEntityRenderStateMixin.java
+# The cape-derived elytra on 1.21.1: its elytra layer sets the model up and draws it as it renders, so WingsLayerMixin (java/)
+# sets the wing parts there; 1.21.1 has no render state for ElytraModelMixin to read.
+skip mixin/feature/ElytraModelMixin.java
 skip mixin/feature/NameTagShadowMixin.java
 skip mixin/feature/SubmitNodeCollectionMixin.java
 # Worn equipment (EquipmentLayerRenderer, 1.21.2): 1.21.1 draws armor in HumanoidArmorLayer (ArmorHurtMixin, java/). Chat lines: 1.21.1's

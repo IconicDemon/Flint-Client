@@ -1,5 +1,6 @@
 mod ai;
 mod auth;
+mod capemods;
 mod channel;
 mod content;
 mod core;
@@ -332,6 +333,7 @@ pub fn run() {
             store::store_sign_out,
             store::store_changes,
             store::store_equip,
+            capemods::cape_mod_conflicts,
             store::store_asset,
             store::anim::store_cape_strip,
             store::store_wallet,

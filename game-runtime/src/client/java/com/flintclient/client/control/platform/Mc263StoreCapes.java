@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,10 +45,12 @@ import org.jspecify.annotations.Nullable;
  * an elytra texture of Minecraft's stays, and with the option off only Minecraft's capes are drawn. A player Flint doesn't
  * know as wearing one keeps exactly the skin Minecraft gave.
  *
- * <p>Elytras follow Minecraft's rule (an elytra texture of the skin's, else the cape while it is shown, else the elytra's own):
- * a Store cape with elytra art is on the wings as a Minecraft cape is. One without (the Store's animated capes, and capes
- * drawn without wings) would make them an empty texture, so the wings get what Minecraft would have given them instead: the
- * wearer's Minecraft cape, or the elytra's own texture ({@link #wingsCape}, from {@code mixin/feature/WingsLayerMixin}).
+ * <p>Elytras: with "Cape design on elytra" on, a Store cape's wearer has wings made of that cape, static or animated
+ * ({@link Mc263CapeElytra}, which finds the cape by the skin: {@link #storeCape}). Otherwise elytras follow Minecraft's rule (an
+ * elytra texture of the skin's, else the cape while it is shown, else the elytra's own): a Store cape with elytra art is on
+ * Minecraft's wings as a Minecraft cape is; one without would make them an empty texture, so they get what Minecraft would
+ * have given them instead: the wearer's Minecraft cape, or the elytra's own texture ({@link #wingsCape}, from
+ * {@code mixin/feature/WingsLayerMixin}).
  *
  * <p>The Store is the launcher's ({@link StoreHandoff}: {@code .flint-store.json} in the game directory, looked at once a second
  * with one {@code stat} and read only when it changed); when its {@code equipRevision} changes (the player equipped or removed
@@ -64,6 +67,8 @@ public final class Mc263StoreCapes {
 	private static final List<UUID> WANTED = new ArrayList<>();
 	private static final List<AbstractClientPlayer> NEAR = new ArrayList<>();
 	private static final Map<UUID, Skinned> SKINS = new HashMap<>();
+	/** {@link #SKINS} by the skin they hand out (the very object a render state carries): the elytra finds its cape here. */
+	private static final Map<PlayerSkin, Skinned> BY_SKIN = new IdentityHashMap<>();
 	private static @Nullable StoreCapes<Texture> capes;
 	private static int ticks;
 	private static @Nullable StoreHandoff handoff;
@@ -171,6 +176,7 @@ public final class Mc263StoreCapes {
 	private static void failed(Throwable e) {
 		GUARD.fail(e);
 		SKINS.clear();
+		BY_SKIN.clear();
 		StoreCapes<Texture> service = capes;
 		if (service != null) {
 			try {
@@ -214,6 +220,7 @@ public final class Mc263StoreCapes {
 		if (!endpoint.equals(service.client().endpoint())) {
 			service.clear();
 			SKINS.clear();
+			BY_SKIN.clear();
 			capes = null;
 			return service();
 		}
@@ -240,8 +247,12 @@ public final class Mc263StoreCapes {
 			}
 			Skinned s = SKINS.get(id);
 			if (s == null || s.vanilla() != skin || s.texture() != texture) {
+				if (s != null) {
+					BY_SKIN.remove(s.skin());
+				}
 				s = new Skinned(skin, texture, withCape(skin, texture.id()), service.wings(id));
 				SKINS.put(id, s);
+				BY_SKIN.put(s.skin(), s);
 			}
 			return s.skin();
 		} catch (RuntimeException | LinkageError e) {
@@ -261,15 +272,31 @@ public final class Mc263StoreCapes {
 			return cape;
 		}
 		try {
-			for (Skinned s : SKINS.values()) {
-				if (s.skin() == skin) {
-					return s.wings() ? cape : s.vanilla().cape();
-				}
+			Skinned s = BY_SKIN.get(skin);
+			if (s != null) {
+				return s.wings() ? cape : s.vanilla().cape();
 			}
 			return cape;
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			return cape;
+		}
+	}
+
+	/**
+	 * The Store cape texture {@code skin} carries (a skin {@link #skin} gave a Store cape: loaded and verified), for the
+	 * cape-derived elytra ({@link Mc263CapeElytra}); null for any other skin, or while Store capes are off. Render thread.
+	 */
+	public static @Nullable Identifier storeCape(PlayerSkin skin) {
+		if (capes == null || !GUARD.on()) {
+			return null;
+		}
+		try {
+			Skinned s = BY_SKIN.get(skin);
+			return s == null ? null : s.texture().id();
+		} catch (RuntimeException | LinkageError e) {
+			GUARD.fail(e);
+			return null;
 		}
 	}
 

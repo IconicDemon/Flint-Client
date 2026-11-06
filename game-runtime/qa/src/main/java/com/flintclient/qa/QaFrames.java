@@ -39,6 +39,7 @@ public final class QaFrames {
 			mc.player.turn(turning * ((now - turnLast) / 1e9) / 0.15, 0);
 		}
 		turnLast = now;
+		QaCapes.frame();
 		if (!recording) {
 			return;
 		}

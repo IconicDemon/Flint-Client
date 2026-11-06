@@ -273,7 +273,8 @@ public final class Catalog {
 		GameOptions.MENU_KEY, GameOptions.HUD_EDITOR_KEY, GameOptions.NO_HOTBAR_LOOPING, GameOptions.MINIMAL_BOBBING, GameOptions.CLOCK_24H, GameOptions.LEAVE_KEY,
 		GameOptions.LEAVE_CONFIRM, GameOptions.MOD_KEYS, GameOptions.INACTIVE_FPS, GameOptions.LIMIT_UNFOCUSED, GameOptions.LIMIT_IDLE,
 		GameOptions.IDLE_MINUTES, GameOptions.IDLE_SECONDS, GameOptions.HUD_SCALE_STEP, GameOptions.MENU_SCALE,
-		GameOptions.MENU_SOUND, GameOptions.FLINT_BADGE, GameOptions.SHARE_PRESENCE, GameOptions.STORE_CAPES, GameOptions.VANILLA_MAIN_MENU);
+		GameOptions.MENU_SOUND, GameOptions.FLINT_BADGE, GameOptions.SHARE_PRESENCE, GameOptions.STORE_CAPES, GameOptions.CAPE_ELYTRA,
+		GameOptions.VANILLA_MAIN_MENU);
 
 	/** Parses and resolves a catalog; an unknown module, setting or icon is an error (the test reads the shipped file). */
 	static Catalog read(Reader reader) {
@@ -513,7 +514,7 @@ public final class Catalog {
 			}
 			// What players equipped in the Flint Store (in the launcher): beside the marks, also in plain view.
 			List<Row> cosmetics = new ArrayList<>();
-			clientRows.removeIf(row -> row.setting() == GameOptions.STORE_CAPES && cosmetics.add(row));
+			clientRows.removeIf(row -> (row.setting() == GameOptions.STORE_CAPES || row.setting() == GameOptions.CAPE_ELYTRA) && cosmetics.add(row));
 			if (!cosmetics.isEmpty()) {
 				sections.add(new Section("Cosmetics", cosmetics));
 			}

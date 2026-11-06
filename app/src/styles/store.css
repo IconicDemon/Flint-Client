@@ -1153,6 +1153,47 @@ button.store-tile:hover:not([aria-disabled="true"]) .store-art-cape {
   color: var(--fg);
 }
 
+/* ---------- Wearing a cape while a cape mod is on in a profile (CapeConflictDialog) ---------- */
+
+.cape-conflict-list {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.cape-conflict-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 14px;
+  line-height: 1.4;
+}
+
+.cape-conflict-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.cape-conflict-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.cape-conflict-list span {
+  flex-shrink: 0;
+  max-width: 55%;
+  text-align: right;
+  color: var(--text-3);
+}
+
+.cape-conflict-list .cape-conflict-more {
+  color: var(--text-3);
+}
+
 /* ---------- Hero: no account, signed out, locked, error, unreachable ---------- */
 
 .store-hero {
