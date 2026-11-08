@@ -13,11 +13,15 @@ import org.jspecify.annotations.Nullable;
  * rewards clients talk to this instead of the network, so the Daily Rewards screens can be tried and photographed before the
  * Backend is deployed. It follows the Backend's rewards rules (migration 20261104006700: 5, 5, 10, 15, 20, 25, 40, repeating
  * every 7 days; a missed day starts again at day 1; 24 hours between claims). {@code -Dflintqa.rewards.day=N} starts the streak at day N with today's reward waiting ({@code claimed}
- * adds {@code -Dflintqa.rewards.claimed=true}). Never used without the property. Version-neutral.
+ * adds {@code -Dflintqa.rewards.claimed=true}). {@code -Dflintqa.rewards.state=S} shows a state that isn't the rewards instead:
+ * {@code signedout} (Mojang refuses the account), {@code offline} (nothing answers), {@code loading} (no answer ever comes),
+ * {@code paused} (rewards switched off), {@code store} (no Store sign-in yet) or {@code refuse} (a claim refused as this
+ * network's daily limit). Never used without the property. Version-neutral.
  */
 public final class DemoServices {
 	public static final FlintServices SERVICES = new FlintServices("http://127.0.0.1", "flint-qa-demo");
 	private static final long HOUR = 3_600_000L;
+	private static final String STATE = System.getProperty("flintqa.rewards.state", "");
 
 	private long balance = 1_250;
 	private int day;
@@ -39,20 +43,24 @@ public final class DemoServices {
 	/** The transport that answers as Flint's servers and Mojang would. */
 	public static ProfileShareClient.Transport transport() {
 		DemoServices demo = new DemoServices();
-		return (uri, headers, body) -> CompletableFuture.supplyAsync(() -> demo.answer(uri, body), CompletableFuture.delayedExecutor(220,
-			java.util.concurrent.TimeUnit.MILLISECONDS));
+		return (uri, headers, body) -> switch (STATE) {
+			case "offline" -> CompletableFuture.failedFuture(new java.io.IOException("offline (QA demo)"));
+			case "loading" -> new CompletableFuture<>();
+			default -> CompletableFuture.supplyAsync(() -> demo.answer(uri, body), CompletableFuture.delayedExecutor(220,
+				java.util.concurrent.TimeUnit.MILLISECONDS));
+		};
 	}
 
 	private synchronized ProfileShareClient.Reply answer(URI uri, String body) {
 		String path = uri.getPath();
 		String name = path.substring(path.lastIndexOf('/') + 1);
 		return switch (name) {
-			case "join" -> new ProfileShareClient.Reply(204, "");
+			case "join" -> new ProfileShareClient.Reply("signedout".equals(STATE) ? 403 : 204, "");
+			case "merit_daily_claim" -> "refuse".equals(STATE) ? ok("{\"ok\":false,\"error\":\"ip_daily_limit\"}") : ok(claim().toString());
 			case "flint_signin_challenge" -> ok("{\"ok\":true,\"challenge\":\"" + java.util.UUID.randomUUID() + "\",\"server_id\":\"" + "e".repeat(40) + "\"}");
 			case "flint_presence_announce_v2" -> ok("{\"ok\":true,\"token\":\"" + "d".repeat(64) + "\",\"tag\":\"default\",\"ttl_seconds\":900}");
 			case "flint_presence_lookup" -> ok("{}");
 			case "merit_daily_status" -> ok(view(null).toString());
-			case "merit_daily_claim" -> ok(claim().toString());
 			default -> ok("{\"ok\":true}");
 		};
 	}
@@ -109,6 +117,11 @@ public final class DemoServices {
 		}
 		v.addProperty("server_time", Instant.ofEpochMilli(now).toString());
 		v.addProperty("max_reward", 40);
+		if ("paused".equals(STATE)) {
+			v.addProperty("enabled", false);
+		} else if ("store".equals(STATE)) {
+			v.addProperty("unavailable", "store_account_required");
+		}
 		JsonArray track = new JsonArray();
 		for (int d = first; d < first + 7; d++) {
 			track.add(JsonParser.parseString("{\"day\":" + d + ",\"reward\":" + amount(d) + "}"));

@@ -156,6 +156,8 @@ def generatedResources = layout.buildDirectory.dir("generated/flint-resources")
 def generateFlintResources = tasks.register("generateFlintResources") {
 	def notes = file("../../app/src/data/releaseNotes.json")
 	inputs.file(notes)
+	def coverDir = file("../../app/src/assets/news")
+	inputs.files(fileTree(dir: coverDir, include: "flint-*-cover.png"))
 	outputs.dir(generatedResources)
 	doLast {
 		def root = generatedResources.get().asFile
@@ -163,6 +165,16 @@ def generateFlintResources = tasks.register("generateFlintResources") {
 		def target = new File(root, "assets/flintclient/whats_new.json")
 		target.parentFile.mkdirs()
 		target.text = notes.text
+		// The release covers the launcher carries (the owner's art, 480x270), for the "What's new" page; linear sampling.
+		def covers = new File(root, "assets/flintclient/textures/gui/whats_new")
+		covers.mkdirs()
+		(coverDir.listFiles() ?: new File[0]).sort { it.name }.each { png ->
+			def version = (png.name =~ /^flint-(\d+\.\d+\.\d+)-cover\.png$/)
+			if (version.matches()) {
+				new File(covers, version.group(1) + ".png").bytes = png.bytes
+				new File(covers, version.group(1) + ".png.mcmeta").text = '{"texture":{"blur":true,"clamp":true}}'
+			}
+		}
 	}
 }
 

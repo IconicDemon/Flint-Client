@@ -31,6 +31,14 @@ public final class Texture {
 		this.pixels = pixels;
 	}
 
+	/**
+	 * A picture bundled in Flint's jar at {@code assets/flintclient/<path>}, which Minecraft's texture manager loads the first
+	 * time it is drawn (its {@code .mcmeta} says how it is sampled); null when this jar doesn't carry it.
+	 */
+	public static @Nullable Texture bundled(String path) {
+		return Texture.class.getResource("/assets/" + FlintClient.MOD_ID + "/" + path) == null ? null : new Texture(id(path));
+	}
+
 	/** The id of a texture of Flint's at {@code path} (not necessarily registered yet). */
 	static Identifier id(String path) {
 		return Identifier.fromNamespaceAndPath(FlintClient.MOD_ID, path);
@@ -60,6 +68,9 @@ public final class Texture {
 	 * bytes read as this machine's ints: {@code CapeFrames.Layout.RGBA_BYTES}), so this is one copy into a staging image made
 	 * at the first write and reused. Render thread, between frames (not inside a render pass).
 	 */
+	/** The layout {@link #writeTopLeft} takes. */
+	public static final com.flintclient.client.control.feature.CapeFrames.Layout WRITE_LAYOUT = com.flintclient.client.control.feature.CapeFrames.Layout.RGBA_BYTES;
+
 	public void writeTopLeft(int[] pixels, int width, int height) {
 		DynamicTexture texture = this.pixels;
 		if (texture == null) {

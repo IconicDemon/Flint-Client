@@ -325,6 +325,8 @@ public final class FlintTitleScreen extends TitleScreen {
 
 		footer.set(Component.translatable("flintclient.menu.footer", FlintInfo.flintVersion(), FlintInfo.minecraftVersion(), FlintInfo.loader()).getString());
 		layout.account = account;
+		layout.wordmark = wordmark;
+		layout.footer = footer;
 		layout.apply(width, height);
 		toastTop = (int) Math.ceil((layout.topBarBottom + 4) * MenuScale.pixels() / (double) Math.max(1, minecraft.getWindow().getGuiScale()));
 		placeAccountCard();
@@ -594,7 +596,7 @@ public final class FlintTitleScreen extends TitleScreen {
 	private void placeAccountCard() {
 		popW = Math.min(CARD_W, width - 8);
 		int right = Math.max(account.getX() + account.getWidth(), layout.topIcons.isEmpty() ? width - 8
-			: layout.topIcons.get(layout.topIcons.size() - 1).getX() + MenuLayout.ICON_BUTTON);
+			: layout.topIcons.get(layout.topIcons.size() - 1).getX() + layout.topIcons.get(layout.topIcons.size() - 1).getWidth());
 		popX = Math.max(4, Math.min(account.getX(), right - popW));
 		popY = account.getY() + account.getHeight() + 4;
 		int inner = popW - 2 * CARD_PAD;
@@ -1121,8 +1123,7 @@ public final class FlintTitleScreen extends TitleScreen {
 			}
 			c.setOpacity(before * opacity);
 			paintLogo(c, entrance);
-			int footerY = c.px(layout.footerY);
-			c.text(footer, (c.px(width) - c.width(footer)) / 2, footerY, Palette.MUTED);
+			paintFooter(c);
 			if (layout.railVisible) {
 				int border = Math.max(1, Math.round(c.scale() / 4.0F));
 				c.panel(c.px(layout.railX), c.px(layout.railY), c.px(layout.railW), c.px(layout.railH), c.px(3.6F), border, Palette.RAIL_BORDER, Palette.RAIL);
@@ -1222,15 +1223,62 @@ public final class FlintTitleScreen extends TitleScreen {
 	}
 
 	private void paintLogo(Canvas c, float entrance) {
-		int markH = c.px(layout.markHeight);
-		int markW = MaskAtlas.markWidth(markH);
-		int gap = c.px(4.6F);
-		int wordW = c.width(wordmark);
-		int left = (c.px(width) - (markW + gap + wordW)) / 2;
+		int screenW = c.px(width);
 		int rise = Math.round((1.0F - entrance) * c.px(2.0F));
 		int top = c.px(layout.logoY) + rise;
-		c.mark(left, top, markH, 1.0F);
-		// The wordmark's capitals are centred on the mark.
-		c.text(wordmark, left + markW + gap, c.baselineFor(wordmark, top + markH / 2), Palette.TEXT);
+		// At the size the player picked (Utilities › Menu sizes), in a frame that much larger: the wordmark is rasterised for
+		// the size it shows at, as crisp as at 100 %.
+		boolean sized = resized(layout.logoScale);
+		if (sized) {
+			Canvas.beginAtGuiScale(c.frame(), c.unitScale() * layout.logoScale);
+		}
+		try {
+			int markH = c.px(layout.markHeight);
+			int markW = MaskAtlas.markWidth(markH);
+			int gap = c.px(4.6F);
+			int wordW = c.width(wordmark);
+			int left = (screenW - (markW + gap + wordW)) / 2;
+			c.mark(left, top, markH, 1.0F);
+			// The wordmark's capitals are centred on the mark.
+			c.text(wordmark, left + markW + gap, c.baselineFor(wordmark, top + markH / 2), Palette.TEXT);
+		} finally {
+			if (sized) {
+				c.end();
+			}
+		}
+	}
+
+	/** The version line, centred, at the size the player picked for it (as the logo). */
+	private void paintFooter(Canvas c) {
+		int screenW = c.px(width);
+		int baseline = c.px(layout.footerY);
+		boolean sized = resized(layout.footerScale);
+		if (sized) {
+			Canvas.beginAtGuiScale(c.frame(), c.unitScale() * layout.footerScale);
+		}
+		try {
+			c.text(footer, (screenW - c.width(footer)) / 2, baseline, Palette.MUTED);
+		} finally {
+			if (sized) {
+				c.end();
+			}
+		}
+	}
+
+	private static boolean resized(float scale) {
+		return Math.abs(scale - 1.0F) > 0.001F;
+	}
+
+	// ---------- Utilities › Menu sizes ----------
+
+	/** The part sizes changed (or the window did, under the Menu sizes page): this menu is laid out again for them. */
+	void sizesChanged() {
+		rebuildWidgets();
+	}
+
+	/** Where {@code part} is on this menu, as last laid out (Menu sizes outlines the part a size changes), or null. */
+	MenuGeometry.@Nullable Box partBounds(MenuGeometry.Part part) {
+		MenuGeometry.Result result = layout.result;
+		return result == null ? null : result.bounds(part);
 	}
 }

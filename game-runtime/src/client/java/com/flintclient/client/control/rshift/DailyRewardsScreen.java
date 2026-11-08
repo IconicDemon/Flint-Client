@@ -240,17 +240,17 @@ public final class DailyRewardsScreen extends KitScreen {
 	}
 
 	/**
-	 * The window: a back button at its top left, outside it, and a block holding the rewards ({@link RewardsPage}), sized to
-	 * the window and kept in proportion as the Right Shift menu is.
+	 * The window: one centred block holding the rewards ({@link RewardsPage}, the back button in its header), as wide as the
+	 * week needs and as tall as the page, kept in proportion as the Right Shift menu is; in a small window it takes what there
+	 * is (the page makes room for itself) instead of running off the screen.
 	 */
 	private static final class RewardsWindow extends Node {
-		private static final float WIN_W = 1240;
-		private static final float WIN_H = 640;
-		private static final float BACK = 44;
-		private static final float GAP = 14;
+		private static final float WIN_W = 1200;
+		/** The share of the window's height the panel takes at least (when it fits), for room to breathe. */
+		private static final float MIN_SHARE = 0.62F;
 		private static final float EDGE = 24;
+		private static final float RADIUS = 16;
 
-		private final Parts.Square back;
 		private final RewardsPage page;
 		private float winX;
 		private float winY;
@@ -258,24 +258,21 @@ public final class DailyRewardsScreen extends KitScreen {
 		private float winH;
 
 		RewardsWindow(Runnable onClose) {
-			back = add(new Parts.Square(Glyph.CHEVRON_LEFT, "Back", onClose));
-			page = add(new RewardsPage());
+			page = add(new RewardsPage(onClose));
 		}
 
 		@Override
 		protected void layout() {
-			float side = d(BACK) + d(GAP);
-			winW = Math.min(w - 2 * d(EDGE) - 2 * side, d(WIN_W));
+			winW = Math.max(0, Math.min(w - 2 * d(EDGE), d(WIN_W)));
 			winX = x + (w - winW) / 2;
-			winH = Math.max(d(420), Math.min(d(WIN_H), h - 2 * d(EDGE)));
+			winH = Math.max(0, Math.min(Math.max(RewardsPage.naturalHeight(measure()), h * MIN_SHARE), h - 2 * d(EDGE)));
 			winY = y + (h - winH) / 2;
-			back.setBounds(winX - side, winY, d(BACK), d(BACK));
 			page.setBounds(winX, winY, winW, winH);
 		}
 
 		@Override
 		protected void paint(Canvas c) {
-			MenuStyle.block(c, winX, winY, winW, winH, MenuStyle.radius(), 0, 0);
+			MenuStyle.block(c, winX, winY, winW, winH, d(RADIUS), 0, 0);
 		}
 	}
 }

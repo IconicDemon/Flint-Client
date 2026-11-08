@@ -645,6 +645,7 @@
   "library.card.installed": "已安装",
   "library.card.needsProfile": "请先选择实例",
   "library.card.open": "打开 {title}",
+  "library.card.uninstall": "卸载",
   "library.card.updated": "最近更新",
   "library.categories.label": "分类",
   "library.categories.selected.other": "已选择 {count} 个",

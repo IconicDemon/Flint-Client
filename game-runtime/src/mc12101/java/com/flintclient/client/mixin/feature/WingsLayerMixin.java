@@ -10,7 +10,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.model.ElytraModel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.layers.ElytraLayer;
 import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.resources.ResourceLocation;
@@ -31,8 +30,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Minecraft 1.21.1's elytra layer (it picks the texture, sets the model up and draws it as it renders), for Flint Store capes.
  * <ul>
  * <li>A player who wears a Store cape and an elytra (with "Cape design on elytra" on; {@link CapeElytra#use}) gets the
- * cape-derived elytra ({@link Mc263CapeElytra}): for this draw the elytra model's wing parts draw the cape's wing mesh, with the
- * cape's texture, in a back-face-culled cut-out pass (the glint, when enchanted, stays Minecraft's foil buffer over it).</li>
+ * cape-derived elytra ({@link Mc263CapeElytra}): for this draw the elytra model's wing parts draw Minecraft's own wing boxes cut
+ * to its elytra's silhouette, with the cape's texture, in Minecraft's own elytra pass (armorCutoutNoCull; the glint, when
+ * enchanted, stays Minecraft's foil buffer over it).</li>
  * <li>Everyone else: Minecraft's elytra and its texture rule (the skin's elytra texture, else its cape while shown, else the
  * elytra's), except that a Flint Store cape without elytra art isn't put on Minecraft's wings (they would be empty); Minecraft
  * decides with the cape it gave the wearer instead ({@link Mc263StoreCapes#wingsCape}).</li>
@@ -93,10 +93,4 @@ abstract class WingsLayerMixin {
 		return flint$capeWings ? original.call(skin) : Mc263StoreCapes.wingsCape(skin, original.call(skin));
 	}
 
-	@WrapOperation(method = RENDER, at = @At(value = "INVOKE",
-		target = "Lnet/minecraft/client/renderer/RenderType;armorCutoutNoCull(Lnet/minecraft/resources/ResourceLocation;)Lnet/minecraft/client/renderer/RenderType;"))
-	private RenderType flint$capeWingsType(ResourceLocation texture, Operation<RenderType> original) {
-		// 1.21.1's entityCutout culls back faces: a hole in the cape is see-through from outside, as the websites draw it.
-		return flint$capeWings ? RenderType.entityCutout(texture) : original.call(texture);
-	}
 }

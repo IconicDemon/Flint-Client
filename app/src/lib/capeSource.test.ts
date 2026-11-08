@@ -376,3 +376,85 @@ test("signed out of the Store: a stale copy is never shown as owned", async () =
   assert.deepEqual(r.shown(STEVE), { source: "minecraft", url: MC_CAPE });
   assert.ok(!r.calls.some((c) => c.startsWith("poster")));
 });
+
+const versioned = (uuid: string, worn: string | null, version: number, owned = OWNED): StoreView => {
+  const v = view(uuid, worn, {}, owned);
+  return { ...v, inventory: { ...v.inventory!, version } };
+};
+
+test("an answer older than the one kept (by the Store's inventory version) is dropped: a cape never goes back for a moment", async () => {
+  const r = rig();
+  r.views.set(STEVE, versioned(STEVE, EMBER, 4));
+  r.source.subscribe(STEVE, () => {}, { store: true });
+  await flush();
+  r.poster(STEVE, EMBER);
+  await flush();
+  // The equip's answer (version 5, Frost) arrives, then a change check's reload that left before it (version 4, Ember).
+  r.source.noteView(versioned(STEVE, FROST, 5));
+  r.source.noteView(versioned(STEVE, EMBER, 4));
+  r.poster(STEVE, FROST);
+  await flush();
+  assert.equal((r.shown(STEVE) as { url: string }).url, r.art(STEVE, FROST));
+  assert.deepEqual(r.source.describe()[0].art, `${FROST}:a-c2:1`);
+  // The same version again, or a newer one, is taken; signing out always is.
+  r.source.noteView(versioned(STEVE, null, 6));
+  assert.deepEqual(r.shown(STEVE), { source: "minecraft", url: MC_CAPE });
+  r.source.noteView(signedOutView(STEVE));
+  assert.deepEqual(r.shown(STEVE), { source: "minecraft", url: MC_CAPE });
+});
+
+test("while the window is in front, the accounts shown follow the change feed at the Store's pace; hidden, nothing is asked", async () => {
+  const r = rig();
+  r.views.set(STEVE, versioned(STEVE, null, 3));
+  r.source.subscribe(STEVE, () => {}, { store: true });
+  await flush();
+  const changeChecks = () => r.calls.filter((c) => c.startsWith("changes")).length;
+  r.advance(6_000);
+  r.source.setActive(true);
+  await flush();
+  assert.equal(changeChecks(), 1, "coming to the front checks at once");
+  // The Store asks for 25 s: nothing before, one check then.
+  r.advance(24_000);
+  await flush();
+  assert.equal(changeChecks(), 1);
+  r.advance(1_000);
+  await flush();
+  assert.equal(changeChecks(), 2);
+  // A gift arrives: the next check sees it and reads the inventory (which preloads the new cape's texture).
+  r.setChanges({ state: "ok", changed: true, version: 4, pollAfterSeconds: 30 });
+  r.views.set(STEVE, versioned(STEVE, null, 4, [...OWNED, item("00000000-0000-4000-8000-0000000000c9")]));
+  const inventories = r.calls.filter((c) => c.startsWith("inventory")).length;
+  r.advance(25_000);
+  await flush();
+  await flush();
+  assert.equal(r.calls.filter((c) => c.startsWith("inventory")).length, inventories + 1);
+  // Hidden: no more checks, however long.
+  r.source.setActive(false);
+  const before = changeChecks();
+  r.advance(600_000);
+  await flush();
+  assert.equal(changeChecks(), before);
+});
+
+test("a cape the account newly owns has its texture fetched ahead; the ones it had aren't fetched again", async () => {
+  const preloaded: string[] = [];
+  const source = createCapeSource<{ name: string; closed: boolean }>({
+    inventory: async () => versioned(STEVE, null, 3),
+    changes: async () => ({ state: "ok", changed: false, version: 3, pollAfterSeconds: 25 }),
+    poster: async () => "data:,",
+    strips: async () => [],
+    release: () => {},
+    isPlayable,
+    preload: (uuid, id) => preloaded.push(`${uuid}:${id}`),
+    now: () => 0,
+    later: () => null,
+    cancel: () => {},
+  });
+  source.noteView(versioned(STEVE, null, 3));
+  assert.deepEqual(preloaded, [], "the first answer: nothing is new");
+  const GIFT = "00000000-0000-4000-8000-0000000000c9";
+  source.noteView(versioned(STEVE, null, 4, [...OWNED, item(GIFT)]));
+  assert.deepEqual(preloaded, [`${STEVE}:${GIFT}`]);
+  source.noteView(versioned(STEVE, null, 4, [...OWNED, item(GIFT)]));
+  assert.equal(preloaded.length, 1, "the same version again preloads nothing");
+});

@@ -300,8 +300,21 @@ fn version_option(v: &Value, adds: &[Value], blocked: Option<String>) -> Value {
     })
 }
 
-/// The updates for the files the check can ask about.
-async fn find_updates(source: &impl UpdateSource, profile: &Profile, installed: &[ContentEntry], files: &[Installed]) -> CmdResult<Vec<Value>> {
+/// A newer file's project versions and its installed version, looked up for the check. None when either can't be had.
+async fn versions_of(source: &impl UpdateSource, file: &Installed, kind: &str, game: &str) -> Option<(Vec<Value>, Value)> {
+    let list = source.versions(&file.project_id, kind, game).await.ok()?;
+    let list = list.as_array().cloned().unwrap_or_default();
+    let current = match list.iter().find(|v| v["id"].as_str() == Some(file.version_id.as_str())) {
+        Some(v) => v.clone(),
+        None => source.version(&file.version_id).await.ok()?,
+    };
+    Some((list, current))
+}
+
+/// The updates for the files the check can ask about. The projects with something newer are looked up `parallel` at a
+/// time: one after another, 46 outdated mods took 1.5 to 5 s.
+async fn find_updates(source: &impl UpdateSource, profile: &Profile, installed: &[ContentEntry], files: &[Installed], parallel: usize) -> CmdResult<Vec<Value>> {
+    use futures_util::StreamExt;
     let game = profile.game_version.as_str();
     let mut needs = Needs::default();
     let mut updates = Vec::new();
@@ -315,21 +328,18 @@ async fn find_updates(source: &impl UpdateSource, profile: &Profile, installed: 
         for chunk in hashes.chunks(300) {
             latest.extend(source.latest(chunk, kind, game).await?.as_object().cloned().unwrap_or_default());
         }
-        for file in group {
-            // Modrinth's answer is the newest build of any channel; when that's the installed one, nothing is newer.
-            let Some(newest) = latest.get(&file.sha512) else { continue };
-            if newest["id"].as_str() == Some(file.version_id.as_str()) {
-                continue;
-            }
-            let Ok(list) = source.versions(&file.project_id, kind, game).await else { continue };
-            let list = list.as_array().cloned().unwrap_or_default();
-            let current = match list.iter().find(|v| v["id"].as_str() == Some(file.version_id.as_str())) {
-                Some(v) => v.clone(),
-                None => match source.version(&file.version_id).await {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                },
-            };
+        // Modrinth's answer is the newest build of any channel; when that's the installed one, nothing is newer.
+        let newer: Vec<&Installed> = group
+            .into_iter()
+            .filter(|file| latest.get(&file.sha512).is_some_and(|newest| newest["id"].as_str() != Some(file.version_id.as_str())))
+            .collect();
+        let mut each = Vec::with_capacity(newer.len());
+        for file in &newer {
+            each.push(versions_of(source, file, kind, game));
+        }
+        let looked_up: Vec<Option<(Vec<Value>, Value)>> = futures_util::stream::iter(each).buffered(parallel.max(1)).collect().await;
+        for (file, looked_up) in newer.into_iter().zip(looked_up) {
+            let Some((list, current)) = looked_up else { continue };
             let Some((proposed, alternatives)) = update_options(&current, &list, kind, game) else { continue };
             let mut options = Vec::new();
             for v in std::iter::once(&proposed).chain(&alternatives) {
@@ -383,7 +393,8 @@ async fn check_profile(state: &AppState, source: &impl UpdateSource, profile: &P
     let manifest = load(state, &profile.id);
     let identified: HashMap<String, Identified> = read_json(&identified_path(state, &profile.id));
     let installed = present_entries(&manifest, &identified);
-    let updates = find_updates(source, profile, &installed, &files).await?;
+    let parallel = crate::storage::modrinth_download_limit(&crate::data::load_settings(state));
+    let updates = find_updates(source, profile, &installed, &files, parallel).await?;
     Ok(json!({
         "updates": updates,
         "unmanaged": unmanaged,
@@ -538,8 +549,9 @@ struct Added {
 
 /// What an update transaction does outside the profile folder: download into staging and report progress.
 trait Transfer {
-    /// Downloads a file to `target`, verified against its SHA-512.
-    async fn download(&self, file: &NewFile, target: &Path) -> CmdResult<u64>;
+    /// Downloads a file to `target`, verified against its SHA-512. `quiet`: one of several at once, so the job's file and
+    /// byte counts are left alone (they would jump between files).
+    async fn download(&self, file: &NewFile, target: &Path, quiet: bool) -> CmdResult<u64>;
     fn stage(&self, stage: &str, done: usize, total: usize);
     fn cancelled(&self) -> bool;
     /// Moves a file within the profile; tests make it fail on purpose.
@@ -568,8 +580,8 @@ impl Catalog for Live<'_> {
 }
 
 impl Transfer for Live<'_> {
-    async fn download(&self, file: &NewFile, target: &Path) -> CmdResult<u64> {
-        let fetch = Fetch { url: &file.url, expected: Expected::Sha512(&file.sha512), max_bytes: jobs::listed_cap(file.size), allowed_hosts: MODRINTH_CDN, quiet: false };
+    async fn download(&self, file: &NewFile, target: &Path, quiet: bool) -> CmdResult<u64> {
+        let fetch = Fetch { url: &file.url, expected: Expected::Sha512(&file.sha512), max_bytes: jobs::listed_cap(file.size), allowed_hosts: MODRINTH_CDN, quiet };
         download_verified(self.app, self.state, self.job, fetch, target).await
     }
     fn stage(&self, stage: &str, done: usize, total: usize) {
@@ -675,7 +687,9 @@ async fn plan_swap(state: &AppState, catalog: &impl Catalog, profile: &Profile, 
     if old.project_id.is_empty() {
         return Err("Flint couldn't match this file on Modrinth, so it can't update it".into());
     }
-    let version = catalog.version(&item.version_id).await?;
+    // Asked for together: the project only names the new file's record, and waiting for each in turn doubled the time.
+    let (version, project) = futures_util::join!(catalog.version(&item.version_id), catalog.project(&old.project_id));
+    let version = version?;
     if version["project_id"].as_str() != Some(old.project_id.as_str()) {
         return Err("That version belongs to a different project".into());
     }
@@ -686,7 +700,7 @@ async fn plan_swap(state: &AppState, catalog: &impl Catalog, profile: &Profile, 
         let number = version["version_number"].as_str().unwrap_or("This version");
         return Err(format!("{number} isn't made for {}", made_for(&item.kind, &profile.game_version)));
     }
-    let project = catalog.project(&old.project_id).await.ok();
+    let project = project.ok();
     let new = new_file(&version, project.as_ref(), &item.kind, item.world.as_deref(), &old.title)?;
     Ok(Some(Swap { item: item.clone(), old, version, new, failed: None, staged: None }))
 }
@@ -699,13 +713,31 @@ async fn apply(state: &AppState, io: &(impl Catalog + Transfer), profile_id: &st
     let mut report = Report::default();
     let total = items.len();
 
+    // Several items are looked up and downloaded at once (Settings → Storage's limit, at most MODRINTH_MAX): one after
+    // another, "Update all" on 46 mods took 12 to 24 s. Each answer is still checked and each file verified, results are
+    // taken in the items' order, and the job counts finished items.
+    use futures_util::StreamExt;
+    let parallel = crate::storage::modrinth_download_limit(&crate::data::load_settings(state));
+
     // 1. Plan every update against this profile.
     let manifest = load(state, profile_id);
     let identified: HashMap<String, Identified> = read_json(&identified_path(state, profile_id));
     let mut swaps: Vec<Swap> = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        io.stage("Checking compatibility", index, total);
-        match plan_swap(state, io, &profile, &manifest, &identified, item).await {
+    io.stage("Checking compatibility", 0, total);
+    let planned: Vec<CmdResult<Option<Swap>>> = {
+        let (profile, manifest, identified, checked) = (&profile, &manifest, &identified, &std::sync::atomic::AtomicUsize::new(0));
+        let mut each = Vec::with_capacity(total);
+        for item in &items {
+            each.push(async move {
+                let planned = plan_swap(state, io, profile, manifest, identified, item).await;
+                io.stage("Checking compatibility", checked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1, total);
+                planned
+            });
+        }
+        futures_util::stream::iter(each).buffered(parallel.max(1)).collect().await
+    };
+    for (item, planned) in items.iter().zip(planned) {
+        match planned {
             Ok(Some(swap)) => swaps.push(swap),
             Ok(None) => Report::note(&mut report.skipped, item, &item_title(state, profile_id, item), "Already on this version"),
             Err(reason) => Report::note(&mut report.failed, item, &item_title(state, profile_id, item), &reason),
@@ -746,39 +778,39 @@ async fn apply(state: &AppState, io: &(impl Catalog + Transfer), profile_id: &st
     std::fs::create_dir_all(&staging.0).map_err(err("Could not prepare the download"))?;
     let wanted = |swaps: &[Swap], added: &Added| added.for_swaps.iter().any(|&i| swaps[i].failed.is_none());
     let count = swaps.iter().filter(|s| s.failed.is_none()).count() + adds.iter().filter(|a| wanted(&swaps, a)).count();
-    let mut done = 0;
-    for (index, swap) in swaps.iter_mut().enumerate().filter(|(_, s)| s.failed.is_none()) {
-        io.stage("Downloading", done, count);
-        let target = staging.0.join(format!("u{index}")).join(&swap.new.file_name);
-        match io.download(&swap.new, &target).await {
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    // With several downloads at once the job counts finished files; one file alone still shows its bytes.
+    let quiet = count > 1 && parallel > 1;
+    // The updates first, then the dependencies still wanted by an update whose download went through.
+    let wanted_swaps: Vec<(usize, PathBuf)> = swaps.iter().enumerate().filter(|(_, s)| s.failed.is_none()).map(|(i, s)| (i, staging.0.join(format!("u{i}")).join(&s.new.file_name))).collect();
+    let files: Vec<&NewFile> = wanted_swaps.iter().map(|(i, _)| &swaps[*i].new).collect();
+    let fetched = download_each(io, &files, wanted_swaps.iter().map(|(_, t)| t.as_path()), parallel, quiet, &done, count).await?;
+    for ((index, target), fetched) in wanted_swaps.into_iter().zip(fetched) {
+        let swap = &mut swaps[index];
+        match fetched {
             Ok(bytes) => {
                 swap.new.size = Some(bytes);
                 swap.staged = Some(target);
             }
-            Err(e) if io.cancelled() => return Err(e),
             Err(e) => swap.failed = Some(e),
         }
-        done += 1;
     }
-    for (index, add) in adds.iter_mut().enumerate() {
-        if !wanted(&swaps, add) {
-            continue;
-        }
-        io.stage("Downloading", done, count);
-        let target = staging.0.join(format!("d{index}")).join(&add.file.file_name);
-        match io.download(&add.file, &target).await {
+    let wanted_adds: Vec<(usize, PathBuf)> = adds.iter().enumerate().filter(|(_, a)| wanted(&swaps, a)).map(|(i, a)| (i, staging.0.join(format!("d{i}")).join(&a.file.file_name))).collect();
+    let files: Vec<&NewFile> = wanted_adds.iter().map(|(i, _)| &adds[*i].file).collect();
+    let fetched = download_each(io, &files, wanted_adds.iter().map(|(_, t)| t.as_path()), parallel, quiet, &done, count).await?;
+    for ((index, target), fetched) in wanted_adds.into_iter().zip(fetched) {
+        let add = &mut adds[index];
+        match fetched {
             Ok(bytes) => {
                 add.file.size = Some(bytes);
                 add.staged = Some(target);
             }
-            Err(e) if io.cancelled() => return Err(e),
             Err(e) => {
                 for &i in &add.for_swaps {
                     swaps[i].failed.get_or_insert_with(|| format!("Couldn't download {}, which it needs: {e}", add.file.title));
                 }
             }
         }
-        done += 1;
     }
 
     // 4. Swap, under the file lock, and only while the game is still closed.
@@ -787,6 +819,44 @@ async fn apply(state: &AppState, io: &(impl Catalog + Transfer), profile_id: &st
     ensure_not_running(state, profile_id)?;
     commit(state, io, profile_id, &mut swaps, &adds, &mut report);
     Ok(report.into_json())
+}
+
+/// Downloads `files` to `targets`, `parallel` at a time, and gives each one's outcome in their order. `done` counts the
+/// batch's finished files for the job (out of `count`). Cancelling ends the batch at once (Err); the staging folder
+/// holding what was fetched is removed by its owner.
+async fn download_each<'p>(
+    io: &impl Transfer,
+    files: &[&NewFile],
+    targets: impl Iterator<Item = &'p Path>,
+    parallel: usize,
+    quiet: bool,
+    done: &std::sync::atomic::AtomicUsize,
+    count: usize,
+) -> CmdResult<Vec<CmdResult<u64>>> {
+    use futures_util::StreamExt;
+    let mut each = Vec::with_capacity(files.len());
+    for (file, target) in files.iter().zip(targets) {
+        each.push(async move {
+            if !quiet {
+                io.stage("Downloading", done.load(std::sync::atomic::Ordering::Relaxed), count);
+            }
+            let fetched = io.download(file, target, quiet).await;
+            let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if quiet {
+                io.stage("Downloading", finished, count);
+            }
+            fetched
+        });
+    }
+    let mut out = Vec::with_capacity(each.len());
+    let mut stream = futures_util::stream::iter(each).buffered(parallel.max(1));
+    while let Some(fetched) = stream.next().await {
+        match fetched {
+            Err(e) if io.cancelled() => return Err(e),
+            other => out.push(other),
+        }
+    }
+    Ok(out)
 }
 
 /// A dependency's file, from the resolver's plan item.
@@ -1083,6 +1153,16 @@ mod tests {
         stuck: Option<String>,
         /// The game starts in this profile while files download.
         starts_game: Option<&'a AppState>,
+        /// Versions whose download takes a while, so later ones finish first.
+        slow: Vec<&'static str>,
+        /// The player cancels while this version downloads.
+        cancel_on: Option<&'static str>,
+        cancelled: std::sync::atomic::AtomicBool,
+        /// Downloads running now, and the most that ran at once.
+        running: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+        /// Every stage the job reported, with its counts.
+        stages: std::sync::Mutex<Vec<(String, usize, usize)>>,
     }
 
     impl Catalog for Fake<'_> {
@@ -1114,21 +1194,33 @@ mod tests {
     }
 
     impl Transfer for Fake<'_> {
-        async fn download(&self, file: &NewFile, target: &Path) -> CmdResult<u64> {
+        async fn download(&self, file: &NewFile, target: &Path, _quiet: bool) -> CmdResult<u64> {
             if let Some(state) = self.starts_game {
                 state.running.lock().unwrap().insert(PROFILE.into(), RunningGame { kill: None });
             }
             if self.broken.contains(&file.version_id.as_str()) {
                 return Err("Download failed: could not connect (check your internet connection)".into());
             }
+            use std::sync::atomic::Ordering::SeqCst;
+            let now = self.running.fetch_add(1, SeqCst) + 1;
+            self.most.fetch_max(now, SeqCst);
+            let wait = if self.slow.contains(&file.version_id.as_str()) { 60 } else { 5 };
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            self.running.fetch_sub(1, SeqCst);
+            if self.cancel_on == Some(file.version_id.as_str()) {
+                self.cancelled.store(true, SeqCst);
+                return Err("Cancelled".into());
+            }
             assert_eq!(sha(file.version_id.as_bytes()), file.sha512, "the published hash is what's checked");
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             std::fs::write(target, file.version_id.as_bytes()).unwrap();
             Ok(file.version_id.len() as u64)
         }
-        fn stage(&self, _: &str, _: usize, _: usize) {}
+        fn stage(&self, stage: &str, done: usize, total: usize) {
+            self.stages.lock().unwrap().push((stage.to_owned(), done, total));
+        }
         fn cancelled(&self) -> bool {
-            false
+            self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
         }
         fn place(&self, from: &Path, to: &Path) -> std::io::Result<()> {
             if self.stuck.as_deref().is_some_and(|name| to.file_name().is_some_and(|n| n == name)) {
@@ -1404,6 +1496,55 @@ mod tests {
         assert_eq!(version_of("LITHIUM1").as_deref(), Some("L1"));
         assert_eq!(version_of("ZOOMIFY1").as_deref(), Some("Z2"));
         assert!(no_staging_left(&state));
+    }
+
+    #[tokio::test]
+    async fn updates_download_several_at_once_and_are_reported_in_their_order() {
+        let dir = TestDir::new();
+        let mut fake = catalog();
+        let (state, _) = profile_with_mods(&dir, &fake);
+        let mods = state.paths.profile_dir(PROFILE).join("mods");
+        // Sodium's file is the slowest, so the others finish before it.
+        fake.slow = vec!["S3"];
+        let items = vec![item(&fake, "S1", "S3"), item(&fake, "L1", "L2"), item(&fake, "Z1", "Z2")];
+        let result = apply(&state, &fake, PROFILE, items).await.unwrap();
+        let titles = |list: &str| result[list].as_array().unwrap().iter().map(|u| u["title"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(titles("updated"), ["Sodium", "Lithium", "Zoomify"], "in the items' order, whichever finished first");
+        assert_eq!(titles("added"), ["Fabric API"]);
+        assert!(fake.most.load(std::sync::atomic::Ordering::SeqCst) >= 2, "several downloads ran at once");
+        for (old, new) in [("S1", "S3"), ("Z1", "Z2")] {
+            assert!(!mods.join(file_of(&fake, old)).exists() && std::fs::read(mods.join(file_of(&fake, new))).unwrap() == new.as_bytes());
+        }
+
+        // The job counts finished files, never backwards, up to every file of the batch (three updates and Fabric API).
+        let stages = fake.stages.lock().unwrap().clone();
+        let counts = |name: &str| stages.iter().filter(|s| s.0 == name).map(|s| (s.1, s.2)).collect::<Vec<_>>();
+        assert_eq!(counts("Checking compatibility"), [(0, 3), (1, 3), (2, 3), (3, 3)]);
+        assert_eq!(counts("Downloading"), [(1, 4), (2, 4), (3, 4), (4, 4)]);
+        assert!(no_staging_left(&state));
+    }
+
+    #[tokio::test]
+    async fn cancelling_while_updates_download_leaves_every_file_as_it_was() {
+        let dir = TestDir::new();
+        let mut fake = catalog();
+        let (state, _) = profile_with_mods(&dir, &fake);
+        let mods = state.paths.profile_dir(PROFILE).join("mods");
+        let before = load(&state, PROFILE);
+        fake.cancel_on = Some("L2");
+        fake.slow = vec!["S3"];
+        let items = vec![item(&fake, "S1", "S3"), item(&fake, "L1", "L2"), item(&fake, "Z1", "Z2")];
+        assert!(apply(&state, &fake, PROFILE, items).await.is_err());
+
+        assert_eq!(std::fs::read(mods.join(file_of(&fake, "S1"))).unwrap(), b"S1");
+        assert!(mods.join(format!("{}{DISABLED}", file_of(&fake, "L1"))).is_file());
+        assert_eq!(std::fs::read(mods.join(file_of(&fake, "Z1"))).unwrap(), b"Z1");
+        for new in ["S3", "L2", "Z2", "F1"] {
+            assert!(!mods.join(file_of(&fake, new)).exists(), "{new} wasn't put in");
+        }
+        let after = load(&state, PROFILE);
+        assert_eq!(after.iter().map(|m| (&m.project_id, &m.version_id)).collect::<Vec<_>>(), before.iter().map(|m| (&m.project_id, &m.version_id)).collect::<Vec<_>>());
+        assert!(no_staging_left(&state), "what was fetched is removed");
     }
 
     #[tokio::test]

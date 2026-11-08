@@ -180,24 +180,6 @@ public final class ParityReasons {
 		if (VisualMods.ItemPhysics.ID.equals(module.id())) {
 			return itemPhysics(module, setting);
 		}
-		if (VisualMods.MotionBlur.ID.equals(module.id())) {
-			return motionBlur(module, setting);
-		}
-		return null;
-	}
-
-	/**
-	 * Motion Blur: the rows Natural Motion Blur's own screen greys out for the algorithm chosen (refresh rate scaling only for
-	 * Velocity based; the profile for the velocity blur, which Hybrid blending also draws), and Flint's two velocity rows likewise.
-	 */
-	private static @Nullable String motionBlur(ModuleState m, SettingDescriptor<?> s) {
-		int algorithm = m.option(VisualMods.MotionBlur.ALGORITHM);
-		if (s == VisualMods.MotionBlur.REFRESH_SCALING) {
-			return algorithm == 0 ? null : "Only for Velocity based";
-		}
-		if (s == VisualMods.MotionBlur.PROFILE || s == VisualMods.MotionBlur.QUALITY || s == VisualMods.MotionBlur.MOVEMENT) {
-			return algorithm == 0 || algorithm == 2 ? null : "Only for Velocity based and Hybrid blending";
-		}
 		return null;
 	}
 

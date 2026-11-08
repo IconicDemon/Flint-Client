@@ -684,6 +684,7 @@
   "library.card.installed": "Geïnstalleerd",
   "library.card.needsProfile": "Kies eerst een profiel",
   "library.card.open": "{title} openen",
+  "library.card.uninstall": "Verwijderen",
   "library.card.updated": "Laatst bijgewerkt",
   "library.categories.label": "Categorieën",
   "library.categories.selected.one": "{count} geselecteerd",

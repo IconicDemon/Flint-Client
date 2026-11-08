@@ -645,6 +645,7 @@
   "library.card.installed": "インストール済み",
   "library.card.needsProfile": "先にプロフィールを選択してください",
   "library.card.open": "{title}を開く",
+  "library.card.uninstall": "アンインストール",
   "library.card.updated": "最終更新",
   "library.categories.label": "カテゴリ",
   "library.categories.selected.other": "{count}個選択中",

@@ -4,6 +4,7 @@
  */
 package com.flintclient.legacy.mods;
 
+import com.flintclient.client.control.fx.BlurRules;
 import com.flintclient.client.control.fx.NmbTiming;
 import com.flintclient.client.control.model.mods.VisualMods;
 import com.flintclient.legacy.module.Module;
@@ -30,8 +31,10 @@ import org.lwjgl.opengl.GLContext;
 import org.lwjgl.util.vector.Matrix4f;
 
 /**
- * Motion Blur on Minecraft 1.8.9, exactly as on the other lines (the rules: {@link NmbTiming}; the look: Natural Motion Blur's
- * velocity based blur, frame blending, hybrid and accumulation, with the same settings and defaults).
+ * Motion Blur on Minecraft 1.8.9, exactly as on the other lines (the rules: {@link BlurRules} and {@link NmbTiming}): Smooth, AFKZ
+ * Motion Blur's trail fading by time (drawn by the accumulation pass in linear light), and Natural, Natural Motion Blur's velocity
+ * blur with its recommended settings; the same settings and defaults. The blur starts over on a new world, a respawn, a resize, a
+ * screen, focus, F1 or F5 ({@link BlurRules.Scene}).
  *
  * <p><b>Where</b> (the hooks: {@code mixin/GameRendererMixin}, in the world pass): at its {@code "entities"} profiler step, after
  * the solid, cutout-mipped and cutout terrain and before any entity: {@link #early}, which also reads this frame's camera
@@ -55,12 +58,9 @@ public final class MotionBlur extends Module {
 	/** The texture units GlStateManager keeps track of. */
 	private static final int TRACKED_UNITS = 8;
 
-	public final Setting.Choice algorithm = option(VisualMods.MotionBlur.ALGORITHM);
-	public final Setting.Decimal strength = decimal(VisualMods.MotionBlur.STRENGTH, 100, "");
-	public final Setting.Bool refreshScaling = bool(VisualMods.MotionBlur.REFRESH_SCALING);
-	public final Setting.Choice profile = option(VisualMods.MotionBlur.PROFILE);
-	public final Setting.Choice quality = option(VisualMods.MotionBlur.QUALITY);
-	public final Setting.Bool movement = bool(VisualMods.MotionBlur.MOVEMENT);
+	public final Setting.Choice mode = option(VisualMods.MotionBlur.MODE);
+	public final Setting.Int strength = integer(VisualMods.MotionBlur.STRENGTH);
+	private final BlurRules.Scene scene = new BlurRules.Scene();
 
 	// GPU resources.
 	private boolean programsTried;
@@ -113,6 +113,7 @@ public final class MotionBlur extends Module {
 	private boolean frameActive;
 	private int frameMode;
 	private float frameStrength;
+	private int framePercent;
 	private float frameSeconds;
 	private float fps;
 	private boolean frameDetached;
@@ -156,6 +157,7 @@ public final class MotionBlur extends Module {
 	/** A new world: the next frame isn't blurred from the last one, and kept frames and the trail start over. */
 	public void reset() {
 		previousReady = false;
+		scene.reset();
 		accumValid = false;
 		historyFilled = 0;
 	}
@@ -210,7 +212,7 @@ public final class MotionBlur extends Module {
 			if (NmbTiming.usesFrameBlending(frameMode)) {
 				frameBlend(mc, frameStrength);
 			} else if (NmbTiming.usesAccumulation(frameMode)) {
-				accumulate(mc, NmbTiming.kept(frameMode, frameStrength, frameSeconds, refreshRate), frameMode == NmbTiming.ACCUMULATION_MAX);
+				accumulate(mc, BlurRules.smoothKept(framePercent, frameSeconds), false);
 			}
 		} finally {
 			end(mc);
@@ -231,8 +233,10 @@ public final class MotionBlur extends Module {
 		earlyDrawn = false;
 		Minecraft mc = Minecraft.getInstance();
 		Entity camera = mc.getCamera();
-		float strength = this.strength.decimal();
-		if (!enabled() || strength <= 0 || camera == null || mc.world == null || mc.width <= 0 || mc.height <= 0
+		int percent = this.strength.value();
+		// Natural's strength (Natural Motion Blur's 0–2); Smooth's trail follows the percent (BlurRules.smoothKept).
+		float strength = BlurRules.naturalStrength(percent);
+		if (!enabled() || percent <= 0 || camera == null || mc.world == null || mc.width <= 0 || mc.height <= 0
 			|| !programs()) {
 			previousReady = false;
 			return;
@@ -246,16 +250,21 @@ public final class MotionBlur extends Module {
 		double x = camera.prevX + (camera.x - camera.prevX) * tickDelta;
 		double y = camera.prevY + (camera.y - camera.prevY) * tickDelta;
 		double z = camera.prevZ + (camera.z - camera.prevZ) * tickDelta;
-		int mode = algorithm.index();
-		boolean detached = mc.options.perspective != 0 || mc.player != null && mc.player.vehicle != null;
+		// Smooth is drawn by the accumulation pass, Natural by the velocity pass (1.8.9 has no shader pack loader to yield to).
+		int mode = BlurRules.effectiveMode(this.mode.index(), false) == BlurRules.NATURAL ? NmbTiming.VELOCITY : NmbTiming.ACCUMULATION_MIX;
+		boolean riding = mc.player != null && mc.player.vehicle != null;
+		boolean detached = mc.options.perspective != 0 || riding;
 		int width = mc.width;
 		int height = mc.height;
 		int level = System.identityHashCode(mc.world);
 		double dx = x - prevX;
 		double dy = y - prevY;
 		double dz = z - prevZ;
-		boolean continuous = previousReady && level == levelIdentity && width == lastWidth && height == lastHeight && detached == lastDetached
-			&& mode == lastMode && NmbTiming.continues(frameSeconds, dx, dy, dz);
+		// A screen, focus or F1 changing, a respawn or F5: the last frame isn't one of this view (BlurRules.Scene).
+		boolean sameScene = scene.same(level, System.identityHashCode(mc.player), width, height, mc.options.perspective * 2 + (riding ? 1 : 0),
+			mode, BlurRules.flags(mc.screen != null, false, Display.isActive(), mc.options.hideGui, false));
+		boolean continuous = previousReady && sameScene && level == levelIdentity && width == lastWidth && height == lastHeight
+			&& detached == lastDetached && mode == lastMode && NmbTiming.continues(frameSeconds, dx, dy, dz);
 		levelIdentity = level;
 		lastWidth = width;
 		lastHeight = height;
@@ -269,10 +278,11 @@ public final class MotionBlur extends Module {
 		frameActive = true;
 		frameMode = mode;
 		frameStrength = strength;
+		framePercent = percent;
 		frameDetached = detached;
-		frameMovement = movement.on();
-		frameProfile = profile.index();
-		frameQuality = quality.index();
+		frameMovement = true;
+		frameProfile = 0;
+		frameQuality = NmbTiming.BALANCED;
 		boolean still = dx == 0 && dy == 0 && dz == 0 && same(view, prevView) && same(projection, prevProjection);
 		if (NmbTiming.usesVelocity(mode) && continuous && !still && Matrix4f.invert(view, invView) != null
 			&& Matrix4f.invert(projection, invProjection) != null) {
@@ -282,7 +292,7 @@ public final class MotionBlur extends Module {
 			deltaY = (float) dy;
 			deltaZ = (float) dz;
 			velocityBlend = mode == NmbTiming.HYBRID ? NmbTiming.hybridFiller(strength, fps, smoothedFps, refreshRate, historyFilled)
-				: NmbTiming.velocityStrength(strength, fps, refreshRate, refreshScaling.on());
+				: NmbTiming.velocityStrength(strength, fps, refreshRate, true);
 			boolean translating = dx != 0 || dy != 0 || dz != 0;
 			// Only a turn or a zoom that moves the image under half a pixel (a field of view settling): nothing to draw.
 			boolean drift = !translating && NmbTiming.turnPixels(columns(invProjection, invProjectionArray), columns(invView, invViewArray),

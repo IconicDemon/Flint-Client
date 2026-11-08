@@ -1,10 +1,120 @@
 [
   {
+    "version": "1.0.3",
+    "date": "2026-11-07",
+    "page_url": "https://flintclient.com/releases/1.0.3/",
+    "title": "Real elytra wings, smooth motion blur and instant cape changes",
+    "summary": "Your Flint cape now covers Minecraft's own elytra wings, Motion Blur is rebuilt to be smooth and safe with shader packs, cape changes show the moment you pick them, and every part of the main menu can be made bigger or smaller. Esc and E always work right after the Right Shift menu, and Daily Rewards has a cleaner screen.",
+    "image": { "url": "https://flintclient.com/releases/covers/1.0.3.webp", "width": 1920, "height": 1080, "alt": "Flint Client 1.0.3 update." },
+    "points": [
+      "Cape design on elytra now uses Minecraft's own elytra: the same shape, size and wing movement as vanilla wings, with your Flint cape's artwork on them, still or animated, on every version with elytras. The Flint Store previews show the same wings.",
+      "Changing capes is instant: the cape you pick shows at once in the launcher and in game, the last one you click wins, and the Minecraft cape no longer flashes in between. If the Store turns a change down, your last cape comes back with a message.",
+      "Capes you buy, get as a gift, get free or unlock as a creator appear in your inventory and in game without restarting Flint.",
+      "Motion Blur is rebuilt. The new Smooth mode, now the default, gives the soft trail you know from Lunar Client and feels the same at 60 or 240 FPS. Choose Smooth or Natural and a strength. It works on top of shader packs, and your old strength carries over.",
+      "Fixed: right after closing the Right Shift menu, a quick Esc or E was sometimes ignored. The pause menu and inventory now open on the first press, and a closing menu can no longer get stuck holding your keys and mouse.",
+      "A new Daily Rewards screen: your week as seven Merits in a row, today's reward marked, and one Claim button, with your streak and best streak beside it.",
+      "The Cosmetics window in game plays animated capes, shows full names, lets you search by name, and keeps big collections tidy with your worn cape first.",
+      "Uninstall from the Library: mods, resource packs and shader packs installed in your profile now have an Uninstall button right next to Installed.",
+      "Three new nametag badges: Trial Creator, VIP and Special, next to Owner, Co-Owner, Staff, Developer and Content Creator.",
+      "Utilities › Menu sizes: make each part of the main menu bigger or smaller, from 50% to 200%: the logo, the buttons, the version line, Daily Rewards, What's New, the Flint | Vanilla switch and the account bar.",
+      "Update all and update checks are much faster: Flint looks up and downloads several mods at once, every file still checked. The Content tab opens faster too.",
+      "Opening the Right Shift menu for the first time in a session no longer hitches.",
+      "News and What's new show each release's own artwork.",
+      "Flint for Mac stays on version 1.0.2 for now while we focus on Windows and Linux. Version 1.0.2 keeps working, and Mac updates will return in a future release."
+    ],
+    "sections": [
+      {
+        "heading": "Capes and cosmetics",
+        "points": [
+          "Flint Store capes, still or animated, on every Minecraft version Flint supports, 1.8.9 included. Other Flint players see the cape you wear.",
+          "Cape design on elytra: wear an elytra and Minecraft's own wings carry your cape's artwork, the same shape, size and wing movement as vanilla wings, animated in step with the cape. Turn it off in Right Shift, Settings, Cosmetics.",
+          "Change capes in the launcher or from the Cosmetics window in game, without leaving your world or server. The cape you pick shows at once, the last one you click wins, and the Minecraft cape never flashes in between.",
+          "Capes you buy, get as a gift, get free or unlock as a creator appear in your inventory and in game without restarting Flint.",
+          "Wavy Capes: a Realistic movement that moves your cape smoothly at any frame rate, with natural gravity as you walk, run, jump, crouch and swim.",
+          "A short notice when another mod that shows its own capes, such as Capes or Essential, is on and can hide your Flint cape.",
+          "The Cosmetics page shows a 3D preview of what you wear, your items by slot with a clear None, and your Merits, orders and the Flint Store one click away.",
+          "In game, the Cosmetics window plays animated capes, shows full names, lets you search by name and keeps big collections tidy, with your worn cape first."
+        ]
+      },
+      {
+        "heading": "Main menu",
+        "points": [
+          "Flint's own title screen, with a Flint | Vanilla switch to go back to Minecraft's menu at any time.",
+          "Menu sizes in Utilities: make each part of the main menu bigger or smaller, from 50% to 200%: the logo, the buttons, the version line, Daily Rewards, What's New, the Flint | Vanilla switch and the account bar.",
+          "Quick Play: pin up to five servers from Multiplayer to the main menu.",
+          "The What's new card opens the full notes of your Flint version with its artwork, and the Daily Rewards card shows your streak.",
+          "A new Daily Rewards screen: your week as seven Merits in a row, today's reward marked, and one Claim button, with your streak and best streak beside it.",
+          "The menu stays readable at any GUI scale and window size."
+        ]
+      },
+      {
+        "heading": "In game",
+        "points": [
+          "The Right Shift menu: over 90 mods for HUD, PvP, visuals and quality of life, each with its own settings, on every version Flint supports. A few depend on what each Minecraft version has.",
+          "A HUD editor: drag any HUD element anywhere and size it. Armor HUD shows your armor, sword, pickaxe, axe, shield and other tools with durability text you can size.",
+          "Pick any color for any color setting: a color square, a hue bar, your recent colors and a hex box.",
+          "UHC Overlay for any item, a TNT Timer above the TNT and Subtitles with arrows to nearby sounds on every version including 1.8.9, plus a Music Player, Custom Fog and Brightness.",
+          "Add resource packs and shader packs while you play: they show up in Minecraft right away, with no restart.",
+          "Motion Blur, rebuilt: Smooth (the default) gives a soft Lunar-style trail that feels the same at any frame rate, and Natural blurs what moves. It runs on top of shader packs and leaves no smears after menus, pausing, F1, F5 or changing worlds.",
+          "Esc and E always work on the first press right after you close a Flint menu, and a closing menu can no longer get stuck holding your keys and mouse.",
+          "Flint players see a Flint mark before each other's names and in the player list, including the new Trial Creator, VIP and Special badges, and every player has one nametag, as the server intends.",
+          "When joining a server says the authentication servers are not reachable or fails to verify your name, Flint waits a moment and tries again.",
+          "Opening the Right Shift menu for the first time in a session no longer hitches."
+        ]
+      },
+      {
+        "heading": "Friends",
+        "points": [
+          "Add Flint players by their Minecraft name, accept or decline requests, pin your favourites and chat, in the launcher and inside Minecraft on every version, 1.8.9 included.",
+          "Set yourself Online, Busy, Away or Invisible, and get a short note when a friend comes online or messages you. Each note can be turned off.",
+          "Send a friend a gift from the Flint Store.",
+          "Flint asks before you send anything that looks like a password, email, login or card number, and keeps it blurred. Flint staff will never ask for them.",
+          "Friends signs you in by itself with your Minecraft sign-in, safely: no codes to type."
+        ]
+      },
+      {
+        "heading": "Launcher",
+        "points": [
+          "Guided setup with Microsoft sign-in, and profiles with real Minecraft and Fabric installs, each with its own memory, icon and folder named after it. Pin up to five profiles to the sidebar.",
+          "Library from Modrinth: mods, modpacks, resource packs, data packs and shaders, with dependencies handled for you and a performance preset for new profiles. Ask Flint AI to find mods, resource packs and shaders.",
+          "Uninstall right from the Library: mods, resource packs and shader packs installed in your profile have an Uninstall button next to Installed.",
+          "Update all finds mod updates by itself and now looks up and downloads several mods at once, every file still checked. Update projects lets you choose versions, read changelogs and pin a mod.",
+          "Import profiles from the Modrinth App, CurseForge, Prism, MultiMC, Lunar, Feather, Dawn, the Minecraft Launcher, GDLauncher and ATLauncher, with their mods and settings.",
+          "Skins: change your skin with a 3D preview, with classic or slim arms.",
+          "News shows Flint's releases with their own artwork. Flint comes in 17 languages.",
+          "Settings for Syncing, Java and memory, Storage and Troubleshooting. Every Minecraft version runs on the same Java and settings as the official Minecraft Launcher.",
+          "Flint updates itself, and every update's signature is checked before it installs."
+        ]
+      },
+      {
+        "heading": "Flint Store and Flint Creators",
+        "points": [
+          "A redesigned Flint Store in Flint's black and orange: the search in the middle of the header, calmer pages and a quicker checkout.",
+          "Browse capes by colour and by 16 tags that describe their style and theme.",
+          "Animated capes start playing the moment you point at them, and only load the frames they show, so pages stay smooth.",
+          "Capes that are Free for everyone reach an open Flint launcher at its next check, with no restart.",
+          "Your Merit history names daily rewards and gifts from Flint.",
+          "The Flint Creator Program has a new look: upload a cape in five clear steps, preview it on your own Minecraft skin, edit your storefront in tabs, and keep track of your nametag badge in one place.",
+          "Creators get help on the Creator site itself, answered by the Flint team."
+        ]
+      },
+      {
+        "heading": "Versions and platforms",
+        "points": [
+          "Minecraft 1.8.9, 1.21.1, 1.21.10, 1.21.11, 26.1, 26.2 and 26.3, with Fabric.",
+          "Flint 1.0.3 is for Windows 10 and 11 and for Linux (AppImage and .deb).",
+          "Flint for Mac stays on version 1.0.2 for now while we focus on Windows and Linux. Version 1.0.2 keeps working, and Mac updates will return in a future release."
+        ]
+      }
+    ]
+  },
+  {
     "version": "1.0.2",
     "date": "2026-11-06",
     "page_url": "https://flintclient.com/releases/1.0.2/",
     "title": "Your cape on your elytra, and smoother capes",
     "summary": "Your Flint Store cape now covers your elytra wings, animated with it, as the Flint Store previews it. Change what you wear from the Right Shift menu without leaving your server, Wavy Capes moves like a real cloak, and Flint tells you when another cape mod can hide your cape.",
+    "image": { "url": "https://flintclient.com/releases/covers/1.0.2.webp", "width": 1920, "height": 1080, "alt": "Flint Client 1.0.2 update." },
     "points": [
       "Cape design on elytra: wear an elytra and your Flint Store cape becomes your wings, its design outside and its lining inside, and an animated cape plays on the wings in step with the cape. Other Flint players see it too; turn it off in Right Shift, Settings, Cosmetics",
       "Right Shift menu: Cosmetics takes the place of Resource Packs. Pick a cape and it changes in game right away, without leaving the world or the server; other Flint players see it within a minute. Resource packs stay in MC Settings",
@@ -20,6 +130,7 @@
     "page_url": "https://flintclient.com/releases/1.0.1/",
     "title": "First public release",
     "summary": "The first general release: Flint Friends and Flint capes inside Minecraft on every version, a redesigned Store page, a smaller and faster launcher, and fixes for the bugs players told us about.",
+    "image": { "url": "https://flintclient.com/releases/covers/1.0.1.webp", "width": 1920, "height": 1080, "alt": "Flint Client 1.0.1, first public release." },
     "points": [
       "Flint Friends inside Minecraft on every version, 1.8.9 included: chat, answer requests, pin friends and send gifts from the title screen, with a short note when a friend comes online or messages you",
       "A Cosmetics window in Minecraft shows the Flint Store capes on your account and lets you wear them",
@@ -103,6 +214,7 @@
     "page_url": "https://flintclient.com/releases/0.9.1/",
     "title": "Friends",
     "summary": "Add your friends, see who's online and chat in Flint, now in 17 languages, plus profiles from other launchers, Update all and a calmer Music Player.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.9.1.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.9.1, pre-release build." },
     "points": [
       "Friends: add Flint players by their Minecraft name, accept or decline requests, pin your favourites and chat. Only players who use Flint can be added",
       "Set yourself Online, Busy, Away or Invisible, and get a note with a soft sound when a friend comes online, a request arrives or a message comes in (each can be turned off)",
@@ -125,6 +237,7 @@
     "page_url": "https://flintclient.com/releases/0.5.5/",
     "title": "Your profiles, your icons",
     "summary": "Your profiles in the sidebar with icons of their own, any tile color, UHC Overlay items as rows of their own, and a TNT timer that stays above the TNT.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.5.5.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.5.5, pre-release build." },
     "points": [
       "Your profiles in the sidebar: open the arrow on the Profiles button to see up to five, pinned ones first, then the ones you play most",
       "Give a profile a sidebar icon: over 100 Minecraft items in groups, with a search, on a tile of any color you pick, or your own picture",
@@ -142,6 +255,7 @@
     "page_url": "https://flintclient.com/releases/0.5.3/",
     "title": "Any color, any item",
     "summary": "A full color picker for every color setting, UHC Overlay for any item, and the new Flint menu on every version.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.5.3.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.5.3, pre-release build." },
     "points": [
       "Pick any color: a color square, a hue bar, your recent colors and a hex box, everywhere a mod has a color",
       "UHC Overlay: search any item of your Minecraft version, add it and choose how big it shows on the ground",
@@ -158,6 +272,7 @@
     "page_url": "https://flintclient.com/releases/0.5.2/",
     "title": "A cleaner right-click",
     "summary": "Right-clicking in Flint no longer opens the browser menu.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.5.2.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.5.2, pre-release build." },
     "points": [
       "No more Back, Refresh, Save as and Print menu on right-click, anywhere in Flint",
       "Copy and paste in text boxes with Ctrl+C and Ctrl+V"
@@ -169,6 +284,7 @@
     "page_url": "https://flintclient.com/releases/0.5.1/",
     "title": "Flint on Windows",
     "summary": "The first Flint build for Windows, plus artwork for every version.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.5.1.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.5.1, pre-release build." },
     "points": [
       "Flint Client now runs on Windows 10 and 11",
       "Each Minecraft version has its own artwork in the version picker, Home and Profiles",
@@ -182,6 +298,7 @@
     "page_url": "https://flintclient.com/releases/0.5.0/",
     "title": "Flint for Minecraft 26.3",
     "summary": "The first public Flint for Minecraft 26.3.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.5.0.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.5.0, pre-release build." },
     "points": [
       "Quick Play: pin up to five servers from Multiplayer to the main menu",
       "Flint updates itself: an Update button appears when a new version is out",
@@ -195,6 +312,7 @@
     "page_url": "https://flintclient.com/releases/0.4.0/",
     "title": "Flint, now inside Minecraft",
     "summary": "Flint's own menu, now in Minecraft 26.3.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.4.0.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.4.0, pre-release build." },
     "points": [
       "A Flint main menu inside Minecraft 26.3 with Fabric",
       "Discord Rich Presence for games launched from Flint",
@@ -208,6 +326,7 @@
     "page_url": "https://flintclient.com/releases/0.3.0/",
     "title": "A calmer, more complete Flint",
     "summary": "Home, Profiles and Skins rebuilt around real account and profile data.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.3.0.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.3.0, pre-release build." },
     "points": [
       "Home, Profiles and Skins rebuilt around real account and profile data",
       "Library talks to Modrinth with a live catalog, dependencies and a performance preset",
@@ -221,6 +340,7 @@
     "page_url": "https://flintclient.com/releases/0.2.0/",
     "title": "A new Flint",
     "summary": "Guided first-run setup with Microsoft sign-in.",
+    "image": { "url": "https://flintclient.com/releases/covers/0.2.0.webp", "width": 1920, "height": 1080, "alt": "Flint Client 0.2.0, pre-release build." },
     "points": [
       "Guided first-run setup with Microsoft sign-in",
       "Profiles with real Minecraft and Fabric installs",

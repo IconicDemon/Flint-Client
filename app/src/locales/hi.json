@@ -684,6 +684,7 @@
   "library.card.installed": "इंस्टॉल है",
   "library.card.needsProfile": "पहले एक प्रोफ़ाइल चुनें",
   "library.card.open": "{title} खोलें",
+  "library.card.uninstall": "अनइंस्टॉल करें",
   "library.card.updated": "आख़िरी अपडेट",
   "library.categories.label": "श्रेणियाँ",
   "library.categories.selected.one": "{count} चुनी गई",

@@ -152,6 +152,17 @@ export function normalizeStoreCode(input: string): string | null {
 /** Flint's form of a Minecraft UUID: 32 lowercase hex digits. */
 export const canonicalUuid = (uuid: string) => uuid.replace(/-/g, "").toLowerCase();
 
+/**
+ * Whether `next` is an older inventory than the one `shown` (the Store's version only grows: purchases, gifts, equips). Such
+ * an answer was on its way from before (a change check's reload overtaken by an equip) and is dropped, so a cape never goes
+ * back for a moment. A signed-out or offline answer is never older: it says something else.
+ */
+export function isOlderView(next: StoreView, shown: StoreView | null | undefined): boolean {
+  const a = next.signedIn && !next.stale ? next.inventory : null;
+  const b = shown?.signedIn ? shown.inventory : null;
+  return !!a && !!b && canonicalUuid(next.uuid) === canonicalUuid(shown!.uuid) && a.version < b.version;
+}
+
 /** An answer counts only for the account it was asked for (an account switch can overtake a slow answer). */
 export function viewFor(uuid: string, view: StoreView | null | undefined): StoreView | null {
   return view && canonicalUuid(view.uuid) === canonicalUuid(uuid) ? view : null;

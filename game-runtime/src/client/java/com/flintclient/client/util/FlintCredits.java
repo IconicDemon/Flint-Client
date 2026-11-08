@@ -42,6 +42,7 @@ public final class FlintCredits {
 			new Entry("Font Awesome Free 6.5.2", "SIL Open Font License 1.1", "Fonticons, Inc.", "OFL-1.1-FontAwesome-Free-6.5.2.txt"),
 			new Entry("Lucide", "ISC License", "Lucide Icons and Contributors", "ISC-Lucide.txt"))),
 		new Section("Features adapted from", List.of(
+			new Entry("AFKZ Motion Blur", "MIT License", "Neerajisafk", "MIT-AFKZMotionBlur.txt"),
 			new Entry("AmbientSounds", "LGPL-3.0", "CreativeMD and AriaFreeze", "LGPL-3.0-AmbientSounds.txt"),
 			new Entry("AppleSkin", "The Unlicense", "squeek502", "Unlicense-AppleSkin.txt"),
 			new Entry("BetterF3", "MIT License", "cominixo and TreyRuffy", "MIT-BetterF3.txt"),
@@ -58,7 +59,7 @@ public final class FlintCredits {
 			new Entry("Falling Leaves", "MIT License", "RandomMcSomethin", "MIT-FallingLeaves.txt"),
 			new Entry("Loot Beams Refork", "CC0 1.0", "Clefal", "CC0-1.0-LootBeamsRefork.txt"),
 			new Entry("Model Gap Fix", "GPL-3.0", "MehVahdJukaar", "GPL-3.0-ModelGapFix.txt"),
-			new Entry("Natural Motion Blur", "LGPL-3.0", "Pasi, IMS212, Romain H and What42Pizza", "LGPL-3.0-NaturalMotionBlur.txt"),
+			new Entry("Natural Motion Blur 1.4.5", "LGPL-3.0", "Pasi, IMS212, Romain H and What42Pizza", "LGPL-3.0-NaturalMotionBlur.txt"),
 			new Entry("No Chat Reports", "WTFPL", "Aizistral", "WTFPL-NoChatReports.txt"),
 			new Entry("Ping View", "MIT License", "karlsson1000, with itsrec0very", "MIT-PingView.txt"),
 			new Entry("Player Health Indicators", "MIT License", "Gaider10", "MIT-PlayerHealthIndicators.txt"),

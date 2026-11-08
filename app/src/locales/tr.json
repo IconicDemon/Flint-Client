@@ -684,6 +684,7 @@
   "library.card.installed": "Yüklü",
   "library.card.needsProfile": "Önce bir profil seç",
   "library.card.open": "{title} aç",
+  "library.card.uninstall": "Kaldır",
   "library.card.updated": "Son güncelleme",
   "library.categories.label": "Kategoriler",
   "library.categories.selected.one": "{count} seçili",

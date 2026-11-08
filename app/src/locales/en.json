@@ -684,6 +684,7 @@
   "library.card.installed": "Installed",
   "library.card.needsProfile": "Choose a profile first",
   "library.card.open": "Open {title}",
+  "library.card.uninstall": "Uninstall",
   "library.card.updated": "Last updated",
   "library.categories.label": "Categories",
   "library.categories.selected.one": "{count} selected",

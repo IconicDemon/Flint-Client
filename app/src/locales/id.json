@@ -645,6 +645,7 @@
   "library.card.installed": "Terpasang",
   "library.card.needsProfile": "Pilih profil dulu",
   "library.card.open": "Buka {title}",
+  "library.card.uninstall": "Copot",
   "library.card.updated": "Terakhir diperbarui",
   "library.categories.label": "Kategori",
   "library.categories.selected.other": "{count} dipilih",

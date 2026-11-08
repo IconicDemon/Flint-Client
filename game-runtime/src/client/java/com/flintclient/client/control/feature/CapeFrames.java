@@ -58,6 +58,22 @@ public final class CapeFrames {
 		return scale;
 	}
 
+	/** The front of a cape (10 × 16 of its 22 × 17 units, from (1, 1)): what the Cosmetics window shows. */
+	public static final int FRONT_WIDTH = 10;
+	public static final int FRONT_HEIGHT = 16;
+
+	/** The front of {@code frame} (a whole frame at {@code scale} pixels per unit, in any layout): {@code FRONT_WIDTH × scale} wide. */
+	public static int[] front(int[] frame, int scale) {
+		int width = CapeAnimation.ATLAS_WIDTH * scale;
+		int w = FRONT_WIDTH * scale;
+		int h = FRONT_HEIGHT * scale;
+		int[] out = new int[w * h];
+		for (int y = 0; y < h; y++) {
+			System.arraycopy(frame, (scale + y) * width + scale, out, y * w, w);
+		}
+		return out;
+	}
+
 	/** What {@code frames} frames take at {@code scale} pixels per unit. */
 	public static long bytes(int frames, int scale) {
 		return (long) frames * CapeAnimation.ATLAS_WIDTH * scale * CapeAnimation.ATLAS_HEIGHT * scale * 4;

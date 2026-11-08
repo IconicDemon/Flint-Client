@@ -10,12 +10,13 @@
  * ```
  *
  * One shared copy per account (by canonical UUID) for the whole app: the Store's answer, the cape's checked picture and its
- * decoded animation. It follows every Store answer the launcher gets (`storeFeed`: equipping or taking off on the Store page
- * shows at once), asks the Store again when the window comes to the front (an equip in the game or on the website), and
- * forgets an account that signs out of the Store or leaves Flint.
+ * decoded animation. It follows every Store answer the launcher gets (`storeFeed`: equipping or taking off on the Store page,
+ * or in a game's Cosmetics window, shows at once), asks the Store's change feed every `pollAfterSeconds` while the window is
+ * in front and at once when it comes to the front (a purchase, a gift, an equip on the website), and forgets an account that
+ * signs out of the Store or leaves Flint.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
-import { api } from "./api";
+import { api, followStoreAnswers } from "./api";
 import { isPlayable } from "./capeAnimation";
 import { chooseCape, createCapeSource, NO_CAPE, sameCape, settleCape, type DisplayedCape, type FlintCapeState, type Settled } from "./capeSource";
 import { loadStrips, releaseStrips } from "./capeTexture";
@@ -34,19 +35,26 @@ export const capeSource = createCapeSource<ImageBitmap>({
   strips: (uuid, cosmeticId, manifest) => loadStrips(manifest, (index) => api.storeCapeStrip(uuid, cosmeticId, index)),
   release: releaseStrips,
   isPlayable,
+  preload: (uuid, cosmeticId) => void api.storeAsset(uuid, cosmeticId).catch(() => {}),
   now: () => Date.now(),
   later: (callback, ms) => window.setTimeout(callback, ms),
   cancel: (handle) => window.clearTimeout(handle as number),
 });
 
 let wired = false;
-/** Once, on first use: Store answers from anywhere in the app, and a check when the window comes to the front. */
+/**
+ * Once, on first use: Store answers from anywhere in the app (a game's too), and the change feed while the window is in front
+ * (checked at once when it comes to the front).
+ */
 function wire() {
   if (wired) return;
   wired = true;
   storeFeed.listen((event) => (event.kind === "view" ? capeSource.noteView(event.view) : capeSource.signedOut(event.uuid)));
-  onWindowFocus((focused) => focused && capeSource.checkShown());
-  window.addEventListener("focus", () => capeSource.checkShown());
+  followStoreAnswers();
+  onWindowFocus((focused) => capeSource.setActive(focused));
+  window.addEventListener("focus", () => capeSource.setActive(true));
+  window.addEventListener("blur", () => capeSource.setActive(false));
+  capeSource.setActive(typeof document === "undefined" || document.hasFocus());
 }
 
 const NO_FLINT: FlintCapeState<ImageBitmap> = { state: "none" };

@@ -168,8 +168,14 @@ that lookup answers for that player, now, or within 30 minutes of its last answe
   second; at most 100 per request, one request at a time, a newly seen player waits 0.75 s so arrivals share a request. Only
   Mojang accounts (version-4 UUIDs) are sent; offline-mode players and server NPCs never are (a Store on loopback is asked
   about anyone, for development and QA).
-- **Freshness:** an answer is kept for the Store's `max-age` (15 s to 10 min; 60 s today), then asked again. A player the answer
-  leaves out wears nothing, so an unequipped, refunded or revoked cape goes at the next refresh. A failed lookup (offline, 429,
+- **Freshness:** an answer is kept for the Store's `max-age` (15 s to 10 min; 60 s today), then asked again; a lookup sent anyway
+  (a newcomer, your own refresh) takes along every answer at least 20 s old. A player the answer leaves out wears nothing, so an
+  unequipped, refunded or revoked cape goes at the next refresh.
+- **Switching:** a player whose cape changes keeps the one shown until the new texture is up, then switches in one frame (never
+  Minecraft's cape or none in between); taking a cape off shows Minecraft's at once. A cape picked in the Cosmetics window
+  (`rshift/FlintCosmeticsScreen` → `control/feature/CapeChoices`) is on you in the same tick from the picture the app checked,
+  one request per slot at a time, the latest pick winning; refused, the Store's last answer comes back at once; accepted, it
+  stays until the Store's public answer agrees (15 s at most); never settled, it goes after 45 s. A failed lookup (offline, 429,
   5xx, malformed JSON) keeps what was known and waits: `Retry-After` when given (up to an hour), else 30 s doubling to 10 min.
 - **Assets:** downloaded only from the Store's own origin or over https from a Supabase project's public `cosmetic-assets`
   bucket (no query, credentials or `.`/`..` segments), checked against the Store's SHA-256 and size (64×32 at 1, 2, 4, 8 or 16×,
@@ -217,10 +223,11 @@ wears, and holds no token or account.
 - Ignored (the built-in `https://store.flintclient.com` is used) when missing, unreadable, over 16 KiB, of a `schema` or
   `contractVersion` other than 1, with a `storeBaseUrl` that isn't https (or http on `localhost`/`127.0.0.1`), or with a
   `publicCosmeticsUrl` that isn't that Store's lookup.
-- Watched once a second with one `stat` (modification time and size); read only when either changed. A read that fails while
-  the launcher replaces the file keeps what was read before and tries again next second.
+- Watched four times a second with one `stat` (modification time and size); read only when either changed. A read that fails
+  while the launcher replaces the file keeps what was read before and tries again next time.
 - `equipRevision` is compared for inequality (it goes back to 0 when the launcher restarts): when it changes, your own player is
-  asked about again at once (at most every 5 s), with `Cache-Control: no-cache`, instead of at the next 60 s refresh. The Store
+  asked about again at once (at most once a second), with `Cache-Control: no-cache`, instead of at the next 60 s refresh, and
+  an open Cosmetics window reads its list again. The Store
   may still answer from a copy up to 60 s old. A different `storeBaseUrl` starts over with that Store.
 - `-Dflint.store.baseUrl=` overrides the file's Store (development and QA); `equipRevision` still counts.
 

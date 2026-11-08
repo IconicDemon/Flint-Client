@@ -406,7 +406,8 @@ public final class Migration189 {
 			}
 			case "motionblur" -> {
 				if (s.has("amount")) {
-					set(state, VisualMods.MotionBlur.STRENGTH, integer(s, "amount", 5) / 5F);
+					// Its amount (1–10, 5 its default) as Flint's strength: 5 is the default 50%.
+					set(state, VisualMods.MotionBlur.STRENGTH, VisualMods.MotionBlur.STRENGTH.clamp(integer(s, "amount", 5) * 10));
 				}
 			}
 			case "togglesprint" -> {

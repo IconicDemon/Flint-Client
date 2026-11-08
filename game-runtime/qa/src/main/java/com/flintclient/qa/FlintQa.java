@@ -369,7 +369,10 @@ public final class FlintQa implements ClientModInitializer {
 			}
 			case "leave-world" -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
 			case "open-world" -> mc.execute(() -> {
-				// open-world NAME: a saved world again (its folder name), as Singleplayer's Play does.
+				// open-world NAME: a saved world again (its folder name), as Singleplayer's Play does (wait-world logs how long
+				// joining it took).
+				worldStart = System.nanoTime();
+				worldJoined = false;
 				try {
 					mc.createWorldOpenFlows().openWorld(c[1], () -> log("open-world cancelled"));
 					log("opening world: " + c[1]);
@@ -485,7 +488,11 @@ public final class FlintQa implements ClientModInitializer {
 				// frames SECONDS NAME [DEG_PER_S]: every frame's time while the camera turns (QaFrames).
 				if (!seen) {
 					seen = true;
-					QaFrames.begin(c.length > 3 ? Double.parseDouble(c[3]) : 0);
+					// A recording started a few steps before ("call com.flintclient.qa.QaFrames.begin 0", to catch the frame that
+					// opens a screen) goes on.
+					if (!QaFrames.recording()) {
+						QaFrames.begin(c.length > 3 ? Double.parseDouble(c[3]) : 0);
+					}
 					return false;
 				}
 				if (elapsed < Double.parseDouble(c[1])) {

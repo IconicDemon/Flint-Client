@@ -2,6 +2,7 @@ package com.flintclient.client.control.platform;
 
 import com.flintclient.client.FlintClient;
 import com.flintclient.client.control.ControlState;
+import com.flintclient.client.control.feature.CapeChoices;
 import com.flintclient.client.control.feature.CapeFrames;
 import com.flintclient.client.control.feature.StoreCapes;
 import com.flintclient.client.control.model.GameOptions;
@@ -52,16 +53,22 @@ import org.jspecify.annotations.Nullable;
  * have given them instead: the wearer's Minecraft cape, or the elytra's own texture ({@link #wingsCape}, from
  * {@code mixin/feature/WingsLayerMixin}).
  *
- * <p>The Store is the launcher's ({@link StoreHandoff}: {@code .flint-store.json} in the game directory, looked at once a second
- * with one {@code stat} and read only when it changed); when its {@code equipRevision} changes (the player equipped or removed
- * something in the launcher), your own cosmetics are asked for again at once, past any cache. Fault-isolated: a failure turns Store capes
- * off for the session, never the game.
+ * <p>The Store is the launcher's ({@link StoreHandoff}: {@code .flint-store.json} in the game directory, looked at
+ * with one {@code stat} four times a second and read only when it changed); when its {@code equipRevision} changes (the player
+ * equipped or removed something in the launcher), your own cosmetics are asked for again at once, past any cache, and an open
+ * Cosmetics window reads its list again ({@link CapeChoices}). A cape picked in that window is on you at once
+ * ({@link StoreCapes}). Fault-isolated: a failure turns Store capes off for the session, never the game.
  */
 public final class Mc263StoreCapes {
 	private static final HookGuard GUARD = new HookGuard("Flint Store capes",
 		(path, error) -> FlintClient.LOGGER.warn("Flint: the {} hook failed; it's off for this session", path, error));
 	/** Players are gathered every this many ticks; textures are uploaded every tick (at most {@link #UPLOADS} a tick). */
 	private static final int EVERY = 20;
+	/**
+	 * The launcher's handoff is looked at every this many ticks (one {@code stat}); when it changed, players are gathered and
+	 * asked about at once instead of at the next second, and every tick while that lookup for you waits or is out.
+	 */
+	private static final int HANDOFF_EVERY = 5;
 	private static final int UPLOADS = 2;
 	private static final int MAX_PLAYERS = 200;
 	private static final List<UUID> WANTED = new ArrayList<>();
@@ -73,8 +80,19 @@ public final class Mc263StoreCapes {
 	private static int ticks;
 	private static @Nullable StoreHandoff handoff;
 	private static long equipRevision;
+	/** {@link #handoffChanged} found the file changed: {@link #handoff} reads what it says. */
+	private static boolean handoffPolled;
 
 	private Mc263StoreCapes() {
+	}
+
+	/** Looks at the launcher's handoff (one {@code stat}): whether it changed since {@link #handoff} last read it. */
+	private static boolean handoffChanged() {
+		StoreHandoff h = handoff;
+		if (h != null && h.poll()) {
+			handoffPolled = true;
+		}
+		return handoffPolled;
 	}
 
 	/**
@@ -123,6 +141,7 @@ public final class Mc263StoreCapes {
 				StoreCapes.loaderThread());
 			FlintClient.LOGGER.info("Flint Store capes: using {}", endpoint);
 			capes = service;
+			StoreCapes.share(service);
 		}
 		return service;
 	}
@@ -135,7 +154,9 @@ public final class Mc263StoreCapes {
 		try {
 			StoreCapes<Texture> service = service();
 			service.upload(UPLOADS);
-			if (++ticks % EVERY != 0) {
+			++ticks;
+			boolean soon = service.refreshing() || ticks % HANDOFF_EVERY == 0 && handoffChanged();
+			if (ticks % EVERY != 0 && !soon) {
 				return;
 			}
 			Minecraft mc = Minecraft.getInstance();
@@ -210,12 +231,18 @@ public final class Mc263StoreCapes {
 	 */
 	private static StoreCapes<Texture> handoff(StoreCapes<Texture> service, @Nullable UUID self) {
 		StoreHandoff h = handoff;
-		if (h == null || !h.poll()) {
+		boolean changed = handoffPolled || h != null && h.poll();
+		handoffPolled = false;
+		if (h == null || !changed) {
 			return service;
 		}
 		long revision = h.equipRevision();
 		boolean equipped = revision != equipRevision;
 		equipRevision = revision;
+		if (equipped) {
+			// An open Cosmetics window reads its list again (a change made in the launcher, or on the website through it).
+			CapeChoices.launcherChanged();
+		}
 		StoreEndpoint endpoint = h.endpoint();
 		if (!endpoint.equals(service.client().endpoint())) {
 			service.clear();

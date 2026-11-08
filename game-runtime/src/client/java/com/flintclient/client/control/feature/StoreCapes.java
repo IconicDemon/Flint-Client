@@ -57,6 +57,12 @@ import org.jspecify.annotations.Nullable;
  * address {@code StoreEndpoint} allows, checked against the Store's SHA-256 and size, decoded by {@link CapePng} within the
  * cape limits, then uploaded on the game's thread ({@link #upload}). At most {@link #MAX_TEXTURES} textures and
  * {@link #MAX_TEXELS} texels; a texture nobody in view wears is released after {@link #RELEASE_NANOS}.</li>
+ * <li>A player whose cape changes keeps the one shown until the new one is up (its texture uploaded), then switches in one
+ * frame: never Minecraft's cape (or none) in between. Taking a cape off, or one that can't be loaded, shows Minecraft's at
+ * once.</li>
+ * <li>Your own pick in Flint's Cosmetics window ({@link CapeChoices}) is on you at once, from the picture the Flint app
+ * checked, while the Store answers: refused, what the Store last said comes back; accepted, it stays until the Store's
+ * public answer agrees (or {@link #CONFIRMED_HOLD_NANOS} at most), so a cape never goes back and forth on the way.</li>
  * <li>Animated capes ({@link CapeAnimation}): the poster first, exactly as a static cape; once it is up, the strips, one per
  * loader task (a poster asked for meanwhile doesn't wait for a whole animation), each cached and checked like a texture,
  * decoded and cut into frames ({@link CapeFrames}: at most 16 px per unit and {@link CapeFrames#MAX_BYTES} a cape, all
@@ -76,11 +82,23 @@ public final class StoreCapes<T> {
 	static final long MIN_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 	static final long DEFAULT_FRESH_NANOS = TimeUnit.SECONDS.toNanos(60);
 	static final long MIN_FRESH_NANOS = TimeUnit.SECONDS.toNanos(15);
-	/** The launcher's signal (something was equipped) asks about you again at most this often. */
-	static final long SIGNAL_NANOS = TimeUnit.SECONDS.toNanos(5);
+	/**
+	 * The launcher's signal (something was equipped) asks about you again at most this often: it comes only when the Store
+	 * accepted a change, so as often as lookups may go ({@link #MIN_INTERVAL_NANOS}).
+	 */
+	static final long SIGNAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 	static final long MAX_FRESH_NANOS = TimeUnit.MINUTES.toNanos(10);
 	/** Entries this close to their refresh go along with a request that is being sent anyway. */
 	static final long AHEAD_NANOS = TimeUnit.SECONDS.toNanos(5);
+	/**
+	 * With room left, answers at least this old go along with a request that is being sent anyway (a newcomer, your own
+	 * refresh): a cape changed near you shows sooner, for no request more.
+	 */
+	static final long PIGGYBACK_NANOS = TimeUnit.SECONDS.toNanos(20);
+	/** Your pick in the Cosmetics window, while the Store hasn't said whether it took it: it goes after this long. */
+	static final long PENDING_HOLD_NANOS = TimeUnit.SECONDS.toNanos(45);
+	/** Your pick the Store accepted stays at most this long for the Store's public answer to agree; then that answer stands. */
+	static final long CONFIRMED_HOLD_NANOS = TimeUnit.SECONDS.toNanos(15);
 	static final long STALE_NANOS = TimeUnit.MINUTES.toNanos(30);
 	/** A player out of view this long is forgotten (asked again if they come back). */
 	static final long FORGET_NANOS = TimeUnit.MINUTES.toNanos(5);
@@ -125,7 +143,7 @@ public final class StoreCapes<T> {
 		}
 	}
 
-	private static final class Entry {
+	private static final class Entry<T> {
 		@Nullable Asset cape;
 		/** Answered by the Store at least once (and not dropped as stale since). */
 		boolean known;
@@ -134,6 +152,38 @@ public final class StoreCapes<T> {
 		long freshUntil = NEVER;
 		long lastWanted;
 		int mark;
+		/** What this player is drawn with now: kept while the cape they change to loads. */
+		@Nullable Loaded<T> showing;
+		/** Your own pick in the Cosmetics window, shown over the Store's answer until the Store settles it. */
+		@Nullable Choice<T> choice;
+	}
+
+	/** A pick from the Cosmetics window ({@link CapeChoices}). */
+	private static final class Choice<T> {
+		final long serial;
+		/** None: no Flint cape. */
+		final boolean none;
+		final @Nullable String sha256;
+		/** Its texture (null: None, or its picture isn't here). */
+		final @Nullable Loaded<T> loaded;
+		final long since;
+		boolean accepted;
+		long acceptedAt;
+		/** Lookups sent when the Store accepted it: only an answer to a later one may end it. */
+		int acceptedAfter;
+
+		Choice(long serial, @Nullable String sha256, @Nullable Loaded<T> loaded, long since) {
+			this.serial = serial;
+			this.none = sha256 == null;
+			this.sha256 = sha256;
+			this.loaded = loaded;
+			this.since = since;
+		}
+
+		/** Whether the Store's answer ({@code cape}) is this pick. */
+		boolean agrees(@Nullable Asset cape) {
+			return none ? cape == null : cape != null && cape.sha256().equals(sha256);
+		}
 	}
 
 	private static final int LOADING = 0;
@@ -165,6 +215,8 @@ public final class StoreCapes<T> {
 		long retry = ASSET_RETRY_NANOS;
 		long lastUsed;
 		boolean warned;
+		/** Made from your pick's picture ({@link CapeChoices}): never downloaded (its asset has no address of the Store's). */
+		boolean local;
 		// ---------- an animated cape's frames ----------
 		int frames = FRAMES_NONE;
 		int @Nullable [][] pixels;
@@ -209,7 +261,8 @@ public final class StoreCapes<T> {
 	private record Shown<T>(T texture, @Nullable Loaded<T> animated, boolean wings) {
 	}
 
-	private record Answer(List<UUID> asked, Lookup lookup) {
+	/** {@code serial}: the lookup's number ({@link #requests} once it was sent). */
+	private record Answer(List<UUID> asked, Lookup lookup, int serial) {
 	}
 
 	private record Result(String key, CapePng.@Nullable Image image, boolean refused, String reason) {
@@ -232,7 +285,7 @@ public final class StoreCapes<T> {
 	private final long maxFrameBytes;
 	private final long maxCapeFrameBytes;
 	// ---------- game thread ----------
-	private final Map<UUID, Entry> entries = new HashMap<>();
+	private final Map<UUID, Entry<T>> entries = new HashMap<>();
 	private final Map<String, Loaded<T>> assets = new HashMap<>();
 	private final ArrayDeque<Loaded<T>> ready = new ArrayDeque<>();
 	private final ArrayDeque<Loaded<T>> readyFrames = new ArrayDeque<>();
@@ -253,6 +306,8 @@ public final class StoreCapes<T> {
 	private long frameWrites;
 	private long frameWriteNanos;
 	private @Nullable UUID refreshSoon;
+	/** A lookup asked past any cache (your own, after a change) is out: its answer is taken as soon as it is in. */
+	private boolean freshInFlight;
 	// ---------- from the request and loader threads ----------
 	private final ConcurrentLinkedQueue<Answer> answers = new ConcurrentLinkedQueue<>();
 	private final ConcurrentLinkedQueue<Result> results = new ConcurrentLinkedQueue<>();
@@ -293,6 +348,28 @@ public final class StoreCapes<T> {
 
 	public StoreCosmeticsClient client() {
 		return client;
+	}
+
+	/** The game's own, once the engine's side made it: the Cosmetics window plays animated capes through its disk cache. */
+	private static volatile @Nullable StoreCapes<?> shared;
+
+	public static @Nullable StoreCapes<?> shared() {
+		return shared;
+	}
+
+	/** Called by the engine's side with the service it made. */
+	public static void share(StoreCapes<?> service) {
+		shared = service;
+	}
+
+	/**
+	 * Strip {@code s}'s bytes, checked against its SHA-256: the disk cache's copy, else downloaded from where the endpoint
+	 * allows and kept there (so the cape worn and its tile in the Cosmetics window load it once). Blocking: a worker thread.
+	 */
+	public byte[] strip(CapeAnimation.Strip s) throws Exception {
+		byte[] bytes = fetch(s.sha256(), CapeAnimation.MAX_STRIP_BYTES, () -> client.download(s));
+		store(s.sha256(), bytes);
+		return bytes;
 	}
 
 	/**
@@ -413,20 +490,21 @@ public final class StoreCapes<T> {
 				clear();
 			}
 			enabled = false;
+			// Picks made meanwhile are dropped (only Minecraft's capes are drawn), never kept for later.
+			takeChoices(now);
 			return;
 		}
 		enabled = true;
+		takeChoices(now);
 		order.clear();
 		mark++;
-		// A Store on this computer (development, QA's offline identity) may be asked about anyone.
-		boolean anyId = client.endpoint().loopback();
 		for (UUID id : players) {
-			if (id == null || id.version() != 4 && !anyId || order.size() == MAX_PLAYERS) {
+			if (!askable(id) || order.size() == MAX_PLAYERS) {
 				continue;
 			}
-			Entry e = entries.get(id);
+			Entry<T> e = entries.get(id);
 			if (e == null) {
-				e = new Entry();
+				e = new Entry<>();
 				e.firstSeen = now;
 				entries.put(id, e);
 			} else if (e.mark == mark) {
@@ -437,11 +515,19 @@ public final class StoreCapes<T> {
 			order.add(id);
 		}
 		prune(now);
+		expireChoices(now);
 		request(now);
 		for (UUID id : order) {
-			Asset cape = entries.get(id).cape;
-			if (cape != null) {
-				want(cape, now);
+			Entry<T> e = entries.get(id);
+			if (e.cape != null) {
+				want(e.cape, now);
+			}
+			// What they are drawn with (and your pick) stays loaded while the cape they change to loads.
+			if (e.showing != null) {
+				e.showing.lastUsed = now;
+			}
+			if (e.choice != null && e.choice.loaded != null) {
+				e.choice.loaded.lastUsed = now;
 			}
 		}
 		// Frames once every cape worn in view is marked used: only the others may make room.
@@ -458,8 +544,12 @@ public final class StoreCapes<T> {
 		}
 	}
 
-	/** Every game tick: uploads at most {@code budget} textures (and animations) that finished loading. Game thread. */
+	/**
+	 * Every game tick: takes your picks from the Cosmetics window ({@link CapeChoices}), then uploads at most {@code budget}
+	 * textures (and animations) that finished loading, a pick's first. Game thread.
+	 */
 	public void upload(int budget) {
+		takeChoices(now);
 		int done = 0;
 		for (; done < budget && !ready.isEmpty(); done++) {
 			Loaded<T> l = ready.poll();
@@ -508,6 +598,14 @@ public final class StoreCapes<T> {
 		refreshSoon = player;
 	}
 
+	/**
+	 * Whether a {@link #refresh} (or an accepted pick) waits for its lookup, or that lookup is out: the game then updates every
+	 * tick instead of once a second, so the answer shows the moment it is in.
+	 */
+	public boolean refreshing() {
+		return refreshSoon != null || freshInFlight;
+	}
+
 	/** Forgets everything and releases every texture (Store capes off, or another Store). Game thread. */
 	public void clear() {
 		Map<UUID, Shown<T>> none = Map.of();
@@ -531,7 +629,7 @@ public final class StoreCapes<T> {
 	/** One line for the log or a dev tour: players known, capes shown, textures, animations, requests, and whether the Store answers. */
 	public String describe() {
 		int wearing = 0;
-		for (Entry e : entries.values()) {
+		for (Entry<T> e : entries.values()) {
 			if (e.cape != null) {
 				wearing++;
 			}
@@ -565,7 +663,7 @@ public final class StoreCapes<T> {
 		boolean due = false;
 		int newcomers = 0;
 		for (UUID id : order) {
-			Entry e = entries.get(id);
+			Entry<T> e = entries.get(id);
 			boolean must;
 			if (!e.known) {
 				must = true;
@@ -587,13 +685,15 @@ public final class StoreCapes<T> {
 		if (!due || batch.isEmpty()) {
 			return;
 		}
-		// Then, with room left, the answers that would be due within AHEAD_NANOS go along.
+		// Then, with room left, the answers that would be due within AHEAD_NANOS go along, and those at least PIGGYBACK_NANOS
+		// old (nearest first): the request goes anyway, so a cape changed near you shows sooner for no request more.
 		for (UUID id : order) {
 			if (batch.size() == StoreCosmeticsClient.MAX_BATCH) {
 				break;
 			}
-			Entry e = entries.get(id);
-			if (e.known && now - e.freshUntil < 0 && now - e.freshUntil >= -AHEAD_NANOS && !batch.contains(id)) {
+			Entry<T> e = entries.get(id);
+			boolean soon = now - e.freshUntil < 0 && now - e.freshUntil >= -AHEAD_NANOS;
+			if (e.known && (soon || now - e.fetchedAt >= PIGGYBACK_NANOS) && !batch.contains(id)) {
 				batch.add(id);
 			}
 		}
@@ -602,11 +702,12 @@ public final class StoreCapes<T> {
 			refreshSoon = null;
 		}
 		inFlight = true;
-		requests++;
+		freshInFlight = fresh;
+		int serial = ++requests;
 		nextRequestAt = now + MIN_INTERVAL_NANOS;
 		List<UUID> asked = List.copyOf(batch);
 		client.lookup(asked, fresh).whenComplete((lookup, error) -> answers.add(new Answer(asked,
-			lookup != null ? lookup : new Lookup(StoreCosmeticsClient.Status.FAILED, Map.of(), -1, -1))));
+			lookup != null ? lookup : new Lookup(StoreCosmeticsClient.Status.FAILED, Map.of(), -1, -1), serial)));
 	}
 
 	/** Picks up lookups and loaded assets that finished since the last update. */
@@ -614,12 +715,13 @@ public final class StoreCapes<T> {
 		Answer a;
 		while ((a = answers.poll()) != null) {
 			inFlight = false;
+			freshInFlight = false;
 			Lookup l = a.lookup();
 			if (l.status() == StoreCosmeticsClient.Status.OK) {
 				long fresh = l.maxAgeSeconds() < 0 ? DEFAULT_FRESH_NANOS
 					: Math.max(MIN_FRESH_NANOS, Math.min(MAX_FRESH_NANOS, TimeUnit.SECONDS.toNanos(Math.min(l.maxAgeSeconds(), 86_400))));
 				for (UUID id : a.asked()) {
-					Entry e = entries.get(id);
+					Entry<T> e = entries.get(id);
 					if (e == null) {
 						// Forgotten (or Store capes turned off) while the request was out.
 						continue;
@@ -632,6 +734,12 @@ public final class StoreCapes<T> {
 					e.known = true;
 					e.fetchedAt = now;
 					e.freshUntil = now + fresh;
+					Choice<T> c = e.choice;
+					if (c != null && c.accepted && a.serial() > c.acceptedAfter && c.agrees(cape)) {
+						// The Store's public answer is your pick now: it takes over (the same texture, so nothing moves).
+						e.choice = null;
+						visibleDirty = true;
+					}
 				}
 				retry = RETRY_NANOS;
 				if (failing || !answeredOnce) {
@@ -692,9 +800,9 @@ public final class StoreCapes<T> {
 
 	/** Forgets players out of view for {@link #FORGET_NANOS}, and drops answers older than {@link #STALE_NANOS}. */
 	private void prune(long now) {
-		Iterator<Entry> it = entries.values().iterator();
+		Iterator<Entry<T>> it = entries.values().iterator();
 		while (it.hasNext()) {
-			Entry e = it.next();
+			Entry<T> e = it.next();
 			if (now - e.lastWanted > FORGET_NANOS) {
 				visibleDirty |= e.cape != null;
 				it.remove();
@@ -719,6 +827,11 @@ public final class StoreCapes<T> {
 	private void want(Asset asset, long now) {
 		String key = key(asset);
 		Loaded<T> l = assets.get(key);
+		if (l != null && l.local && l.state == FAILED) {
+			// A pick's texture that couldn't be uploaded: the Store's own asset (with its address) is loaded instead.
+			assets.remove(key);
+			l = null;
+		}
 		if (l == null) {
 			if (assets.size() >= MAX_TEXTURES || texels() + (long) asset.width() * asset.height() > MAX_TEXELS) {
 				// Over the budget: no Store cape for this one until others are released.
@@ -764,6 +877,8 @@ public final class StoreCapes<T> {
 	private void fail(Loaded<T> l, long now, boolean refused, String reason) {
 		l.state = FAILED;
 		l.image = null;
+		// A player kept on their previous cape while this one loaded gets no Flint cape now (Minecraft's, as before).
+		visibleDirty = true;
 		if (refused) {
 			l.retryAt = now + ASSET_REFUSED_NANOS;
 			if (!l.warned) {
@@ -950,21 +1065,154 @@ public final class StoreCapes<T> {
 
 	private void publish() {
 		Map<UUID, Shown<T>> shown = new HashMap<>();
-		for (Map.Entry<UUID, Entry> e : entries.entrySet()) {
-			Asset cape = e.getValue().cape;
-			Loaded<T> l = cape == null ? null : assets.get(key(cape));
-			if (l != null && l.texture != null) {
+		for (Map.Entry<UUID, Entry<T>> me : entries.entrySet()) {
+			Entry<T> e = me.getValue();
+			Loaded<T> l = drawn(e);
+			e.showing = l;
+			if (l != null) {
 				Shown<T> s = l.shownAs;
 				if (s == null || s.texture() != l.texture || s.wings() != l.wings) {
 					s = new Shown<>(l.texture, l.animation != null ? l : null, l.wings);
 					l.shownAs = s;
 				}
-				shown.put(e.getKey(), s);
+				shown.put(me.getKey(), s);
 			}
 		}
 		visible = shown.isEmpty() ? Map.of() : Collections.unmodifiableMap(shown);
 		visibleDirty = false;
 	}
+
+	/**
+	 * What {@code e} is drawn with: your pick while there is one, else the Store's answer, once its texture is up. While that
+	 * one loads, what is shown stays (never Minecraft's cape in between); None, or a cape that can't come, is no Flint cape.
+	 */
+	private @Nullable Loaded<T> drawn(Entry<T> e) {
+		Choice<T> c = e.choice;
+		boolean none = c != null ? c.none : e.cape == null;
+		if (none) {
+			return null;
+		}
+		Loaded<T> target = c != null ? c.loaded : assets.get(key(e.cape));
+		if (up(target)) {
+			return target;
+		}
+		// A pick whose picture isn't here keeps what is shown until the Store's answer replaces it.
+		boolean coming = c != null || target != null && target.state != FAILED;
+		return coming && up(e.showing) ? e.showing : null;
+	}
+
+	/** Loaded, uploaded and not released. */
+	private boolean up(@Nullable Loaded<T> l) {
+		return l != null && l.texture != null && assets.get(l.key) == l;
+	}
+
+	// ---------- your picks in the Cosmetics window ----------
+
+	/** Whether {@code id} may be asked about (and shown with a Store cape): a Mojang account, or anyone on a Store on this computer. */
+	private boolean askable(@Nullable UUID id) {
+		// A Store on this computer (development, QA's offline identity) may be asked about anyone.
+		return id != null && (id.version() == 4 || client.endpoint().loopback());
+	}
+
+	/** Takes the Cosmetics window's notes ({@link CapeChoices}). Game thread. */
+	private void takeChoices(long now) {
+		for (CapeChoices.Note note; (note = CapeChoices.take()) != null;) {
+			if (note instanceof CapeChoices.Seen seen) {
+				if (cacheDir != null) {
+					try {
+						loader.execute(() -> store(seen.sha256(), seen.png()));
+					} catch (RejectedExecutionException e) {
+						// Not kept: the texture is downloaded when it is needed.
+					}
+				}
+			} else if (note instanceof CapeChoices.Chose chose) {
+				if (!enabled || !askable(chose.player())) {
+					// Store capes are off (only Minecraft's capes), or not for this id.
+					continue;
+				}
+				Entry<T> e = entries.get(chose.player());
+				if (e == null) {
+					e = new Entry<>();
+					e.firstSeen = now;
+					e.lastWanted = now;
+					entries.put(chose.player(), e);
+				}
+				String sha = chose.sha256();
+				e.choice = new Choice<>(chose.serial(), sha, sha == null ? null : local(sha, chose.image(), now), now);
+				visibleDirty = true;
+			} else if (note instanceof CapeChoices.Settled settled) {
+				Entry<T> e = entries.get(settled.player());
+				Choice<T> c = e == null ? null : e.choice;
+				if (c == null || c.serial != settled.serial()) {
+					// An earlier pick: the one after it is still on its way.
+					continue;
+				}
+				if (settled.accepted()) {
+					c.accepted = true;
+					c.acceptedAt = now;
+					c.acceptedAfter = requests;
+					// The Store took it: its public answer is asked for past any cache, and ends the pick once it agrees.
+					refreshSoon = settled.player();
+				} else {
+					// Refused: what the Store last said is shown again (it is still loaded: it was shown before the pick).
+					e.choice = null;
+					visibleDirty = true;
+				}
+			}
+		}
+	}
+
+	/** Picks the Store hasn't settled in {@link #PENDING_HOLD_NANOS}, or whose answer didn't agree in {@link #CONFIRMED_HOLD_NANOS}, go. */
+	private void expireChoices(long now) {
+		for (Map.Entry<UUID, Entry<T>> me : entries.entrySet()) {
+			Choice<T> c = me.getValue().choice;
+			if (c == null) {
+				continue;
+			}
+			boolean over = c.accepted ? now - c.acceptedAt > CONFIRMED_HOLD_NANOS : now - c.since > PENDING_HOLD_NANOS;
+			if (over) {
+				me.getValue().choice = null;
+				visibleDirty = true;
+				if (c.accepted) {
+					// The Store's answer stands now: asked again in case the last one was a cached copy.
+					refreshSoon = me.getKey();
+				}
+			}
+		}
+	}
+
+	/**
+	 * The texture of a pick's picture: the one already loaded for that hash, or one made from {@code image} (uploaded with the
+	 * next textures, first in line). Null when there is no picture, or no room for it.
+	 */
+	private @Nullable Loaded<T> local(String sha256, CapePng.@Nullable Image image, long now) {
+		Loaded<T> l = assets.get(sha256);
+		if (l != null && l.state != FAILED) {
+			l.lastUsed = now;
+			return l;
+		}
+		if (image == null || image.width() > StoreCosmeticsClient.MAX_CAPE_WIDTH || image.height() > StoreCosmeticsClient.MAX_CAPE_HEIGHT
+			|| image.argb().length < image.width() * image.height()) {
+			return l;
+		}
+		if (l == null) {
+			if (assets.size() >= MAX_TEXTURES || texels() + (long) image.width() * image.height() > MAX_TEXELS) {
+				return null;
+			}
+			l = new Loaded<>(new Asset("local", 0, LOCAL, sha256, image.width(), image.height(), null), maxCapeFrameBytes);
+			l.local = true;
+			assets.put(l.key, l);
+		}
+		l.image = image;
+		l.state = READY;
+		l.lastUsed = now;
+		ready.remove(l);
+		ready.addFirst(l);
+		return l;
+	}
+
+	/** A pick's asset has no address: it is never downloaded. */
+	private static final java.net.URI LOCAL = java.net.URI.create("flint-local:cape");
 
 	// ---------- the loader thread ----------
 

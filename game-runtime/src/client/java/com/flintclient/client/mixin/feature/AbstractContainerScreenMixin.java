@@ -60,6 +60,11 @@ abstract class AbstractContainerScreenMixin extends Screen {
 
 	@Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
 	private void flint$key(KeyEvent event, CallbackInfoReturnable<Boolean> callback) {
+		// Animating out: it closes now and the key goes to the game (unused), as after any closed screen.
+		if (Mc263Inventory.finishClosing(this)) {
+			callback.setReturnValue(false);
+			return;
+		}
 		if (Mc263Inventory.keyPressed(this, flint$search, hoveredSlot, event)) {
 			callback.setReturnValue(true);
 		}

@@ -10,11 +10,34 @@ import { KIND_LABEL, placementNote, ProjectIcon, type InstallTarget } from "./In
 type Section = "overview" | "gallery" | "versions" | "details";
 
 const SIDE: Record<string, MessageKey> = { required: "library.side.required", optional: "library.side.optional", unsupported: "library.side.unsupported", unknown: "library.side.unknown" };
+
+/** A card's or the drawer's Uninstall: removes the project's files from the chosen profile, after a short confirm. */
+export type UninstallAction = { locked: boolean; busy: boolean; ask: () => void };
+
+export function UninstallButton({ action }: { action: UninstallAction }) {
+  const t = useT();
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      icon="trash"
+      className="result-uninstall"
+      onClick={action.ask}
+      loading={action.busy}
+      disabled={action.locked}
+      title={action.locked ? t("library.install.runningMods") : undefined}
+    >
+      {t("library.card.uninstall")}
+    </Button>
+  );
+}
+
 export function ProjectDrawer({
   hit,
   kind,
   profile,
   installed,
+  uninstall,
   onClose,
   onInstall,
   onOpenProfile,
@@ -23,6 +46,8 @@ export function ProjectDrawer({
   kind: LibraryKind | null;
   profile: Profile | null;
   installed: boolean;
+  /** Offered only when the project's files in this profile are known (not for modpacks). */
+  uninstall: UninstallAction | null;
   onClose: () => void;
   onInstall: (target: InstallTarget) => void;
   onOpenProfile: (id: string) => void;
@@ -112,6 +137,7 @@ export function ProjectDrawer({
               <span className="result-installed">
                 <Icon name="check" size={15} /> {t("library.drawer.installedIn", { profile: profile?.name ?? "" })}
               </span>
+              {uninstall && <UninstallButton action={uninstall} />}
               {profile && (
                 <Button size="sm" variant="ghost" onClick={() => onOpenProfile(profile.id)}>
                   {t("library.drawer.manage")}

@@ -610,7 +610,8 @@ impl Backend for AppBackend {
         async move {
             let state = tauri::Manager::state::<crate::core::AppState>(&app);
             let uuid = crate::store::game::game_account(&state, &playing)?;
-            to_value(crate::store::game::wear(&state, &uuid, &slot, id.as_deref()).await?)
+            // The app's window hears of it too: the launcher's Store page and previews show what the game put on.
+            to_value(crate::store::game::wear(&state, &uuid, &slot, id.as_deref(), |view| crate::store::announce(&app, view)).await?)
         }
     }
 

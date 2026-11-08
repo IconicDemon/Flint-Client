@@ -800,7 +800,7 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
       // doesn't, as after a newer release is out; ?news=offline fails like a computer with no internet and no saved copy.
       await sleep(400);
       if (params.get("news") === "offline") throw "Flint news: could not connect (check your internet connection)";
-      const known = RELEASE_NOTES.map(({ version, date, title, summary, page_url }) => ({ version, date, title, summary, page_url }));
+      const known = RELEASE_NOTES.map(({ version, date, title, summary, page_url, image }) => ({ version, date, title, summary, page_url, image }));
       const next = { version: "9.9.9", date: "2026-12-01", title: "A sample newer release", summary: "Shown in the browser preview only, to check how news of a newer release looks.", page_url: "https://flintclient.com/releases/9.9.9/" };
       return { entries: params.get("news") === "next" ? [next, ...known] : known, offline: false };
     }

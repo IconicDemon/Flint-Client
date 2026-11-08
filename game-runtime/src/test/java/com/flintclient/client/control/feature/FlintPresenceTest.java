@@ -158,6 +158,10 @@ class FlintPresenceTest {
 		presence.tick(3 * FlintPresence.HEARTBEAT_NANOS + 3 * SECOND, account, true, false, List.of());
 		presence.tick(3 * FlintPresence.HEARTBEAT_NANOS + 4 * SECOND, account, true, false, List.of());
 		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.own());
+		// The v3 marks (Trial Creator, VIP, Special) by the names Flint Admin stores.
+		for (String name : List.of("trial_creator", "vip", "special")) {
+			assertEquals(name, FlintPresence.tag(name).name().toLowerCase(java.util.Locale.ROOT));
+		}
 		beatAnswer = "{\"ok\":true,\"tag\":\"champion\"}";
 		FlintPlayers.setOwn(FlintPlayers.Tag.OWNER);
 		presence.tick(4 * FlintPresence.HEARTBEAT_NANOS + 4 * SECOND, account, true, false, List.of());

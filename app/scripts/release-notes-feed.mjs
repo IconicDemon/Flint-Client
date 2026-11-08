@@ -8,7 +8,7 @@
 //   node scripts/release-notes-feed.mjs --repo IconicDemon/Flint-Client --version 1.0.0 --out dist/release-notes.json [--dist dist]
 //
 // Schema 1 (agreed with the site): { schema, generated_at, versions: [{ version, date (YYYY-MM-DD), title, summary, points,
-// sections?: [{heading, points}], release_url, page_url, downloads? }] }, newest first, plain text only. `page_url` is the
+// sections?: [{heading, points}], release_url, page_url, image? (1.0.3+: {url, width, height, alt}), downloads? }] }, newest first, plain text only. `page_url` is the
 // version's own page on the site, exactly https://flintclient.com/releases/<version>/ (agreed with the site; the launcher's
 // news opens it), as releaseNotes.json gives it. The version being released gets `downloads` when --dist holds its files:
 // per platform { url, file_name, size_bytes, sha256 }, only for files that exist.
@@ -99,6 +99,18 @@ const versions = notes
     if (n.page_url !== page) problems.push(`${n.version}: page_url must be exactly ${page}`);
     const entry = { version: n.version, date: n.date, title: n.title ?? "", summary: n.summary ?? "", points, release_url: `${base}/tag/v${n.version}`, page_url: page };
     if (sections?.length) entry.sections = sections;
+    // The release's cover (1.0.3+, agreed with the site): exactly that version's cover on flintclient.com, with its size and a
+    // plain description. The launcher (data.rs feed_image) and the site check it again; older launchers ignore it.
+    if (n.image != null) {
+      const im = n.image;
+      const cover = `https://flintclient.com/releases/covers/${n.version}`;
+      const sized = (x) => Number.isInteger(x) && x >= 1 && x <= 8192;
+      if (im && (im.url === `${cover}.webp` || im.url === `${cover}.png`) && sized(im.width) && sized(im.height) && (im.alt == null || (typeof im.alt === "string" && im.alt.length <= 200 && plain(im.alt)))) {
+        entry.image = { url: im.url, width: im.width, height: im.height, alt: im.alt ?? "" };
+      } else {
+        problems.push(`${n.version}: image must be { url: ${cover}.webp|.png, width, height, alt }`);
+      }
+    }
     if (n.version === current) {
       const d = downloads(current);
       if (d) entry.downloads = d;

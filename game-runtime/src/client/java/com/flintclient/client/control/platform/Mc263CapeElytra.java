@@ -11,18 +11,18 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 /**
- * Minecraft's side of the cape-derived elytra ({@link CapeElytra}, mapping "cape-derived-elytra" v1, as Flint's websites
- * preview it): a player who wears a Flint Store cape and an elytra has wings made of that cape, its front outside, its lining
- * inside, cut to the stepped outline, instead of Minecraft's elytra.
+ * Minecraft's side of the cape-derived elytra ({@link CapeElytra}, mapping "cape-derived-elytra" v2, the vanilla elytra, as Flint's
+ * websites preview it): a player who wears a Flint Store cape and an elytra has Minecraft's own elytra, its shape and size, with
+ * their cape's artwork (static or animated) instead of the elytra texture.
  *
- * <p>Only the wing geometry and its texture change. The elytra layer still decides whether wings are drawn (worn, the player
- * visible, not in first person), and the elytra model's own two wing parts still place them: their pivots, Minecraft's own
- * smoothed wing angles every frame (standing, crouching 3 px lower, gliding, diving), the layer's offset behind the body. The
- * wing parts draw {@link CapeElytra#wingQuads} in their own space ({@link PartDrawing}, as Wavy Capes draws its cloth), with
- * the cape's texture (the one the cape layer draws, so an animated cape plays on the wings at the cape's own frame) in a
- * back-face-culled cut-out pass, and the glint when the elytra is enchanted. Which players: {@link CapeElytra#use}, decided
- * by the version's elytra layer hook ({@code mixin/feature/WingsLayerMixin}). Render thread; fault-isolated (a failure leaves
- * Minecraft's elytra for the session).
+ * <p>Only the texture changes; the wings are Minecraft's. The elytra layer still decides whether wings are drawn (worn, the
+ * player visible, not in first person), and the elytra model's own two wing parts still place them: their pivots, Minecraft's own
+ * smoothed wing angles every frame (standing, crouching 3 px lower, gliding, diving), the layer's offset behind the body. The wing
+ * parts draw {@link CapeElytra#wingQuads} (Minecraft's wing boxes cut to its elytra's silhouette, textured from the cape) in their
+ * own space ({@link PartDrawing}, as Wavy Capes draws its cloth), with the cape's texture (the one the cape layer draws, so an
+ * animated cape plays on the wings at the cape's own frame) in Minecraft's own elytra pass (cut out, both sides), and the glint
+ * when the elytra is enchanted. Which players: {@link CapeElytra#use}, decided by the version's elytra layer hook
+ * ({@code mixin/feature/WingsLayerMixin}). Render thread; fault-isolated (a failure leaves Minecraft's elytra for the session).
  */
 public final class Mc263CapeElytra {
 	private static final HookGuard GUARD = new HookGuard("cape design on elytra",

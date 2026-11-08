@@ -100,7 +100,6 @@ export function StoreInventoryCard({ uuid, inventory: full, pending, error, read
     );
   }
 
-  const busy = !!pending;
   return (
     <section className="store-items" ref={top} aria-labelledby="store-items-title">
       <h2 id="store-items-title" className="sr-only">
@@ -174,8 +173,8 @@ export function StoreInventoryCard({ uuid, inventory: full, pending, error, read
             hasMinecraftCape={hasMinecraftCape}
             motion={motion}
             onColumns={setColumns}
-            onWear={(item) => !busy && !readOnly && full.equipped[item.kind] !== item.cosmeticId && onWear(item.kind, item.cosmeticId)}
-            onNone={() => worn && !busy && !readOnly && onWear(slot, null)}
+            onWear={(item) => !readOnly && full.equipped[item.kind] !== item.cosmeticId && onWear(item.kind, item.cosmeticId)}
+            onNone={() => worn && !readOnly && onWear(slot, null)}
             onPreview={onPreview}
           />
         )}
@@ -190,9 +189,10 @@ export function StoreInventoryCard({ uuid, inventory: full, pending, error, read
           cards={slotCards}
           readOnly={readOnly}
           motion={motion}
-          busy={busy}
+          // A pick on its way never blocks the next one: the latest pick wins (lib/equipQueue.ts).
+          busy={false}
           pendingId={pending?.slot === slot ? pending.cosmeticId : null}
-          onWear={(s, id) => !busy && !readOnly && onWear(s, id)}
+          onWear={(s, id) => !readOnly && onWear(s, id)}
           onPreview={onPreview}
         />
       )}

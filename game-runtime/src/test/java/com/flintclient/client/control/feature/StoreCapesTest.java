@@ -3,6 +3,7 @@ package com.flintclient.client.control.feature;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -130,6 +131,16 @@ class StoreCapesTest {
 
 		Game(Path cache, Store store) {
 			capes = new StoreCapes<>(new StoreCosmeticsClient(StoreEndpoint.defaults(), store), cache, gpu, Runnable::run);
+		}
+
+		/** Assets loaded only when {@code loader} runs its tasks (a slow disk or network). */
+		Game(Path cache, java.util.concurrent.Executor loader) {
+			capes = new StoreCapes<>(new StoreCosmeticsClient(StoreEndpoint.defaults(), store), cache, gpu, loader);
+		}
+
+		/** One tick's uploads (the game uploads every tick, between the once-a-second updates). */
+		void tick() {
+			capes.upload(2);
 		}
 
 		/** {@code seconds} updates, one a second, each followed by a tick's uploads. */
@@ -427,10 +438,14 @@ class StoreCapesTest {
 		assertEquals(2, game.store.lookups.size(), "asked again at once, long before max-age");
 		assertEquals(java.util.List.of(false, true), game.store.freshLookups, "past any cache, as the launcher's handoff asks");
 		game.capes.refresh(STEVE);
-		game.run(4);
-		assertEquals(2, game.store.lookups.size(), "but not more than every 5 s");
-		game.run(2);
-		assertEquals(3, game.store.lookups.size());
+		assertTrue(game.capes.refreshing(), "the game updates sooner while a signal waits");
+		game.run(1);
+		assertEquals(2, game.store.lookups.size(), "not within a second of the last answer");
+		game.run(1);
+		assertEquals(3, game.store.lookups.size(), "then at once: signals only come when the Store accepted a change");
+		assertTrue(game.capes.refreshing(), "its answer is taken as soon as it is in");
+		game.run(1);
+		assertFalse(game.capes.refreshing());
 		assertEquals(java.util.List.of(false, true, true), game.store.freshLookups);
 		game.run(30);
 		assertEquals(3, game.store.lookups.size(), "no signal: max-age again");
@@ -499,5 +514,218 @@ class StoreCapesTest {
 		assertFalse(game.capes.wings(STEVE), "no elytra art: the wings keep what Minecraft gives them");
 		assertTrue(game.capes.wings(ALEX));
 		assertFalse(game.capes.wings(OFFLINE), "wears nothing");
+	}
+
+	// ---------- switching capes: never Minecraft's cape in between, and your pick at once ----------
+
+	private static final String FROST = "https://store.flintclient.com/test-capes/frost-cape.png";
+	private static final byte[] PNG_B = CapePng.encodeRgba(64, 32, CapePngTest.capePixels(64, 32, 41));
+	private static final String SHA_B = StoreCapes.sha256(PNG_B);
+
+	private static CapePng.Image image(byte[] png) {
+		try {
+			return CapePng.decode(png, 1024, 512);
+		} catch (CapePng.Refused e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** A loader that runs its tasks only when asked: what is loading can be seen. */
+	private static final class SlowLoader implements java.util.concurrent.Executor {
+		final java.util.ArrayDeque<Runnable> tasks = new java.util.ArrayDeque<>();
+
+		@Override
+		public void execute(Runnable task) {
+			tasks.add(task);
+		}
+
+		void runAll() {
+			while (!tasks.isEmpty()) {
+				tasks.poll().run();
+			}
+		}
+	}
+
+	@Test
+	void aChangedCapeKeepsTheOldOneUntilTheNewOneIsUpNeverMinecraftsInBetween(@TempDir Path cache) {
+		CapeChoices.clear();
+		SlowLoader loader = new SlowLoader();
+		Game game = new Game(cache, loader);
+		game.store.wear(STEVE, EMBER, PNG, SHA, 64, 32);
+		game.run(3);
+		loader.runAll();
+		game.run(2);
+		String ember = game.capes.texture(STEVE);
+		assertNotNull(ember);
+		// Changed on the website: the next answer names Frost, whose texture takes a while to arrive.
+		game.store.wear(STEVE, FROST, PNG_B, SHA_B, 64, 32);
+		game.capes.refresh(STEVE);
+		for (int i = 0; i < 5; i++) {
+			game.run(1);
+			game.tick();
+			assertEquals(ember, game.capes.texture(STEVE), "Ember stays until Frost is up: never Minecraft's cape, never none");
+		}
+		loader.runAll();
+		game.run(1);
+		String frost = game.capes.texture(STEVE);
+		assertArrayEquals(CapePngTest.capePixels(64, 32, 41), game.gpu.pixels.get(frost), "then Frost, in one step");
+		assertFalse(game.gpu.released.contains(ember), "Ember was never released while it was shown");
+
+		// Back to Ember within a couple of minutes: still loaded, so at once (no download).
+		game.store.wear(STEVE, EMBER, PNG, SHA, 64, 32);
+		int downloads = game.store.downloads.size();
+		game.capes.refresh(STEVE);
+		game.run(2);
+		assertEquals(ember, game.capes.texture(STEVE));
+		assertEquals(downloads, game.store.downloads.size());
+
+		// Taking it off shows Minecraft's cape at once.
+		game.store.wearing.remove(STEVE);
+		game.capes.refresh(STEVE);
+		game.run(2);
+		assertNull(game.capes.texture(STEVE));
+	}
+
+	@Test
+	void aCapeThatFailsItsChecksDoesntHoldTheOldOneForever(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		assertNotNull(game.capes.texture(STEVE));
+		byte[] other = CapePng.encodeRgba(64, 32, CapePngTest.capePixels(64, 32, 99));
+		game.store.wear(STEVE, FROST, other, SHA_B, 64, 32);
+		game.capes.refresh(STEVE);
+		game.run(4);
+		assertNull(game.capes.texture(STEVE), "Frost was refused (its hash): no Flint cape, as before");
+	}
+
+	@Test
+	void yourPickIsOnYouAtOnceFromItsPictureAndTheStoresAnswerTakesOverSeamlessly(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		// Picked in the Cosmetics window: on you in the next tick, from the picture the app checked; nothing downloaded.
+		long serial = CapeChoices.choose(STEVE, SHA_B, image(PNG_B));
+		CapeChoices.seen(PNG_B);
+		game.tick();
+		String frost = game.capes.texture(STEVE);
+		assertNotNull(frost);
+		assertArrayEquals(CapePngTest.capePixels(64, 32, 41), game.gpu.pixels.get(frost));
+		assertEquals(List.of(URI.create(EMBER)), game.store.downloads, "nothing is downloaded for a pick");
+		assertTrue(Files.isRegularFile(cache.resolve(SHA_B + ".png")), "its texture is kept in the cape cache by its hash");
+		// The Store hasn't answered yet, and its lookup still says Ember: the pick stays.
+		game.run(30);
+		assertEquals(frost, game.capes.texture(STEVE), "a pick the Store hasn't settled stays (up to its hold)");
+		// Accepted: the public answer is asked for past any cache, agrees, and takes over with the same texture.
+		game.store.wear(STEVE, FROST, PNG_B, SHA_B, 64, 32);
+		CapeChoices.settled(STEVE, serial, true);
+		int lookups = game.store.lookups.size();
+		game.tick();
+		game.run(2);
+		assertTrue(game.store.lookups.size() > lookups);
+		assertEquals(Boolean.TRUE, game.store.freshLookups.get(game.store.freshLookups.size() - 1));
+		assertEquals(frost, game.capes.texture(STEVE), "the Store's answer is the same texture: nothing moves");
+		assertEquals(List.of(URI.create(EMBER)), game.store.downloads, "and nothing is downloaded for it");
+		game.run(StoreCapes.CONFIRMED_HOLD_NANOS / s(1) + 5);
+		assertEquals(frost, game.capes.texture(STEVE), "the Store's answer now: past the pick's hold, nothing changes");
+		assertFalse(game.gpu.released.contains(frost));
+	}
+
+	@Test
+	void aRefusedPickPutsBackWhatTheStoreSaidAtOnce(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		String ember = game.capes.texture(STEVE);
+		long serial = CapeChoices.choose(STEVE, SHA_B, image(PNG_B));
+		game.tick();
+		assertNotEquals(ember, game.capes.texture(STEVE));
+		CapeChoices.settled(STEVE, serial, false);
+		game.tick();
+		assertEquals(ember, game.capes.texture(STEVE), "the Store's answer again, the same texture as before");
+	}
+
+	@Test
+	void pickingBThenAEachShowsAtOnceAndTheLatestWins(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		String ember = game.capes.texture(STEVE);
+		long b = CapeChoices.choose(STEVE, SHA_B, image(PNG_B));
+		game.tick();
+		String frost = game.capes.texture(STEVE);
+		assertNotEquals(ember, frost);
+		long a = CapeChoices.choose(STEVE, SHA, image(PNG));
+		game.tick();
+		assertEquals(ember, game.capes.texture(STEVE), "Ember's texture, still loaded: at once");
+		// B's answer comes late (it was sent first): it settles nothing, A is the pick.
+		CapeChoices.settled(STEVE, b, true);
+		game.tick();
+		game.run(2);
+		assertEquals(ember, game.capes.texture(STEVE));
+		CapeChoices.settled(STEVE, a, true);
+		game.tick();
+		game.run(3);
+		assertEquals(ember, game.capes.texture(STEVE), "the Store says Ember: the pick ends where it is");
+		assertEquals(1, game.gpu.uploaded.stream().filter(t -> t.startsWith("store-capes/" + SHA + "#")).count(), "Ember uploaded once");
+	}
+
+	@Test
+	void noneTakesTheCapeOffAtOnceAndAnUnsettledPickGoesAfterItsHold(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		String ember = game.capes.texture(STEVE);
+		CapeChoices.choose(STEVE, null, null);
+		game.tick();
+		assertNull(game.capes.texture(STEVE), "None: Minecraft's cape at once");
+		game.run(StoreCapes.PENDING_HOLD_NANOS / s(1) + 2);
+		assertEquals(ember, game.capes.texture(STEVE), "never settled: what the Store says comes back");
+	}
+
+	@Test
+	void anAcceptedPickTheStoreDoesntShowYetStaysOnlyForItsHold(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.run(4);
+		String ember = game.capes.texture(STEVE);
+		long serial = CapeChoices.choose(STEVE, SHA_B, image(PNG_B));
+		CapeChoices.settled(STEVE, serial, true);
+		game.tick();
+		String frost = game.capes.texture(STEVE);
+		game.run(StoreCapes.CONFIRMED_HOLD_NANOS / s(1) - 3);
+		assertEquals(frost, game.capes.texture(STEVE), "the lookup still says Ember (a copy on its way): the pick stays a while");
+		game.run(5);
+		assertEquals(ember, game.capes.texture(STEVE), "then the Store's public answer stands");
+	}
+
+	@Test
+	void picksAreIgnoredWhileStoreCapesAreOffAndNeverKeptForLater(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.on = false;
+		game.run(2);
+		CapeChoices.choose(STEVE, SHA_B, image(PNG_B));
+		game.run(2);
+		assertNull(game.capes.texture(STEVE));
+		game.on = true;
+		game.run(4);
+		assertArrayEquals(CapePngTest.capePixels(64, 32, 5), game.gpu.pixels.get(game.capes.texture(STEVE)), "the Store's answer, not the old pick");
+	}
+
+	@Test
+	void aRequestGoingAnywayTakesAlongAnswersOlderThan20Seconds(@TempDir Path cache) {
+		CapeChoices.clear();
+		Game game = wearing(cache);
+		game.players = List.of(STEVE, ALEX);
+		game.run(4);
+		assertEquals(1, game.store.lookups.size());
+		game.run(25);
+		UUID newcomer = new UUID(0x1234_5678_9abc_4defL, 0x8000_0000_0000_0001L);
+		game.players = List.of(STEVE, ALEX, newcomer);
+		game.run(3);
+		assertEquals(2, game.store.lookups.size(), "one request for the newcomer");
+		assertEquals(java.util.Set.of(STEVE, ALEX, newcomer), new java.util.HashSet<>(game.store.lookups.get(1)),
+			"with the answers older than 20 s: a cape changed near you shows sooner, for no request more");
 	}
 }

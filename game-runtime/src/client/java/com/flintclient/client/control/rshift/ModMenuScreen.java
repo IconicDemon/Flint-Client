@@ -32,7 +32,6 @@ import org.jspecify.annotations.Nullable;
  * session, so a fault costs the menu, not the game. It doesn't pause the game. Render thread.
  */
 public final class ModMenuScreen extends KitScreen {
-	private static final long CLOSE_TIMEOUT_MILLIS = 600;
 	private static final long SAVE_AFTER_MILLIS = 1000;
 	private static final float RISE = 12;
 	private static final float DROP = 6;
@@ -48,10 +47,10 @@ public final class ModMenuScreen extends KitScreen {
 	private boolean closeToGame;
 	private boolean started;
 	private boolean framed;
-	private boolean closing;
+	/** The closing fade: a key pressed during it goes on to the game, and it can't outlast {@link MenuClose#TIMEOUT_MILLIS}. */
+	private final MenuClose fade = new MenuClose();
 	private boolean closed;
 	private boolean failed;
-	private long closingSince;
 	private long dirtySince = -1;
 
 	public ModMenuScreen(@Nullable Object parent) {
@@ -147,9 +146,14 @@ public final class ModMenuScreen extends KitScreen {
 				}
 				com.flintclient.client.render.ModIcons.preload(keys);
 				long began = System.nanoTime();
+				// The packages, then the few classes elsewhere the first opening still loaded on the render thread (about 6 ms each
+				// there: the HUD page's key logic and game state, the open sound and its gate, the key names, the icon font).
 				int classes = com.flintclient.client.ClassWarmer.load(ModMenuScreen.class, java.util.List.of("com/flintclient/client/control/rshift/",
 					"com/flintclient/client/ui/kit/", "com/flintclient/client/render/", "com/flintclient/client/control/hud/",
-					"com/flintclient/client/control/editor/"));
+					"com/flintclient/client/control/editor/", "com/flintclient/client/control/sound/",
+					"com/flintclient/client/control/GameState", "com/flintclient/client/control/model/ToggleKeyLogic",
+					"com/flintclient/client/control/platform/UiSound", "com/flintclient/client/platform/KeyInput",
+					"com/flintclient/client/platform/GlyphRaster"));
 				FlintLog.LOGGER.info("Flint: Right Shift menu readied ahead ({} classes loaded in {} ms on a worker)", classes,
 					(System.nanoTime() - began) / 1_000_000);
 			} catch (RuntimeException | LinkageError e) {
@@ -233,7 +237,7 @@ public final class ModMenuScreen extends KitScreen {
 
 	@Override
 	protected void update() {
-		if (failed || closing && Clock.millis() - closingSince > CLOSE_TIMEOUT_MILLIS) {
+		if (failed || fade.overdue(Clock.millis())) {
 			finishClose();
 		}
 		rescaleIfChanged();
@@ -290,11 +294,10 @@ public final class ModMenuScreen extends KitScreen {
 
 	@Override
 	protected void closeRequested() {
-		if (closing) {
+		if (fade.closing()) {
 			return;
 		}
-		closing = true;
-		closingSince = Clock.millis();
+		fade.begin(Clock.millis());
 		motion.close();
 		try {
 			if (settings().soundsEnabled()) {
@@ -306,14 +309,14 @@ public final class ModMenuScreen extends KitScreen {
 	}
 
 	private void reopen() {
-		closing = false;
+		fade.end();
 		closeToGame = false;
 		closed = false;
 		motion.open();
 	}
 
 	private void finishClose() {
-		closing = false;
+		fade.end();
 		closed = false;
 		if (hostIsShown()) {
 			// Right Shift leaves Flint altogether; Escape and Close go back to where the window was opened from.
@@ -414,9 +417,17 @@ public final class ModMenuScreen extends KitScreen {
 			return true;
 		}
 		try {
-			if (closing) {
-				if (toggleKey.keyPressed(MenuHost.isOpenKey(event), false, false)) {
-					reopen();
+			if (fade.closing()) {
+				// Fading out: a fresh press of the menu key turns it round; any other key closes it now and is the game's (Esc
+				// opens the pause menu, E the inventory), as if the menu had already gone. The menu key is matched held or not.
+				switch (MenuClose.press(MenuHost.isOpenKeyRelease(event), toggleKey.keyPressed(MenuHost.isOpenKey(event), false, false))) {
+					case REOPEN -> reopen();
+					case LEAVE_NOW -> {
+						finishClose();
+						return hostIsShown();
+					}
+					case IGNORE -> {
+					}
 				}
 				return true;
 			}
@@ -449,7 +460,7 @@ public final class ModMenuScreen extends KitScreen {
 		try {
 			// The open key bound to a mouse button (not the left one, which works the window) closes it too.
 			if (button != Kit.LEFT_BUTTON && toggleKey.keyPressed(MenuHost.isOpenButton(x, y, button), typing() || hasModal(), capturingKeys())) {
-				if (closing) {
+				if (fade.closing()) {
 					reopen();
 				} else if (acceptsInput()) {
 					closeToGame = true;

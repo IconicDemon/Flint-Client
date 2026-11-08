@@ -690,6 +690,7 @@
   "library.card.installed": "Installato",
   "library.card.needsProfile": "Scegli prima un profilo",
   "library.card.open": "Apri {title}",
+  "library.card.uninstall": "Disinstalla",
   "library.card.updated": "Ultimo aggiornamento",
   "library.categories.label": "Categorie",
   "library.categories.selected.one": "{count} selezionata",

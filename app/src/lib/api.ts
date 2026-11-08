@@ -499,7 +499,15 @@ export type SavedDiagnostics = { path: string; size: number; files: number };
 
 /** `news_feed`: a release from Flint's public release feed, already checked field by field (src-tauri/src/data.rs
  *  `feed_releases`; lib/newsLinks.ts `newsReleases` checks it again). `page_url` only when it is exactly the version's page. */
-export type FeedRelease = { version: string; date: string; title: string; summary: string; page_url: string | null };
+export type FeedRelease = {
+  version: string;
+  date: string;
+  title: string;
+  summary: string;
+  page_url: string | null;
+  /** The release's cover on flintclient.com (1.0.3+ feeds; only that version's own cover address), or null. */
+  image?: { url: string; width: number; height: number; alt: string } | null;
+};
 
 /** `partners_feed` (src-tauri/src/partners): the Store's Partners API v1 body as it came (parse with lib/partners.ts), and where it came from. */
 export type PartnersAnswer = {
@@ -657,6 +665,14 @@ export function subscribe<T>(event: string, handler: (payload: T) => void): () =
 function fed(view: StoreView): StoreView {
   storeFeed.publish({ kind: "view", view });
   return view;
+}
+
+/**
+ * Store answers the app didn't ask for (a cape put on in a game's Cosmetics window: src-tauri `store::announce`), passed on
+ * to `storeFeed` like its own. Returns the unsubscribe.
+ */
+export function followStoreAnswers(): () => void {
+  return subscribe<StoreView>("store-view", (view) => void fed(view));
 }
 
 export function errorText(error: unknown): string {

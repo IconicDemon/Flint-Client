@@ -1,5 +1,6 @@
 package com.flintclient.legacy;
 
+import com.flintclient.client.control.feature.CapeChoices;
 import com.flintclient.client.control.feature.CapeFrames;
 import com.flintclient.client.control.feature.StoreCapes;
 import com.flintclient.client.control.model.GameOptions;
@@ -37,6 +38,8 @@ import org.jspecify.annotations.Nullable;
  */
 public final class StoreCapes189 {
 	private static final int EVERY = 20;
+	/** The handoff is looked at every this many ticks (one stat); a change asks at once, updating every tick until answered. */
+	private static final int HANDOFF_EVERY = 5;
 	private static final int UPLOADS = 2;
 	private static final int MAX_PLAYERS = 200;
 	private static final List<UUID> WANTED = new ArrayList<>();
@@ -48,6 +51,8 @@ public final class StoreCapes189 {
 	private static int ticks;
 	private static @Nullable StoreHandoff handoff;
 	private static long equipRevision;
+	/** {@link #handoffChanged} found the file changed: {@link #handoff} reads what it says. */
+	private static boolean handoffPolled;
 
 	private StoreCapes189() {
 	}
@@ -106,6 +111,7 @@ public final class StoreCapes189 {
 			service = new StoreCapes<>(new StoreCosmeticsClient(endpoint, StoreCosmeticsClient.http()), cache, TEXTURES, StoreCapes.loaderThread());
 			Flint.LOG.info("Flint Store capes: using " + endpoint);
 			capes = service;
+			StoreCapes.share(service);
 		}
 		return service;
 	}
@@ -118,7 +124,9 @@ public final class StoreCapes189 {
 		try {
 			StoreCapes<Cape> service = service(mc);
 			service.upload(UPLOADS);
-			if (++ticks % EVERY != 0) {
+			++ticks;
+			boolean soon = service.refreshing() || ticks % HANDOFF_EVERY == 0 && handoffChanged();
+			if (ticks % EVERY != 0 && !soon) {
 				return;
 			}
 			Session session = mc.getSession();
@@ -166,12 +174,18 @@ public final class StoreCapes189 {
 	 */
 	private static StoreCapes<Cape> handoff(Minecraft mc, StoreCapes<Cape> service, @Nullable UUID self) {
 		StoreHandoff h = handoff;
-		if (h == null || !h.poll()) {
+		boolean changed = handoffPolled || h != null && h.poll();
+		handoffPolled = false;
+		if (h == null || !changed) {
 			return service;
 		}
 		long revision = h.equipRevision();
 		boolean equipped = revision != equipRevision;
 		equipRevision = revision;
+		if (equipped) {
+			// An open Cosmetics window reads its list again.
+			CapeChoices.launcherChanged();
+		}
 		StoreEndpoint endpoint = h.endpoint();
 		if (!endpoint.equals(service.client().endpoint())) {
 			service.clear();
@@ -182,6 +196,15 @@ public final class StoreCapes189 {
 			service.refresh(self);
 		}
 		return service;
+	}
+
+	/** Looks at the launcher's handoff (one stat): whether it changed since {@link #handoff} last read it. */
+	private static boolean handoffChanged() {
+		StoreHandoff h = handoff;
+		if (h != null && h.poll()) {
+			handoffPolled = true;
+		}
+		return handoffPolled;
 	}
 
 	/** One line for QA tours: what the Store capes know and show. */

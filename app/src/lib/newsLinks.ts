@@ -6,8 +6,8 @@
  * exactly https://flintclient.com/releases/<version>/); anything else isn't clickable.
  */
 
-/** One release in Home's news. */
-export type NewsRelease = { version: string; date: string; title: string; summary: string; page_url?: string | null };
+/** One release in Home's news. `cover`: its row picture from the feed (see {@link coverThumbnail}), when it has one. */
+export type NewsRelease = { version: string; date: string; title: string; summary: string; page_url?: string | null; cover?: string | null };
 
 const VERSION = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,6 +20,18 @@ export function releasePage(note: { version: string; page_url?: unknown }): stri
   if (!VERSION.test(note.version)) return null;
   const page = flintReleasePage(note.version);
   return note.page_url === page ? page : null;
+}
+
+/**
+ * A feed release's row picture: the 960-wide cover flintclient.com serves next to the release's own cover
+ * (`/releases/covers/<version>-960.webp`), only when the feed's `image.url` is exactly that version's cover (.webp or .png).
+ * Anything else: null (the row shows Flint's own picture).
+ */
+export function coverThumbnail(version: string, image: unknown): string | null {
+  if (!VERSION.test(version) || !image || typeof image !== "object") return null;
+  const url = (image as Record<string, unknown>).url;
+  const base = `https://flintclient.com/releases/covers/${version}`;
+  return url === `${base}.webp` || url === `${base}.png` ? `${base}-960.webp` : null;
 }
 
 /** Newest first by version number (1.0.10 comes before 1.0.9). */
@@ -46,7 +58,7 @@ export function newsReleases(bundled: readonly NewsRelease[], feed: readonly unk
     if (typeof r.title !== "string" || !r.title.trim() || r.title.length > 120) continue;
     if (r.summary != null && (typeof r.summary !== "string" || r.summary.length > 400)) continue;
     known.add(r.version);
-    extra.push({ version: r.version, date: r.date, title: r.title, summary: r.summary ?? "", page_url: typeof r.page_url === "string" ? r.page_url : null });
+    extra.push({ version: r.version, date: r.date, title: r.title, summary: r.summary ?? "", page_url: typeof r.page_url === "string" ? r.page_url : null, cover: coverThumbnail(r.version, r.image) });
   }
   return [...bundled.filter((n) => VERSION.test(n.version)), ...extra].sort(newestFirst).slice(0, count);
 }

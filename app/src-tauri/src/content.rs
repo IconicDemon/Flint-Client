@@ -1212,11 +1212,16 @@ fn list_kind(state: &AppState, profile_id: &str, kind: &str, world: Option<&str>
             "localIcon": (kind == "mod").then(|| crate::modicons::url(profile_id, &entry.file_name)),
         }));
     }
+    let real_name = |name: &str, enabled: bool| if enabled { name.to_owned() } else { format!("{name}{DISABLED}") };
+    if kind == "mod" {
+        let untracked: Vec<PathBuf> = files.iter().filter(|f| !f.2 && !tracked.iter().any(|t| t.file_name == f.0)).map(|f| dir.join(real_name(&f.0, f.1))).collect();
+        crate::modicons::warm(&untracked);
+    }
     for (name, enabled, is_dir) in files {
         if tracked.iter().any(|t| t.file_name == name) {
             continue;
         }
-        let real = if enabled { name.clone() } else { format!("{name}{DISABLED}") };
+        let real = real_name(&name, enabled);
         let (size, modified) = file_info(&dir.join(&real));
         let info = identified.get(&format!("{kind}/{}/{name}", world.unwrap_or("-"))).filter(|i| i.size == size && i.modified == modified).and_then(|i| i.info.clone());
         // A jar Modrinth hasn't named (added by hand, imported, CurseForge-only) still shows its own name and version.
@@ -1338,6 +1343,7 @@ async fn identify(state: &AppState, profile_id: &str) -> CmdResult<usize> {
     let manifest = load(state, profile_id);
     let mut identified: HashMap<String, Identified> = read_json(&identified_path(state, profile_id));
     let mut pending: Vec<(String, String)> = Vec::new();
+    let mut to_hash: Vec<(String, PathBuf, u64, u64)> = Vec::new();
     for (kind, world) in content_targets(state, profile_id) {
         let Ok(dir) = kind_dir(state, profile_id, &kind, world.as_deref()) else { continue };
         for (name, enabled, is_dir) in scan(&dir, &kind) {
@@ -1353,11 +1359,28 @@ async fn identify(state: &AppState, profile_id: &str) -> CmdResult<usize> {
             if size > jobs::UNLISTED_MAX {
                 continue;
             }
-            let path = real.clone();
-            let Some(hash) = tokio::task::spawn_blocking(move || sha512_file(&path)).await.ok().flatten() else { continue };
-            identified.insert(key.clone(), Identified { size, modified, sha512: hash.clone(), info: None });
-            pending.push((key, hash));
+            to_hash.push((key, real, size, modified));
         }
+    }
+    // Hashed a few at a time, each on a blocking thread: an imported profile's jars one after another took about 100 ms
+    // per 50 MB.
+    let hashers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4);
+    let hashed: Vec<Option<String>> = {
+        use futures_util::StreamExt;
+        // Each starts only when `buffered` first polls it, so no more than `hashers` run at once.
+        let each: Vec<_> = to_hash
+            .iter()
+            .map(|(_, path, _, _)| {
+                let path = path.clone();
+                async move { tokio::task::spawn_blocking(move || sha512_file(&path)).await.ok().flatten() }
+            })
+            .collect();
+        futures_util::stream::iter(each).buffered(hashers).collect().await
+    };
+    for ((key, _, size, modified), hash) in to_hash.into_iter().zip(hashed) {
+        let Some(hash) = hash else { continue };
+        identified.insert(key.clone(), Identified { size, modified, sha512: hash.clone(), info: None });
+        pending.push((key, hash));
     }
     let unknown: Vec<String> = manifest.iter().filter(|m| m.project_id.is_empty() && !m.sha512.is_empty()).map(|m| m.sha512.clone()).collect();
     if !pending.is_empty() || !unknown.is_empty() {

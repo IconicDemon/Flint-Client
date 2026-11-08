@@ -13,14 +13,24 @@ import org.jspecify.annotations.Nullable;
  * Flint presence service, which doesn't exist; this is where it would report them. Render thread; pure Java.
  */
 public final class FlintPlayers {
-	/** The marks, in the order of their glyphs in Flint's badge font ({@code flintclient:badge}, from U+E000). */
+	/**
+	 * The marks, in the order of their glyphs in Flint's badge font ({@code flintclient:badge}, from U+E000); new marks are
+	 * added at the end so every glyph keeps its place. The pictures are the owner's v3 icon set, the same files Flint Admin
+	 * and the Creator portal show. A tag name the game doesn't know (a newer mark) shows as the default mark.
+	 */
 	public enum Tag {
 		DEFAULT,
 		CONTENT_CREATOR,
 		STAFF,
 		DEVELOPER,
 		CO_OWNER,
-		OWNER;
+		OWNER,
+		/** Creators on trial in the Flint Creator Program. */
+		TRIAL_CREATOR,
+		/** Flint's brand partners. */
+		VIP,
+		/** Friends of Flint. */
+		SPECIAL;
 
 		/** Its glyph in the badge font. */
 		public char glyph() {

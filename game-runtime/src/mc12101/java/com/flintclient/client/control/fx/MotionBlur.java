@@ -1,5 +1,6 @@
 /*
- * The blur is adapted from Natural Motion Blur 1.4.5 by Pasi, with IMS212, Romain H and What42Pizza (LGPL-3.0;
+ * Smooth is adapted from AFKZ Motion Blur 1.0 by Neerajisafk (MIT; META-INF/licenses/MIT-AFKZMotionBlur.txt). Natural is adapted
+ * from Natural Motion Blur 1.4.5 by Pasi, with IMS212, Romain H and What42Pizza (LGPL-3.0;
  * META-INF/licenses/LGPL-3.0-NaturalMotionBlur.txt).
  */
 package com.flintclient.client.control.fx;
@@ -16,7 +17,6 @@ import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
@@ -28,11 +28,11 @@ import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryStack;
 
 /**
- * Motion Blur on Minecraft 1.21.1, exactly as on the other lines (the rules: {@link NmbTiming}; the look: Natural Motion Blur's
- * velocity based blur, frame blending, hybrid and accumulation, with the same settings). 1.21.1 has no GPU pass objects, so the
- * same shaders run as plain OpenGL programs ({@code assets/flintclient/shaders/gl}): each pass draws one screen-covering
- * triangle into a texture of Flint's own (reading Minecraft's colour and depth textures, never drawing into a texture it reads)
- * and that texture is copied back onto the world image with one framebuffer blit.
+ * Motion Blur on Minecraft 1.21.1, exactly as on the other lines: Smooth (AFKZ Motion Blur's trail, fading by time) and Natural
+ * (Natural Motion Blur's velocity blur; the rules: {@link BlurRules} and {@link NmbTiming}), with the same settings. 1.21.1 has no
+ * GPU pass objects, so the same shaders run as plain OpenGL programs ({@code assets/flintclient/shaders/gl}): each pass draws one
+ * screen-covering triangle into a texture of Flint's own (reading Minecraft's colour and depth textures, never drawing into a
+ * texture it reads) and that texture is copied back onto the world image with one framebuffer blit.
  *
  * <p><b>Where</b> (the hooks: {@code mixin/fx/MotionBlurMixin} and {@code MotionBlurLevelMixin}): {@link #beginFrame} as
  * {@code GameRenderer.renderLevel} hands the world to the level renderer (its projection with view bobbing, the hurt tilt and
@@ -50,51 +50,39 @@ public final class MotionBlur {
 	private static final float HAND_DISTANCE = 0.114F;
 	private static final int GL_TEXTURE0 = 0x84C0;
 
-	// The settings.
+	/** Natural keeps Natural Motion Blur's recommended settings: Uniform profile, its own sample density, blur when moving. */
+	private static final int NATURAL_PROFILE = 0;
+	private static final int NATURAL_QUALITY = NmbTiming.BALANCED;
+
+	// The settings: the module's mode and strength (BlurRules), and Flint's older gameplay blur switch (Smooth).
 	private static boolean moduleOn;
-	private static float moduleStrength = 1;
-	private static int algorithm = NmbTiming.VELOCITY;
-	private static int profile;
-	private static boolean refreshScaling = true;
-	private static int quality = NmbTiming.BALANCED;
-	private static boolean movement = true;
+	private static int moduleMode = BlurRules.SMOOTH;
+	private static int modulePercent = BlurRules.DEFAULT_STRENGTH;
 	private static boolean gameplayOn;
-	private static float gameplayStrength = 0.5F;
+	private static int gameplayPercent = BlurRules.DEFAULT_STRENGTH;
 
 	// GPU resources.
 	private static int vertexArray;
 	private static int velocityProgram;
-	private static int blendProgram;
 	private static int accumProgram;
 	private static boolean programsTried;
 	private static @Nullable TextureTarget output;
 	private static @Nullable TextureTarget accum;
 	private static @Nullable TextureTarget accumNext;
-	private static final TextureTarget[] HISTORY = new TextureTarget[NmbTiming.MAX_HISTORY];
 
 	// Uniform locations.
 	private static int vIn, vDepth, vMvInverse, vProjInverse, vPrevView, vPrevProjection, vDelta, vBlend, vRes, vDensity, vMax, vProfile, vMode,
 		vFar, vReversed, vDepthToNdc, vHand;
-	private static final int[] B_SAMPLERS = new int[NmbTiming.MAX_HISTORY];
-	private static int bWeights0, bWeights1, bWeights2, bInvTotal, bCount;
 	private static int aIn, aPrev, aBlend, aMax, aDither;
 
 	// Across frames.
 	private static boolean accumValid;
 	private static int ditherFrame;
-	private static int lastMode = -1;
-	private static final double[] TIMES = new double[HISTORY.length];
-	private static int historyWrite;
-	private static int historyFilled;
 	private static long lastFrameNanos;
 	private static long lastDrawn;
-	private static float smoothedFps;
 	private static int refreshRate = 60;
 	private static long refreshCheckedNanos;
-	private static int levelIdentity;
-	private static int lastWidth;
-	private static int lastHeight;
-	private static boolean lastDetached;
+	private static final BlurRules.Scene SCENE = new BlurRules.Scene();
 	private static boolean previousReady;
 	private static final Matrix4f PREV_VIEW = new Matrix4f();
 	private static final Matrix4f PREV_PROJECTION = new Matrix4f();
@@ -105,7 +93,7 @@ public final class MotionBlur {
 	// This frame (set by beginFrame).
 	private static boolean frameActive;
 	private static int frameMode;
-	private static float frameStrength;
+	private static int framePercent;
 	private static float frameSeconds;
 	private static float fps;
 	private static boolean frameDetached;
@@ -130,37 +118,44 @@ public final class MotionBlur {
 	}
 
 	/**
-	 * The Motion Blur module's settings: on, strength (0–2), algorithm and quality ({@link NmbTiming}), profile (0 uniform, 1
-	 * weighted), refresh rate scaling, and Blur when moving.
+	 * The Motion Blur module's settings: on, mode ({@link BlurRules#SMOOTH} or {@link BlurRules#NATURAL}) and strength (percent).
+	 * Called every client tick; asks Iris about shader packs while the blur is on.
 	 */
-	public static void configure(boolean on, float strength, int blurAlgorithm, int blurProfile, boolean scaling, int blurQuality,
-		boolean blurMovement) {
+	public static void configure(boolean on, int mode, int percent) {
 		moduleOn = on;
-		moduleStrength = Math.max(0, strength);
-		algorithm = blurAlgorithm;
-		profile = blurProfile;
-		refreshScaling = scaling;
-		quality = blurQuality;
-		movement = blurMovement;
+		moduleMode = mode;
+		modulePercent = Math.max(0, Math.min(100, percent));
+		if (enabled()) {
+			ShaderPacks.refresh();
+		}
 		releaseIfOff();
 	}
 
-	/** Flint's own gameplay blur switch (client settings): velocity blur at {@code value} (0–1 → strength 0–2). */
+	/** Flint's own gameplay blur switch (client settings): Smooth at {@code value} (0–1, the strength's 0–100%). */
 	public static void setEnabled(boolean on) {
 		gameplayOn = on;
+		if (enabled()) {
+			ShaderPacks.refresh();
+		}
 		releaseIfOff();
 	}
 
 	public static void setStrength(float value) {
-		gameplayStrength = BlurMath.clampStrength(value);
+		gameplayPercent = Math.round(BlurMath.clampStrength(value) * 100);
 	}
 
 	public static boolean enabled() {
 		return moduleOn || gameplayOn;
 	}
 
-	public static float strength() {
-		return moduleOn ? moduleStrength : gameplayStrength * 2;
+	/** The strength in use (percent): the module's while it is on, else the gameplay switch's. */
+	public static int percent() {
+		return moduleOn ? modulePercent : gameplayPercent;
+	}
+
+	/** The mode chosen (before a shader pack turns Natural into Smooth). */
+	public static int mode() {
+		return moduleOn ? moduleMode : BlurRules.SMOOTH;
 	}
 
 	private static void releaseIfOff() {
@@ -196,13 +191,12 @@ public final class MotionBlur {
 		lastFrameNanos = now;
 		frameSeconds = seconds;
 		fps = seconds > 0 && seconds < 1 ? 1 / seconds : 0;
-		smoothedFps = NmbTiming.smoothFps(smoothedFps, fps);
 		frameActive = false;
 		velocityReady = false;
 		earlyMode = NmbTiming.NONE;
 		earlyDrawn = false;
-		float strength = strength();
-		if (!enabled() || strength == 0 || !GUARD.on()) {
+		int percent = percent();
+		if (!enabled() || percent <= 0 || !GUARD.on()) {
 			if (hasResources()) {
 				release();
 			}
@@ -211,7 +205,7 @@ public final class MotionBlur {
 			return;
 		}
 		try {
-			plan(main, panoramic, view, projection, camera, strength);
+			plan(main, panoramic, view, projection, camera, percent);
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			release();
@@ -224,41 +218,41 @@ public final class MotionBlur {
 		}
 	}
 
-	private static void plan(RenderTarget main, boolean panoramic, Matrix4fc view, Matrix4fc projection, Vec3 camera, float strength) {
+	private static void plan(RenderTarget main, boolean panoramic, Matrix4fc view, Matrix4fc projection, Vec3 camera, int percent) {
 		lastDrawn = System.nanoTime();
 		if (panoramic || main.width <= 0 || main.height <= 0 || !programs()) {
 			previousReady = false;
 			accumValid = false;
+			SCENE.reset();
 			return;
 		}
-		int mode = moduleOn ? algorithm : NmbTiming.VELOCITY;
+		boolean shaderPack = ShaderPacks.active();
+		int mode = BlurRules.effectiveMode(mode(), shaderPack);
 		Minecraft mc = Minecraft.getInstance();
-		boolean detached = !mc.options.getCameraType().isFirstPerson() || mc.player != null && mc.player.isPassenger();
+		boolean riding = mc.player != null && mc.player.isPassenger();
+		boolean detached = !mc.options.getCameraType().isFirstPerson() || riding;
 		int width = main.width;
 		int height = main.height;
-		int level = System.identityHashCode(mc.level);
+		// A screen opening or closing, pausing, focus, F1 or a shader pack: the last frame isn't one of this view (BlurRules.Scene).
+		int flags = BlurRules.flags(com.flintclient.client.control.platform.Mc263ControlPlatform.currentScreen() != null, mc.isPaused(),
+			mc.isWindowActive(), com.flintclient.client.compat.McCompat.hud().isHidden(), shaderPack);
+		boolean sameScene = SCENE.same(System.identityHashCode(mc.level), System.identityHashCode(mc.player), width, height,
+			mc.options.getCameraType().ordinal() * 2 + (riding ? 1 : 0), mode, flags);
 		double dx = camera.x - prevX;
 		double dy = camera.y - prevY;
 		double dz = camera.z - prevZ;
-		boolean continuous = previousReady && level == levelIdentity && width == lastWidth && height == lastHeight && detached == lastDetached
-			&& mode == lastMode && NmbTiming.continues(frameSeconds, dx, dy, dz);
-		levelIdentity = level;
-		lastWidth = width;
-		lastHeight = height;
-		lastDetached = detached;
-		if (mode != lastMode || !continuous) {
-			// Kept frames and the trail start over from this frame.
-			lastMode = mode;
+		boolean continuous = previousReady && sameScene && NmbTiming.continues(frameSeconds, dx, dy, dz);
+		if (!continuous) {
+			// The trail starts over from this frame.
 			accumValid = false;
-			historyFilled = 0;
 		}
 		updateRefreshRate();
 		frameActive = true;
 		frameMode = mode;
-		frameStrength = strength;
+		framePercent = percent;
 		frameDetached = detached;
-		if (!NmbTiming.usesVelocity(mode) || !continuous || dx == 0 && dy == 0 && dz == 0 && view.equals(PREV_VIEW) && projection.equals(PREV_PROJECTION)) {
-			// A still camera has nothing to blur: no velocity pass at all.
+		if (mode != BlurRules.NATURAL || !continuous || dx == 0 && dy == 0 && dz == 0 && view.equals(PREV_VIEW) && projection.equals(PREV_PROJECTION)) {
+			// Smooth needs no camera; a still camera has nothing to blur: no velocity pass at all.
 			return;
 		}
 		view.invert(INV_VIEW);
@@ -268,8 +262,7 @@ public final class MotionBlur {
 		deltaX = (float) dx;
 		deltaY = (float) dy;
 		deltaZ = (float) dz;
-		velocityBlend = mode == NmbTiming.HYBRID ? NmbTiming.hybridFiller(strength, fps, smoothedFps, refreshRate, historyFilled)
-			: NmbTiming.velocityStrength(strength, fps, refreshRate, refreshScaling);
+		velocityBlend = NmbTiming.velocityStrength(BlurRules.naturalStrength(percent), fps, refreshRate, true);
 		boolean translating = dx != 0 || dy != 0 || dz != 0;
 		if (!translating && NmbTiming.turnPixels(INV_PROJECTION.get(INV_PROJECTION_ARRAY), INV_VIEW.get(INV_VIEW_ARRAY),
 			FRAME_PREV_VIEW.get(PREV_VIEW_ARRAY), FRAME_PREV_PROJECTION.get(PREV_PROJECTION_ARRAY), turnDepthNdc(), width, height) * velocityBlend < 0.5F) {
@@ -278,7 +271,7 @@ public final class MotionBlur {
 		}
 		frameTranslating = translating;
 		velocityReady = velocityBlend > 0;
-		earlyMode = ShaderPacks.active() ? NmbTiming.NONE : NmbTiming.earlyMode(movement, detached, translating);
+		earlyMode = shaderPack ? NmbTiming.NONE : NmbTiming.earlyMode(true, detached, translating);
 	}
 
 	private static void remember(Matrix4fc view, Matrix4fc projection, Vec3 camera) {
@@ -309,38 +302,36 @@ public final class MotionBlur {
 			release();
 			frameActive = false;
 		} finally {
-			end(main);
+			endSafely(main);
 		}
 	}
 
-	/** After the world and before the hand: the camera's blur, then frame blending or the trail. */
+	/** After the world and before the hand: Natural's camera blur, or Smooth's trail. */
 	public static void late(RenderTarget main) {
 		if (!frameActive || !GUARD.on()) {
 			return;
 		}
 		frameActive = false;
-		if (!velocityReady && !NmbTiming.usesFrameBlending(frameMode) && !NmbTiming.usesAccumulation(frameMode)) {
-			// A still camera with velocity blur: nothing to draw.
+		if (!velocityReady && frameMode != BlurRules.SMOOTH) {
+			// A still camera with Natural: nothing to draw.
 			return;
 		}
 		try {
 			begin();
 			if (velocityReady) {
-				int mode = NmbTiming.lateMode(movement, frameDetached, earlyDrawn, frameTranslating);
+				int mode = NmbTiming.lateMode(true, frameDetached, earlyDrawn, frameTranslating);
 				if (mode != NmbTiming.NONE) {
 					velocity(main, mode);
 				}
 			}
-			if (NmbTiming.usesFrameBlending(frameMode)) {
-				frameBlend(main, frameStrength);
-			} else if (NmbTiming.usesAccumulation(frameMode)) {
-				accumulate(main, NmbTiming.kept(frameMode, frameStrength, frameSeconds, refreshRate), frameMode == NmbTiming.ACCUMULATION_MAX);
+			if (frameMode == BlurRules.SMOOTH) {
+				accumulate(main, BlurRules.smoothKept(framePercent, frameSeconds));
 			}
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 			release();
 		} finally {
-			end(main);
+			endSafely(main);
 		}
 	}
 
@@ -376,9 +367,9 @@ public final class MotionBlur {
 		GL20.glUniform3f(vDelta, deltaX, deltaY, deltaZ);
 		GL20.glUniform1f(vBlend, velocityBlend);
 		GL20.glUniform2f(vRes, width, height);
-		GL20.glUniform1f(vDensity, NmbTiming.sampleDensity(quality));
-		GlStateManager._glUniform1i(vMax, NmbTiming.maxSamples(quality));
-		GlStateManager._glUniform1i(vProfile, profile);
+		GL20.glUniform1f(vDensity, NmbTiming.sampleDensity(NATURAL_QUALITY));
+		GlStateManager._glUniform1i(vMax, NmbTiming.maxSamples(NATURAL_QUALITY));
+		GlStateManager._glUniform1i(vProfile, NATURAL_PROFILE);
 		GlStateManager._glUniform1i(vMode, mode);
 		// 1.21.1 draws with ordinary depth (far is 1), from -1 to 1 in clip space.
 		GL20.glUniform1f(vFar, 1);
@@ -394,64 +385,10 @@ public final class MotionBlur {
 		blit(out.frameBufferId, main.frameBufferId, width, height);
 	}
 
-	// ---- Frame blending.
-
-	private static final int[] SLOTS = new int[NmbTiming.MAX_HISTORY];
-	private static final float[] WEIGHTS = new float[NmbTiming.MAX_HISTORY];
-	private static final int[] ORDER = new int[HISTORY.length];
-
-	private static void frameBlend(RenderTarget main, float strength) {
-		int width = main.width;
-		int height = main.height;
-		TextureTarget slot = HISTORY[historyWrite];
-		if (slot == null || slot.width != width || slot.height != height) {
-			for (int i = 0; i < HISTORY.length; i++) {
-				if (HISTORY[i] != null) {
-					HISTORY[i].destroyBuffers();
-				}
-				HISTORY[i] = newTarget(width, height);
-			}
-			historyFilled = 0;
-			historyWrite = 0;
-			slot = HISTORY[0];
-		}
-		blit(main.frameBufferId, slot.frameBufferId, width, height);
-		double now = System.nanoTime() * 1.0E-9;
-		TIMES[historyWrite] = now;
-		historyWrite = (historyWrite + 1) % HISTORY.length;
-		historyFilled = Math.min(historyFilled + 1, HISTORY.length);
-		int first = historyWrite - historyFilled;
-		for (int i = 0; i < historyFilled; i++) {
-			ORDER[i] = Math.floorMod(first + i, HISTORY.length);
-		}
-		int count = NmbTiming.weights(now, TIMES, ORDER, historyFilled, smoothedFps, refreshRate, strength, SLOTS, WEIGHTS);
-		if (count <= 1) {
-			return;
-		}
-		float total = 0;
-		for (int i = 0; i < count; i++) {
-			total += WEIGHTS[i];
-		}
-		TextureTarget out = outputTarget(width, height);
-		drawInto(out);
-		GlStateManager._glUseProgram(blendProgram);
-		GL20.glUniform4f(bWeights0, WEIGHTS[0], WEIGHTS[1], WEIGHTS[2], WEIGHTS[3]);
-		GL20.glUniform4f(bWeights1, WEIGHTS[4], WEIGHTS[5], WEIGHTS[6], WEIGHTS[7]);
-		GL20.glUniform4f(bWeights2, WEIGHTS[8], WEIGHTS[9], WEIGHTS[10], WEIGHTS[11]);
-		GL20.glUniform1f(bInvTotal, total > 0 ? 1 / total : 1);
-		GlStateManager._glUniform1i(bCount, count);
-		for (int i = 0; i < NmbTiming.MAX_HISTORY; i++) {
-			GlStateManager._glUniform1i(B_SAMPLERS[i], i);
-			bindTexture(i, HISTORY[SLOTS[Math.min(i, count - 1)]].getColorTextureId(), GL11.GL_NEAREST);
-		}
-		drawTriangle();
-		blit(out.frameBufferId, main.frameBufferId, width, height);
-	}
-
 	// ---- Accumulation.
 
-	/** The fading trail, as on the other lines: drawn into the second trail target, copied onto the world, then the trail. */
-	private static void accumulate(RenderTarget main, float kept, boolean max) {
+	/** Smooth's trail ({@link BlurRules#smoothKept}), as on the other lines: drawn into the second trail target, copied onto the world, then the trail. */
+	private static void accumulate(RenderTarget main, float kept) {
 		int width = main.width;
 		int height = main.height;
 		TextureTarget prev = accum;
@@ -473,7 +410,7 @@ public final class MotionBlur {
 		drawInto(next);
 		GlStateManager._glUseProgram(accumProgram);
 		GL20.glUniform1f(aBlend, kept);
-		GlStateManager._glUniform1i(aMax, max ? 1 : 0);
+		GlStateManager._glUniform1i(aMax, 0);
 		GL20.glUniform1f(aDither, ditherFrame * 5.588238F);
 		GlStateManager._glUniform1i(aIn, 0);
 		GlStateManager._glUniform1i(aPrev, 1);
@@ -497,15 +434,28 @@ public final class MotionBlur {
 		GlStateManager._colorMask(true, true, true, true);
 	}
 
+	/** {@link #end}, never throwing out of Minecraft's frame: a failure turns the effect off and leaves no program of its own bound. */
+	private static void endSafely(RenderTarget main) {
+		try {
+			end(main);
+		} catch (RuntimeException | LinkageError e) {
+			GUARD.fail(e);
+			GlStateManager._glUseProgram(0);
+			GlStateManager._glBindVertexArray(0);
+			main.bindWrite(true);
+		}
+	}
+
 	/** After them: Minecraft's usual state, its program cache reset, the main target bound again. */
 	private static void end(RenderTarget main) {
 		GlStateManager._glBindVertexArray(0);
-		ShaderInstance any = GameRenderer.getPositionTexShader();
+		// Resets ShaderInstance's own record of the bound program (and binds none), through Minecraft's own position_tex shader:
+		// not GameRenderer.getPositionTexShader(), which a shader pack (Iris) answers with its own program, whose clear() leaves
+		// Minecraft's record and this blur's program bound for the hand and the GUI.
+		ShaderInstance any = Minecraft.getInstance().gameRenderer.getShader("position_tex");
+		GlStateManager._glUseProgram(0);
 		if (any != null) {
-			// Resets ShaderInstance's own record of the bound program (and binds none).
 			any.clear();
-		} else {
-			GlStateManager._glUseProgram(0);
 		}
 		GlStateManager._activeTexture(GL_TEXTURE0);
 		GlStateManager._depthMask(true);
@@ -563,7 +513,7 @@ public final class MotionBlur {
 		return target;
 	}
 
-	/** Compiles the three programs once; false (and the effect off) if this driver can't. */
+	/** Compiles the two programs once; false (and the effect off) if this driver can't. */
 	private static boolean programs() {
 		if (programsTried) {
 			return velocityProgram != 0;
@@ -572,7 +522,6 @@ public final class MotionBlur {
 		int vertex = shader(GL20.GL_VERTEX_SHADER, "nmb_screen.vsh");
 		try {
 			velocityProgram = link(vertex, "nmb_velocity.fsh");
-			blendProgram = link(vertex, "nmb_frame_blend.fsh");
 			accumProgram = link(vertex, "nmb_accumulate.fsh");
 		} finally {
 			GlStateManager.glDeleteShader(vertex);
@@ -595,14 +544,6 @@ public final class MotionBlur {
 		vReversed = location(velocityProgram, "Reversed");
 		vDepthToNdc = location(velocityProgram, "DepthToNdc");
 		vHand = location(velocityProgram, "HandDistance");
-		for (int i = 0; i < B_SAMPLERS.length; i++) {
-			B_SAMPLERS[i] = location(blendProgram, "Sample" + i + "Sampler");
-		}
-		bWeights0 = location(blendProgram, "Weights0");
-		bWeights1 = location(blendProgram, "Weights1");
-		bWeights2 = location(blendProgram, "Weights2");
-		bInvTotal = location(blendProgram, "InvTotalWeight");
-		bCount = location(blendProgram, "ActiveCount");
 		aIn = location(accumProgram, "InSampler");
 		aPrev = location(accumProgram, "PrevSampler");
 		aBlend = location(accumProgram, "BlendFactor");
@@ -658,7 +599,7 @@ public final class MotionBlur {
 	// ---- Shared.
 
 	private static boolean hasResources() {
-		return output != null || accum != null || HISTORY[0] != null;
+		return output != null || accum != null;
 	}
 
 	private static void releaseTrail() {
@@ -679,15 +620,8 @@ public final class MotionBlur {
 			output = null;
 		}
 		releaseTrail();
-		for (int i = 0; i < HISTORY.length; i++) {
-			if (HISTORY[i] != null) {
-				HISTORY[i].destroyBuffers();
-				HISTORY[i] = null;
-			}
-		}
-		historyFilled = 0;
-		historyWrite = 0;
 		previousReady = false;
+		SCENE.reset();
 	}
 
 	private static void turnedOff(String path, Throwable error) {

@@ -170,6 +170,19 @@ abstract class WindowScreen extends KitScreen {
 		closeRequested();
 	}
 
+	/**
+	 * Fading out, a key closes the window now and goes on to what is underneath (MenuClose), instead of being swallowed by a
+	 * window that is already leaving; it never turns the close round.
+	 */
+	@Override
+	protected boolean keyDown(com.flintclient.client.platform.KeyInput event) {
+		if (closing && !failed && MenuClose.press(MenuHost.isOpenKeyRelease(event), false) == MenuClose.Press.LEAVE_NOW) {
+			finishClose();
+			return hostIsShown();
+		}
+		return super.keyDown(event);
+	}
+
 	@Override
 	protected void paintBackground(com.flintclient.client.platform.Frame frame) {
 		try {

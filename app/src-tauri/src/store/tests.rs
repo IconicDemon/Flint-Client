@@ -740,12 +740,16 @@ async fn a_game_lists_wears_and_pictures_the_accounts_items_through_flint() {
     let json = serde_json::to_value(&shown).unwrap().to_string();
     assert!(!json.contains("sha256") && !json.contains("/assets/") && !json.contains("token"), "no texture address, hash or token: {json}");
 
-    let worn = game::wear(&rig.state, STEVE, "cape", Some(&rig.ember)).await.unwrap();
+    let before = shown.version.unwrap();
+    let mut heard = None;
+    let worn = game::wear(&rig.state, STEVE, "cape", Some(&rig.ember), |view| heard = view.inventory.as_ref().map(|i| i.equipped.clone())).await.unwrap();
     assert_eq!(worn.equipped.get("cape"), Some(&rig.ember));
+    assert!(worn.version.unwrap() > before, "the list after an equip is a newer version: {worn:?}");
+    assert_eq!(heard.unwrap().get("cape"), Some(&rig.ember), "the app's window hears what the game put on");
     let handoff: Value = read_json(&rig.state.paths.profile_dir("p1").join(handoff::FILE));
     assert!(handoff["equipRevision"].as_u64().unwrap() > 0, "running games hear of it: {handoff}");
-    assert!(game::wear(&rig.state, STEVE, "cape", Some(&rig.frost)).await.unwrap_err().contains("doesn't own"));
-    assert!(game::wear(&rig.state, STEVE, "cape", None).await.unwrap().equipped.is_empty());
+    assert!(game::wear(&rig.state, STEVE, "cape", Some(&rig.frost), |_| panic!("a refusal is no answer to show")).await.unwrap_err().contains("doesn't own"));
+    assert!(game::wear(&rig.state, STEVE, "cape", None, |_| {}).await.unwrap().equipped.is_empty());
 
     let png = game::art(&rig.state, STEVE, &rig.ember).await.unwrap();
     assert_eq!(STANDARD.decode(png).unwrap(), EMBER);
@@ -777,6 +781,17 @@ pub(super) fn manifest(frames: usize) -> Value {
         .collect();
     json!({ "v": 1, "layout": "cape-atlas-22x17", "width": 352, "height": 272, "scale": 16, "frame_count": frames,
             "durations_ms": durations, "duration_ms": durations.iter().sum::<u32>(), "frames_per_strip": 7, "strips": strips })
+}
+
+#[test]
+fn a_games_cosmetics_get_the_manifest_back_as_the_store_wrote_it() {
+    let parsed = anim::parse(&manifest(10)).unwrap();
+    let written = anim::manifest(&parsed).expect("every strip's address is known");
+    assert_eq!(anim::parse(&written), Some(parsed.clone()), "the game reads what the Store sent: {written}");
+    assert_eq!(written["strips"][1]["url"], "https://cdn.example/1.png");
+    let mut unknown = parsed;
+    unknown.strips[0].url.clear();
+    assert!(anim::manifest(&unknown).is_none(), "no address, no animation: the poster shows still");
 }
 
 type Mistake = (&'static str, Box<dyn Fn(&mut Value)>);

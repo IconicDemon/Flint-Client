@@ -645,6 +645,7 @@
   "library.card.installed": "Đã cài",
   "library.card.needsProfile": "Hãy chọn hồ sơ trước",
   "library.card.open": "Mở {title}",
+  "library.card.uninstall": "Gỡ cài đặt",
   "library.card.updated": "Cập nhật lần cuối",
   "library.categories.label": "Danh mục",
   "library.categories.selected.other": "Đã chọn {count}",

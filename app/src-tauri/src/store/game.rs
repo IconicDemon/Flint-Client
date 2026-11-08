@@ -1,5 +1,7 @@
 //! The Flint Store in the game: what the game link (`gamelink.rs`) gives a game's Cosmetics screen. The Store session
-//! stays the launcher's; the game gets the account's items as the Store last listed them (no token, no texture address),
+//! stays the launcher's; the game gets the account's items as the Store last listed them (no token, no texture address;
+//! an animated cape's manifest, the strips' public addresses and hashes the game's own Store lookup also gets, so its
+//! Cosmetics window plays the cape as the game plays it on players),
 //! wears one by asking Flint (the same `PUT /me/equipped/` the app's Store page sends, after which every running game
 //! hears of the change through its handoff file and refreshes its cape), and gets an item's picture as checked bytes
 //! (the texture the Store hashed, from Flint's own cache).
@@ -28,7 +30,15 @@ pub struct GameItem {
     pub test: bool,
     /// The version of its picture (ask `cosmeticArt` for it), or none when it has no usable one.
     pub art: Option<i64>,
+    /// An animated cape's manifest exactly as the Store writes it (`asset.animation`, read by the game's `CapeAnimation`):
+    /// absent for a still cape, and past [`GAME_ANIMATION_BYTES`] (its poster then shows still). Older games ignore it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub animation: Option<Value>,
 }
+
+/// The most bytes of animation manifests sent to a game in one list: with 500 items the list stays well inside the 512 KiB
+/// a game (1.0.2 and earlier included) takes for it.
+pub const GAME_ANIMATION_BYTES: usize = 192 * 1024;
 
 /// A game's Cosmetics screen.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -44,6 +54,8 @@ pub struct GameCosmetics {
     pub stale: bool,
     pub problem: Option<String>,
     pub fetched_at: Option<u64>,
+    /// The Store's inventory version of this list (it only grows): a game drops a list older than the one it shows.
+    pub version: Option<i64>,
 }
 
 fn shown(view: StoreView) -> CmdResult<GameCosmetics> {
@@ -51,6 +63,8 @@ fn shown(view: StoreView) -> CmdResult<GameCosmetics> {
         return Err(view.problem.unwrap_or_else(|| SIGN_IN_IN_APP.into()));
     }
     let inventory = view.inventory;
+    let version = inventory.as_ref().map(|i| i.version);
+    let mut budget = GAME_ANIMATION_BYTES;
     let items = inventory
         .as_ref()
         .map(|i| {
@@ -66,6 +80,14 @@ fn shown(view: StoreView) -> CmdResult<GameCosmetics> {
                     gift_from: o.gift_from.clone(),
                     test: o.test,
                     art: o.asset.as_ref().map(|a| a.version),
+                    animation: o.asset.as_ref().and_then(|a| a.animation.as_ref()).and_then(anim::manifest).filter(|m| {
+                        let bytes = m.to_string().len();
+                        let fits = bytes <= budget;
+                        if fits {
+                            budget -= bytes;
+                        }
+                        fits
+                    }),
                 })
                 .collect()
         })
@@ -78,6 +100,7 @@ fn shown(view: StoreView) -> CmdResult<GameCosmetics> {
         stale: view.stale,
         problem: view.problem,
         fetched_at: view.fetched_at,
+        version,
     })
 }
 
@@ -86,9 +109,12 @@ pub async fn cosmetics(state: &AppState, uuid: &str) -> CmdResult<GameCosmetics>
     shown(view(state, uuid, false).await)
 }
 
-/// Wears `id` in `slot` (or empties the slot): the Store decides, and every running game is told.
-pub async fn wear(state: &AppState, uuid: &str, slot: &str, id: Option<&str>) -> CmdResult<GameCosmetics> {
-    shown(equip(state, uuid, slot, id).await?)
+/// Wears `id` in `slot` (or empties the slot): the Store decides, and every running game is told. `heard` gets the Store's
+/// answer as the app's Store page shows it (the app's window is told, so the launcher shows what the game put on).
+pub async fn wear(state: &AppState, uuid: &str, slot: &str, id: Option<&str>, heard: impl FnOnce(&StoreView)) -> CmdResult<GameCosmetics> {
+    let view = equip(state, uuid, slot, id).await?;
+    heard(&view);
+    shown(view)
 }
 
 /// The picture of an item the account owns: the PNG the Store hashed, as base64.

@@ -309,6 +309,13 @@ public abstract class HostScreen extends Screen {
 
 	@Override
 	public void handleKeyboard() {
+		Minecraft mc = mc();
+		if (mc.screen != this) {
+			// Closed by an earlier key of this tick: Screen.handleInputs still reads every queued key into the screen it began
+			// with, so what follows goes where it would have gone (the game, or the screen shown now) instead of being lost.
+			handOnEvent(mc);
+			return;
+		}
 		if (broken) {
 			closeIfBroken();
 			return;
@@ -334,11 +341,43 @@ public abstract class HostScreen extends Screen {
 	/** A key press with its character (1.8.9 sends both at once): the key to the kit, then the character as typing. */
 	@Override
 	protected void keyPressed(char chr, int key) {
-		if (key != 0) {
-			keyDown(KeyInput.of(key));
+		boolean used = key != 0 && keyDown(KeyInput.of(key));
+		Minecraft mc = mc();
+		if (mc.screen != this) {
+			// The key closed the screen without using it (a menu fading out leaves at the next key): the game has it, as the newer
+			// lines' keyboard handler gives it, so Esc opens the pause menu and E the inventory at the first press.
+			if (!used && key != 0 && mc.screen == null && mc.world != null) {
+				gameKey(mc, key, true);
+			}
+			return;
 		}
-		if (chr >= ' ' && SharedConstants.isValidChatChar(chr) && mc().screen == this) {
+		if (chr >= ' ' && SharedConstants.isValidChatChar(chr)) {
 			typed(chr);
+		}
+	}
+
+	/** The current keyboard event, for a screen that has already closed: to the screen shown now, else to the game. */
+	private static void handOnEvent(Minecraft mc) {
+		Screen now = mc.screen;
+		if (now != null) {
+			now.handleKeyboard();
+			return;
+		}
+		int key = Keyboard.getEventKey() == 0 ? Keyboard.getEventCharacter() + 256 : Keyboard.getEventKey();
+		mc.handleGuiKeyBindings();
+		if (mc.world != null) {
+			gameKey(mc, key, Keyboard.getEventKeyState());
+		}
+	}
+
+	/** A key as 1.8.9's game loop takes it with no screen open: its key bindings, and Escape pauses. */
+	private static void gameKey(Minecraft mc, int key, boolean down) {
+		net.minecraft.client.options.KeyBinding.set(key, down);
+		if (down) {
+			net.minecraft.client.options.KeyBinding.click(key);
+			if (key == Keyboard.KEY_ESCAPE) {
+				mc.pauseGame();
+			}
 		}
 	}
 

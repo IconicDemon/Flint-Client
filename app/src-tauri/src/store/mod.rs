@@ -843,11 +843,26 @@ pub async fn equip(state: &AppState, uuid: &str, slot: &str, cosmetic_id: Option
         return Err("That isn't a Flint Store item.".into());
     }
     let session = session_for_action(state, uuid)?;
-    call(state, Method::PUT, "/api/v1/me/equipped/", Some(&session.token), Some(json!({ "slot": slot, "cosmeticId": cosmetic_id })), None)
+    let answer = call(state, Method::PUT, "/api/v1/me/equipped/", Some(&session.token), Some(json!({ "slot": slot, "cosmeticId": cosmetic_id })), None)
         .await
         .map_err(|f| action_failure(state, uuid, f))?;
     handoff::equip_changed(state);
-    Ok(view(state, uuid, false).await)
+    // `{ ok, version }`: the inventory version the equip made. The inventory read after it is at least that version; one
+    // older (a copy on its way from before the equip) is read once more, so the answer is never behind the equip.
+    let equipped = answer.body["version"].as_i64();
+    let mut shown = view(state, uuid, false).await;
+    if let (Some(version), Some(inventory)) = (equipped, shown.inventory.as_ref()) {
+        if inventory.version < version && !shown.stale {
+            shown = view(state, uuid, false).await;
+        }
+    }
+    Ok(shown)
+}
+
+/// Tells the app's window about a Store answer it didn't ask for (an equip made in a game): the Store page and the
+/// character previews show it at once (`store-view`, lib/api.ts `onStoreView`).
+pub fn announce(app: &AppHandle, view: &StoreView) {
+    let _ = tauri::Emitter::emit(app, "store-view", view);
 }
 
 /// A browser sign-in code as the Store writes it (`GXV9-MC1G`): case, spaces and dashes don't matter, and the letters the

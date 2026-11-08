@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  isOlderView,
   formatStoreMerit,
   isWorn,
   meritText,
@@ -86,4 +87,17 @@ test("Merit, money, reasons and the age of the copy read as words", () => {
   assert.equal(updatedText(now - 5_000, now), "Updated just now");
   assert.equal(updatedText(now - 4 * 60_000, now), "Updated 4 min ago");
   assert.equal(updatedText(null, now), "Not updated yet");
+});
+
+test("an inventory older than the one shown is an answer from before, dropped; offline or signed-out answers never are", () => {
+  const base = { uuid: "8667ba71-b85a-4004-af54-457a9734eed7", storeUrl: "https://store.flintclient.com", signedIn: true, locked: false, stale: false };
+  const at = (version: number, extra: Partial<StoreView> = {}): StoreView => ({ ...base, inventory: { version, name: "Steve", balance: 0, owned: [], equipped: {} }, ...extra });
+  assert.equal(isOlderView(at(4), at(5)), true);
+  assert.equal(isOlderView(at(5), at(5)), false);
+  assert.equal(isOlderView(at(6), at(5)), false);
+  assert.equal(isOlderView(at(4), null), false);
+  assert.equal(isOlderView(at(4, { stale: true }), at(5)), false, "offline: the last copy, whatever its version");
+  assert.equal(isOlderView({ ...base, signedIn: false }, at(5)), false);
+  assert.equal(isOlderView(at(4, { uuid: "ec561538f3fd461daff5086b22154bce" }), at(5)), false, "another account's versions don't compare");
+  assert.equal(isOlderView(at(4, { uuid: "8667ba71b85a4004af54457a9734eed7" }), at(5)), true, "any spelling of the same account");
 });

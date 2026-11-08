@@ -127,11 +127,24 @@ public final class SocialLink {
 	public record Page(List<Message> messages, boolean complete) {
 	}
 
-	/** One Store item the account owns; {@code art}: its picture's version, or -1 when it has none. */
-	public record Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art) {
+	/**
+	 * One Store item the account owns; {@code art}: its picture's version, or -1 when it has none; {@code animation}: an
+	 * animated cape's manifest as the Store wrote it (read with {@code CapeAnimation.parse}), or null for a still one (and from
+	 * a Flint app before 1.0.3).
+	 */
+	public record Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art,
+		@Nullable JsonObject animation) {
+		public Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art) {
+			this(id, name, kind, gift, giftFrom, test, art, null);
+		}
 	}
 
-	public record Cosmetics(String storeUrl, List<Item> items, Map<String, String> equipped, boolean stale, @Nullable String problem) {
+	/**
+	 * {@code version}: the Store's inventory version this list is (it only grows: a list of a lower version than one shown is
+	 * older), or -1 from a Flint app that doesn't say.
+	 */
+	public record Cosmetics(String storeUrl, List<Item> items, Map<String, String> equipped, boolean stale, @Nullable String problem,
+		long version) {
 		public @Nullable String worn(String slot) {
 			return equipped.get(slot);
 		}
@@ -405,8 +418,9 @@ public final class SocialLink {
 				JsonElement art = entry.get("art");
 				long version = art != null && art.isJsonPrimitive() && art.getAsJsonPrimitive().isNumber() ? Math.max(0, number(entry, "art")) : -1;
 				String from = string(entry, "giftFrom");
+				JsonElement animation = entry.get("animation");
 				items.add(new Item(id, clean(name, 120, false), kind, bool(entry, "gift"), from == null ? null : clean(from, MAX_NAME, false),
-					bool(entry, "test"), version));
+					bool(entry, "test"), version, animation != null && animation.isJsonObject() ? animation.getAsJsonObject() : null));
 			}
 		}
 		Map<String, String> equipped = new LinkedHashMap<>();
@@ -422,7 +436,8 @@ public final class SocialLink {
 		String problem = string(reply, "problem");
 		String store = string(reply, "storeUrl");
 		return new Cosmetics(store != null && store.matches("https?://[A-Za-z0-9.:\\[\\]-]{1,200}") ? store : "https://store.flintclient.com",
-			List.copyOf(items), Collections.unmodifiableMap(equipped), bool(reply, "stale"), problem == null ? null : clean(problem, 300, false));
+			List.copyOf(items), Collections.unmodifiableMap(equipped), bool(reply, "stale"), problem == null ? null : clean(problem, 300, false),
+			reply.get("version") instanceof JsonPrimitive v && v.isNumber() ? Math.max(-1, number(reply, "version")) : -1);
 	}
 
 	static byte[] readArt(JsonObject reply) throws LinkException {

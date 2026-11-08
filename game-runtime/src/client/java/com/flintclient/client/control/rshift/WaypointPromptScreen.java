@@ -129,6 +129,16 @@ public final class WaypointPromptScreen extends KitScreen {
 		return motion.opening();
 	}
 
+	/** Fading out (made or cancelled), a key closes it now and is the game's, as after any closed screen (MenuClose). */
+	@Override
+	protected boolean keyDown(com.flintclient.client.platform.KeyInput event) {
+		if (closing && MenuClose.press(false, false) == MenuClose.Press.LEAVE_NOW) {
+			finish();
+			return hostIsShown();
+		}
+		return super.keyDown(event);
+	}
+
 	private void finish() {
 		closing = false;
 		if (hostIsShown()) {

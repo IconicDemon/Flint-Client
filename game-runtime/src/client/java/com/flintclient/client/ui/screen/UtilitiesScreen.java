@@ -25,6 +25,9 @@ public final class UtilitiesScreen extends FlintPageScreen {
 		Row[] rows = {
 			new Row("flintclient.utilities.language", Icon.GLOBE, () -> minecraft.gui.setScreen(new LanguageSelectScreen(this, minecraft.options, minecraft.getLanguageManager()))),
 			new Row("flintclient.utilities.accessibility", Icon.ACCESSIBILITY, () -> minecraft.gui.setScreen(new AccessibilityOptionsScreen(this, minecraft.options))),
+			// The main menu's part sizes, shown live on the menu this page was opened from.
+			new Row("flintclient.utilities.menuSizes", Icon.EXPAND,
+				() -> minecraft.gui.setScreen(new MenuSizesScreen(this, parent instanceof FlintTitleScreen menu ? menu : null))),
 			new Row("flintclient.utilities.gameFolder", Icon.FOLDER, () -> open(game)),
 			new Row("flintclient.utilities.modsFolder", Icon.FOLDER, () -> open(game.resolve("mods"))),
 			new Row("flintclient.utilities.packsFolder", Icon.LAYERS, () -> open(minecraft.getResourcePackDirectory())),

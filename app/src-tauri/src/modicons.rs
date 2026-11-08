@@ -100,6 +100,26 @@ pub fn jar_info(jar: &Path) -> JarInfo {
     info
 }
 
+/// Reads the metadata of several jars at once (a few threads), so the `jar_info` calls that follow answer from the cache.
+/// Opening each jar takes a few milliseconds (more for a large one), and a profile imported from another launcher can
+/// hold hundreds that Modrinth hasn't named: 46 jars took about 200 ms one after another on first view.
+pub fn warm(jars: &[PathBuf]) {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4).min(jars.len());
+    if threads < 2 {
+        return;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                while let Some(jar) = jars.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                    jar_info(jar);
+                }
+            });
+        }
+    });
+}
+
 /// The PNG a jar declares as its icon, or None (no icon, not a PNG, too large, or the jar can't be read).
 pub fn jar_icon(jar: &Path) -> Option<Vec<u8>> {
     let stamp = stamp(jar)?;
@@ -211,6 +231,28 @@ mod tests {
         assert_eq!(jar_info(&forge), JarInfo::default());
         std::fs::write(dir.join("broken.jar"), b"not a zip").unwrap();
         assert_eq!(jar_icon(&dir.join("broken.jar")), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn jars_read_together_answer_as_each_read_alone() {
+        let dir = std::env::temp_dir().join(format!("flint-modicons-{}", crate::core::random_hex(6)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut jars: Vec<PathBuf> = (0..12).map(|n| jar(&dir, &format!("m{n}.jar"), &[("fabric.mod.json", format!(r#"{{"id":"m{n}","name":"Mod {n}","version":"1.{n}"}}"#).as_bytes())])).collect();
+        std::fs::write(dir.join("broken.jar"), b"not a zip").unwrap();
+        jars.push(dir.join("broken.jar"));
+        jars.push(dir.join("missing.jar"));
+        warm(&jars);
+        for (n, path) in jars.iter().take(12).enumerate() {
+            assert_eq!(jar_info(path), JarInfo { name: Some(format!("Mod {n}")), version: Some(format!("1.{n}")), icon: None });
+        }
+        assert_eq!(jar_info(&dir.join("broken.jar")), JarInfo::default());
+        assert_eq!(jar_info(&dir.join("missing.jar")), JarInfo::default());
+        // A jar changed since it was read is read again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        jar(&dir, "m0.jar", &[("fabric.mod.json", br#"{"id":"m0","name":"Mod zero, rebuilt","version":"2.0"}"#)]);
+        warm(&jars);
+        assert_eq!(jar_info(&jars[0]).name.as_deref(), Some("Mod zero, rebuilt"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

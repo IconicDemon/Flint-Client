@@ -20,6 +20,11 @@ public final class Texture {
 	final int glId;
 	private boolean released;
 
+	/** Bundled pictures (the shared {@code Texture.bundled}) aren't drawn on 1.8.9: its screens show their text without them. */
+	public static @org.jspecify.annotations.Nullable Texture bundled(String path) {
+		return null;
+	}
+
 	Texture(int glId) {
 		this.glId = glId;
 	}
@@ -86,6 +91,16 @@ public final class Texture {
 		GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0);
 		GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
 		GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, x, y, w, h, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, upload);
+	}
+
+	/** The layout {@link #writeTopLeft} takes: 1.8.9's ARGB ints. */
+	public static final com.flintclient.client.control.feature.CapeFrames.Layout WRITE_LAYOUT = com.flintclient.client.control.feature.CapeFrames.Layout.ARGB;
+
+	/** Writes {@code width × height} ARGB pixels (row by row) at the top left of this texture (at least that large). Render thread. */
+	public void writeTopLeft(int[] pixels, int width, int height) {
+		if (!released) {
+			write(glId, 0, 0, width, height, pixels, 0, width);
+		}
 	}
 
 	/** Frees the texture (drawing it afterwards draws nothing). */

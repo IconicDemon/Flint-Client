@@ -5,6 +5,9 @@
 		{"type": "bitmap", "file": "flintclient:font/tag_staff.png", "ascent": 8, "height": 9, "chars": [""]},
 		{"type": "bitmap", "file": "flintclient:font/tag_developer.png", "ascent": 8, "height": 9, "chars": [""]},
 		{"type": "bitmap", "file": "flintclient:font/tag_co_owner.png", "ascent": 8, "height": 9, "chars": [""]},
-		{"type": "bitmap", "file": "flintclient:font/tag_owner.png", "ascent": 8, "height": 9, "chars": [""]}
+		{"type": "bitmap", "file": "flintclient:font/tag_owner.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_trial_creator.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_vip.png", "ascent": 8, "height": 9, "chars": [""]},
+		{"type": "bitmap", "file": "flintclient:font/tag_special.png", "ascent": 8, "height": 9, "chars": [""]}
 	]
 }

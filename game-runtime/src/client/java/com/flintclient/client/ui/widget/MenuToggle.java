@@ -116,10 +116,11 @@ public final class MenuToggle extends FlintButton {
 
 	/** Where Flint's half ends, in units (as the halves were last drawn). */
 	private float split() {
-		return Float.isNaN(splitUnits) ? getX() + getWidth() / 2.0F : splitUnits;
+		return Float.isNaN(splitShare) ? getX() + getWidth() / 2.0F : getX() + splitShare * getWidth();
 	}
 
-	private float splitUnits = Float.NaN;
+	/** Where Flint's half ends, as a share of the width as last drawn: the same at any size the switch is drawn at. */
+	private float splitShare = Float.NaN;
 
 	@Override
 	protected void paint(Canvas c) {
@@ -133,7 +134,8 @@ public final class MenuToggle extends FlintButton {
 		int inset = c.px(INSET);
 		int flintW = Math.round(half(c, flint) * unit);
 		int vanillaW = w - 2 * inset - flintW;
-		splitUnits = getX() + INSET + flintW / unit;
+		float splitUnits = getX() + INSET + flintW / unit;
+		splitShare = (splitUnits - getX()) / Math.max(1, getWidth());
 
 		boolean hovered = isHovered() && active;
 		boolean overVanilla = hovered && pointerX >= splitUnits;

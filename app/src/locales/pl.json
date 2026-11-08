@@ -762,6 +762,7 @@
   "library.card.installed": "Zainstalowano",
   "library.card.needsProfile": "Najpierw wybierz profil",
   "library.card.open": "Otwórz {title}",
+  "library.card.uninstall": "Odinstaluj",
   "library.card.updated": "Ostatnia aktualizacja",
   "library.categories.label": "Kategorie",
   "library.categories.selected.few": "Wybrano: {count}",

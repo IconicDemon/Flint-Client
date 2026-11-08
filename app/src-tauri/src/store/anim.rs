@@ -121,6 +121,21 @@ pub fn parse(value: &Value) -> Option<Animation> {
     Some(Animation { scale, width, height, frame_count, durations_ms, duration_ms: loop_ms as u32, frames_per_strip: per, strips })
 }
 
+/// `animation` written back as the Store wrote it (`v`, `layout`, snake_case, each strip's `url` and `sha256`): what a game's
+/// Cosmetics window reads (`CapeAnimation.parse`) to play the cape. None when a strip's address isn't known.
+pub fn manifest(animation: &Animation) -> Option<Value> {
+    if animation.strips.iter().any(|s| s.url.is_empty() || s.sha256.is_empty()) {
+        return None;
+    }
+    let strips: Vec<Value> =
+        animation.strips.iter().map(|s| json!({ "url": s.url, "sha256": s.sha256, "bytes": s.bytes, "frames": s.frames })).collect();
+    Some(json!({
+        "v": 1, "layout": LAYOUT, "scale": animation.scale, "width": animation.width, "height": animation.height,
+        "frame_count": animation.frame_count, "durations_ms": animation.durations_ms, "duration_ms": animation.duration_ms,
+        "frames_per_strip": animation.frames_per_strip, "strips": strips,
+    }))
+}
+
 /// For `#[serde(deserialize_with)]`: a manifest that isn't one never refuses the whole inventory, it only drops the animation.
 pub fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Animation>, D::Error> {
     Ok(Option::<Value>::deserialize(deserializer)?.as_ref().and_then(parse))

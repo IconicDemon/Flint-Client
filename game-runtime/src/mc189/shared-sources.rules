@@ -53,8 +53,11 @@ include control/hud/render/**
 include control/editor/**
 include control/platform/HookGuard.java
 include perf/FrameStats.java
-# Motion Blur's rules (Natural Motion Blur's timing, passes and samples), the same on every line: legacy/mods/MotionBlur draws them.
+# Motion Blur's rules (its two modes, Smooth's trail, the scene resets; Natural Motion Blur's timing, passes and samples), the same
+# on every line: legacy/mods/MotionBlur draws them. ShaderPacks asks Iris by reflection (1.8.9 has none) for the page's note.
+include control/fx/BlurRules.java
 include control/fx/NmbTiming.java
+include control/fx/ShaderPacks.java
 
 # Gson: Minecraft 1.8.9 ships Gson 2.2.4; the shared code is written against a modern Gson (26.3's), built into the 1.8.9 jar
 # under Flint's own package (legacy189/build.gradle relocateGson) so it never meets Minecraft's.

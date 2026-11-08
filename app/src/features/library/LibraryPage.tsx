@@ -1,7 +1,9 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { api, errorText, type Category, type LibraryHit, type LibraryKind, type LibraryResults, type LibrarySearchParams, type Profile } from "../../lib/api";
+import { api, errorText, type Category, type InstalledItem, type LibraryHit, type LibraryKind, type LibraryResults, type LibrarySearchParams, type Profile } from "../../lib/api";
 import { ago, compact } from "../../lib/format";
 import { useT, type MessageKey } from "../../lib/i18n";
+import { dependentsOf, installedByProject, uninstallItems, withoutItems } from "../../lib/libraryUninstall";
+import { removableWhileRunning } from "../../lib/livePacks";
 import { useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { useStoreSelect } from "../../lib/store";
@@ -9,11 +11,11 @@ import { loaderLabel, versionMeta } from "../../lib/versions";
 import { Button, EmptyState, IconButton, Segmented } from "../../ui/controls";
 import { FlintMark } from "../../ui/FlintMark";
 import { Icon, type IconName } from "../../ui/Icon";
-import { Dropdown, Menu, Popover } from "../../ui/overlays";
+import { Dropdown, Menu, Modal, Popover, useToast } from "../../ui/overlays";
 import type { Navigate } from "../shell/Shell";
 import { PartnersDirectory } from "../partners/PartnersDirectory";
 import { InstallDialog, ProjectIcon, type InstallTarget } from "./InstallDialog";
-import { ProjectDrawer } from "./ProjectDrawer";
+import { ProjectDrawer, UninstallButton, type UninstallAction } from "./ProjectDrawer";
 
 const FlintAI = lazy(() => import("./FlintAI"));
 
@@ -55,11 +57,16 @@ const SORTS: { value: LibrarySearchParams["index"]; label: MessageKey }[] = [
 const PAGE = 24;
 const ANY = "__any__";
 const NONE: string[] = [];
+const NO_ITEMS: InstalledItem[] = [];
+
+/** An Uninstall waiting for its confirm: what goes, from which profile. */
+type Uninstall = { profileId: string; projectId: string; title: string; items: InstalledItem[] };
 
 export default function LibraryPage({ navigate, target }: { navigate: Navigate; target?: string }) {
   const t = useT();
   // Only what this page shows: download progress elsewhere in the app doesn't re-render the results.
-  const store = useStoreSelect((s) => ({ profiles: s.profiles, selectedId: s.selectedId, selected: s.selected, contentRevision: s.contentRevision }));
+  const store = useStoreSelect((s) => ({ profiles: s.profiles, selectedId: s.selectedId, selected: s.selected, contentRevision: s.contentRevision, touchContent: s.touchContent }));
+  const toast = useToast();
   // Settings → General → Flint Assist: when off, the Library is plain search with no AI entry point.
   const { flintAssist } = useSettings().settings;
   const initialProfile = target && store.profiles.some((p) => p.id === target.split(":")[0]) ? target.split(":")[0] : store.selectedId ?? ANY;
@@ -89,7 +96,10 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
   const [openKind, setOpenKind] = useState<LibraryKind | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [installing, setInstalling] = useState<InstallTarget | null>(null);
-  const [installed, setInstalled] = useState<Set<string>>(new Set());
+  /** The chosen profile's installed items, kept with the profile they were read for. */
+  const [owned, setOwned] = useState<{ profileId: string; items: InstalledItem[] } | null>(null);
+  const [uninstall, setUninstall] = useState<Uninstall | null>(null);
+  const [uninstalling, setUninstalling] = useState<string | null>(null);
   const [assisting, setAssisting] = useState(false);
   const request = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -98,6 +108,10 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
   /** Flint AI always works for one profile: the one picked here, else the one selected for Play. */
   const aiProfile = profile ?? store.selected ?? null;
   const kind = tab === "partners" ? null : tab;
+  const running = useStoreSelect((s) => !!profile && s.states[profile.id]?.state === "running");
+  // Only the chosen profile's own list counts: while another profile's loads, nothing shows as installed (or uninstallable).
+  const ownedItems = profile && owned?.profileId === profile.id ? owned.items : NO_ITEMS;
+  const byProject = useMemo(() => installedByProject(ownedItems), [ownedItems]);
 
   useEffect(() => localStorage.setItem("flint-library-view", view), [view]);
 
@@ -115,14 +129,14 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
 
   const revision = profile ? store.contentRevision[profile.id] ?? 0 : 0;
   useEffect(() => {
-    if (!profile) return setInstalled(new Set());
+    if (!profile) return setOwned(null);
+    const profileId = profile.id;
     let live = true;
     void api
-      .content(profile.id)
+      .content(profileId)
       .then((c) => {
         if (!live) return;
-        const ids = [...c.mods, ...c.resourcepacks, ...c.shaders, ...c.datapacks].map((i) => i.projectId).filter((x): x is string => !!x);
-        setInstalled(new Set(ids));
+        setOwned({ profileId, items: [...c.mods, ...c.resourcepacks, ...c.shaders, ...c.datapacks] });
       })
       .catch(() => {});
     return () => {
@@ -168,6 +182,39 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
 
   const startInstall = (hit: LibraryHit) =>
     kind && setInstalling({ kind, projectId: hit.projectId, title: hit.title, iconUrl: hit.iconUrl });
+
+  /** Uninstall for a card or the drawer: null when there's nothing it can remove (modpacks, a data pack in several worlds). */
+  const uninstallFor = (hit: LibraryHit, k: LibraryKind | null): UninstallAction | null => {
+    const items = profile ? uninstallItems(byProject, hit.projectId, k) : null;
+    if (!profile || !items || !k) return null;
+    return {
+      locked: running && !removableWhileRunning(items[0].kind),
+      busy: uninstalling === hit.projectId,
+      ask: () => setUninstall({ profileId: profile.id, projectId: hit.projectId, title: hit.title, items }),
+    };
+  };
+  // The drawer can come from Flint AI for another profile than the one picked here: Uninstall only for the picked one.
+  const drawerUninstall = open && (!openKind || aiProfile?.id === profile?.id) ? uninstallFor(open, openKind ?? kind) : null;
+
+  /** The same removal as the profile page's Remove: the files go from this profile only. */
+  const confirmUninstall = async (job: Uninstall) => {
+    setUninstall(null);
+    setUninstalling(job.projectId);
+    try {
+      await api.removeContent(
+        job.profileId,
+        job.items.map((i) => ({ kind: i.kind, fileName: i.fileName, world: i.world })),
+      );
+      setOwned((o) => (o && o.profileId === job.profileId ? { ...o, items: withoutItems(o.items, job.items) } : o));
+      toast({ tone: "success", title: t("workspace.toast.removedOne", { name: job.title }) });
+      store.touchContent(job.profileId);
+    } catch (e) {
+      toast({ tone: "danger", title: t("workspace.toast.failed"), body: errorText(e) });
+    } finally {
+      setUninstalling(null);
+    }
+  };
+  const uninstallDependents = uninstall ? dependentsOf(ownedItems, uninstall.items) : [];
 
   return (
     <div className="page-body library">
@@ -309,8 +356,9 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
                     key={hit.projectId}
                     hit={hit}
                     view={view}
-                    installed={installed.has(hit.projectId)}
+                    installed={byProject.has(hit.projectId)}
                     canInstall={kind === "modpack" || !!profile}
+                    uninstall={uninstallFor(hit, kind)}
                     onOpen={() => (setOpenKind(null), setOpen(hit))}
                     onInstall={() => startInstall(hit)}
                   />
@@ -337,12 +385,39 @@ export default function LibraryPage({ navigate, target }: { navigate: Navigate; 
         hit={open}
         kind={openKind ?? kind}
         profile={openKind ? aiProfile : profile}
-        installed={open ? installed.has(open.projectId) : false}
+        installed={open ? byProject.has(open.projectId) : false}
+        uninstall={drawerUninstall}
         onClose={() => setOpen(null)}
         onInstall={(next) => setInstalling(next)}
         onOpenProfile={(id) => navigate("profiles", `${id}:content`)}
       />
       <InstallDialog target={installing} profile={openKind ? aiProfile : profile} onClose={() => setInstalling(null)} />
+      <Modal
+        open={!!uninstall}
+        onClose={() => setUninstall(null)}
+        title={uninstall ? t("workspace.remove.titleOne", { name: uninstall.title }) : ""}
+        width={460}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setUninstall(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" icon="trash" onClick={() => uninstall && void confirmUninstall(uninstall)}>
+              {t("common.remove")}
+            </Button>
+          </>
+        }
+      >
+        <p className="muted modal-copy">{t("workspace.remove.body")}</p>
+        {uninstallDependents.length > 0 && (
+          <p className="install-warn">
+            <Icon name="alert" size={15} />
+            {uninstallDependents.length === 1
+              ? t("workspace.remove.dependentOne", { name: uninstallDependents[0].title })
+              : t("workspace.remove.dependents", { names: uninstallDependents.map((m) => m.title).join(", ") })}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -431,6 +506,7 @@ function ResultCard({
   view,
   installed,
   canInstall,
+  uninstall,
   onOpen,
   onInstall,
 }: {
@@ -438,6 +514,7 @@ function ResultCard({
   view: "grid" | "list";
   installed: boolean;
   canInstall: boolean;
+  uninstall: UninstallAction | null;
   onOpen: () => void;
   onInstall: () => void;
 }) {
@@ -478,9 +555,12 @@ function ResultCard({
       </button>
       <div className="result-action">
         {installed ? (
-          <span className="result-installed">
-            <Icon name="check" size={14} /> {t("library.card.installed")}
-          </span>
+          <>
+            <span className="result-installed">
+              <Icon name="check" size={14} /> {t("library.card.installed")}
+            </span>
+            {uninstall && <UninstallButton action={uninstall} />}
+          </>
         ) : (
           <Button size="sm" variant="secondary" icon="download" onClick={onInstall} disabled={!canInstall} title={canInstall ? undefined : t("library.card.needsProfile")}>
             {t("library.card.install")}

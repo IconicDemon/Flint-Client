@@ -11,16 +11,23 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import org.jspecify.annotations.Nullable;
 
 /**
- * The full notes for this Flint version, from the same bundled file as the card: "Flint 1.0.2" (the version, as the card
+ * The full notes for this Flint version, from the same bundled file as the card: the release's cover (the owner's art, the
+ * same picture the launcher's news and flintclient.com show, where this jar carries it), "Flint 1.0.3" (the version, as the card
  * names it), the release's title and date, then every point. Scrolls (wheel, arrow keys, Page Up/Down, Home/End) when the
  * notes are taller than the window, with a thin bar at the right, as the credits page does.
  */
 public final class WhatsNewScreen extends FlintPageScreen {
 	private static final int TEXT_W = 190;
 	private static final float WHEEL_STEP = 24;
+	/** The bundled covers' size (the launcher's 480×270 copies of the owner's 1920×1080 art). */
+	private static final int COVER_W = 480;
+	private static final int COVER_H = 270;
 
+	/** The release's cover, 16:9 (bundled as textures/gui/whats_new/<version>.png), or null. */
+	private final com.flintclient.client.platform.@Nullable Texture cover;
 	private final TextLine version;
 	private final TextLine title;
 	private final TextLine dated;
@@ -34,6 +41,7 @@ public final class WhatsNewScreen extends FlintPageScreen {
 
 	public WhatsNewScreen(Screen parent, WhatsNew.Note note) {
 		super(parent, Component.translatable("flintclient.news.heading"));
+		this.cover = com.flintclient.client.platform.Texture.bundled("textures/gui/whats_new/" + note.version() + ".png");
 		this.version = new TextLine(FlintFonts.HEADING, "Flint " + note.version());
 		this.title = new TextLine(FlintFonts.STRONG, note.title());
 		this.dated = new TextLine(FlintFonts.SMALL, Component.translatable("flintclient.news.version", note.version(), note.date()).getString());
@@ -98,6 +106,12 @@ public final class WhatsNewScreen extends FlintPageScreen {
 		int start = viewTop + c.px(4);
 		int y = start - Math.round(shown * c.unitScale());
 		try {
+			if (cover != null) {
+				// Whole, at the notes' width, 16:9 (its logo and text run down its left half).
+				int coverH = w * 9 / 16;
+				c.texture(cover, x, y, w, coverH, COVER_W, COVER_H, 0xFFFFFFFF);
+				y += coverH + c.px(8);
+			}
 			c.text(version, x, y + c.px(6), Palette.TEXT);
 			y += c.px(18);
 			c.text(title, x, y, Palette.ACCENT_TEXT);

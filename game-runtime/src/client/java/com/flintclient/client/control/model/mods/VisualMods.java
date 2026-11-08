@@ -173,43 +173,28 @@ public final class VisualMods {
 	}
 
 	/**
-	 * Motion Blur: Natural Motion Blur 1.4.5 (LGPL-3.0) rebuilt on every Minecraft line, its options, ranges and defaults (Velocity
-	 * based, strength 1.00, refresh rate scaling on, Uniform), plus Quality and Blur when moving. The rules are in
-	 * {@code control/fx/NmbTiming}; the passes in each line's {@code control/fx/MotionBlur}. Settings saved by Flint's earlier
-	 * Classic trail ({@code blurAlgorithm: classic}, its default for a day) read as the default, Velocity based (an unknown
-	 * option reads as the default).
+	 * Motion Blur: two modes ({@code control/fx/BlurRules}), Smooth (AFKZ Motion Blur's frame blend, the trail Lunar Client draws,
+	 * the default) and Natural (Natural Motion Blur 1.4.5's velocity blur, {@code control/fx/NmbTiming}), and one strength for
+	 * both. Flint 1.0.2's six settings ({@code blurAlgorithm}, {@code motionBlurStrength}, {@code refreshRateScaling},
+	 * {@code blurProfile}, {@code quality}, {@code movementBlur}) are retired: the strength carries over
+	 * ({@code ModuleMigrations}), every algorithm becomes Smooth, Natural keeps Natural Motion Blur's recommended settings. The
+	 * passes are in each line's {@code control/fx/MotionBlur}.
 	 */
 	public static final class MotionBlur {
 		public static final String ID = "motion_blur";
-		public static final OptionSetting ALGORITHM = new OptionSetting("blurAlgorithm", "Blur algorithm",
-			"Velocity based (recommended): each pixel blurs along its own motion, with no added input delay. Frame blending: the "
-				+ "frames drawn within one monitor refresh are blended, like f0e's blur (it needs more FPS than your refresh rate at "
-				+ "1.00). Hybrid blending: both, the smoothest and the heaviest. Accumulation (max): a bright trail, as LabyMod Mix, "
-				+ "Lunar v1 and BLC 2.0. Accumulation (mix): an even trail, as LabyMod Max, Lunar v2 and v3 and Badlion. Trails add a "
-				+ "little delay to what you see", 0,
-			"velocity_based", "Velocity based", "frame_blending", "Frame blending", "hybrid_blending", "Hybrid blending", "accumulation_max",
-			"Accumulation (max)", "accumulation_mix", "Accumulation (mix)");
-		public static final FloatSetting STRENGTH = new FloatSetting("motionBlurStrength", "Motion blur strength",
-			"How strong the blur is. 1.00 blurs each frame along the motion your monitor shows in one refresh: the natural amount", 1, 0, 2,
-			0.01F, "");
-		public static final BoolSetting REFRESH_SCALING = new BoolSetting("refreshRateScaling", "Refresh rate scaling",
-			"Keeps the blur as long as one monitor refresh at any FPS: 600 FPS on 60 Hz blurs each frame 10 times as far, 60 FPS or "
-				+ "less as set, so high frame rates don't strobe. Off: the strength is fixed per frame", true);
-		public static final OptionSetting PROFILE = new OptionSetting("blurProfile", "Blur profile",
-			"Uniform: an even box blur, the crispest. Weighted: a smoother falloff at the ends of the blur, slightly softer", 0, "uniform",
-			"Uniform", "weighted", "Weighted");
-		public static final OptionSetting QUALITY = new OptionSetting("quality", "Quality",
-			"Samples along each pixel's motion. Performance: half as many, for weaker graphics cards. Balanced: Natural Motion Blur's "
-				+ "own. High: twice as many, the cleanest fast turns. A still camera costs nothing at any quality", 1, "performance",
-			"Performance", "balanced", "Balanced", "high", "High");
-		public static final BoolSetting MOVEMENT = new BoolSetting("movementBlur", "Blur when moving",
-			"Blurs the world as you walk, sprint, fly or ride, not only as you turn. Players and mobs aren't blurred by your movement", true);
+		public static final OptionSetting MODE = new OptionSetting("mode", "Mode",
+			"Smooth: each frame blends into the last, the smooth trail of Lunar Client and AFKZ Motion Blur. Natural: each pixel "
+				+ "blurs along its own motion, as Natural Motion Blur does; with a shader pack on it blurs as Smooth", 0,
+			"smooth", "Smooth", "natural", "Natural");
+		public static final IntSetting STRENGTH = new IntSetting("strength", "Strength",
+			"How long the trail lasts (Smooth) or how far each frame blurs (Natural). It looks the same at any frame rate",
+			com.flintclient.client.control.fx.BlurRules.DEFAULT_STRENGTH, 5, 100, 5, "%");
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Motion Blur", "Blur your vision when you turn")
-			.keywords("motion blur", "blur", "smooth", "trail", "natural", "nmb").icon(IconId.GAUGE).category(Category.VISUAL)
-			.section("Motion Blur Options", ALGORITHM, STRENGTH, REFRESH_SCALING, PROFILE, QUALITY, MOVEMENT)
-			.note("Natural Motion Blur's blur, the same on every Minecraft version: the world blurs as you turn and move, players and mobs "
-				+ "aren't smeared by your own movement, and your hand and the HUD stay sharp. It looks the same at any frame rate. Velocity "
-				+ "based draws one or two full-screen passes only while the camera moves.").build();
+			.keywords("motion blur", "blur", "smooth", "trail", "natural", "lunar", "afkz", "nmb").icon(IconId.GAUGE).category(Category.VISUAL)
+			.section("Motion Blur Options", MODE, STRENGTH)
+			.note("Smooth blends each frame into the last for a soft trail; Natural blurs each pixel along its motion. Both look the same "
+				+ "at any frame rate, keep your hand and HUD sharp, start over when you open a screen, respawn, resize or change "
+				+ "worlds, and run on top of shader packs. Off, it costs nothing.").build();
 	}
 
 	public static final class Nametags {

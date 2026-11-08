@@ -32,6 +32,8 @@ public final class HudPageScreen extends KitScreen implements MenuParent {
 	private boolean framed;
 	/** The step that leaves, run once the closing fade ends (null while not closing). */
 	private @Nullable Runnable leaveAfterFade;
+	/** The closing fade: a key pressed during it goes on to the game, and it can't outlast {@link MenuClose#TIMEOUT_MILLIS}. */
+	private final MenuClose fade = new MenuClose();
 
 	public HudPageScreen(@Nullable Object parent) {
 		super("Flint HUD", MIN_WIDTH, MIN_HEIGHT);
@@ -42,10 +44,29 @@ public final class HudPageScreen extends KitScreen implements MenuParent {
 
 	/** Leaving: the page fades out (with the close sound), then {@code leave} runs. */
 	private void fadeOut(Runnable leave) {
+		boolean already = leaveAfterFade != null;
 		leaveAfterFade = leave;
+		if (already) {
+			// Asked again while fading (the game closing the screen, say): the same fade, one close sound.
+			return;
+		}
+		fade.begin(com.flintclient.client.platform.Clock.millis());
 		motion.close();
 		if (ControlState.settings().soundsEnabled()) {
 			MenuHost.playCloseSound(ControlState.settings().soundVolume());
+		}
+	}
+
+	/**
+	 * Ends the closing fade now and leaves (when the page is still the screen shown: a screen that replaced it, a death screen
+	 * or a chest the server opened, is never closed by a late leave).
+	 */
+	private void leaveNow() {
+		Runnable leave = leaveAfterFade;
+		leaveAfterFade = null;
+		fade.end();
+		if (leave != null && hostIsShown()) {
+			leave.run();
 		}
 	}
 
@@ -150,9 +171,7 @@ public final class HudPageScreen extends KitScreen implements MenuParent {
 		boolean first = !framed;
 		framed = true;
 		if (motion.advance(first ? 0 : com.flintclient.client.ui.Motion.frameSeconds()) && leaveAfterFade != null) {
-			Runnable leave = leaveAfterFade;
-			leaveAfterFade = null;
-			leave.run();
+			leaveNow();
 			return;
 		}
 		float shown = motion.shown();
@@ -173,6 +192,15 @@ public final class HudPageScreen extends KitScreen implements MenuParent {
 
 	@Override
 	protected boolean keyDown(KeyInput event) {
+		if (leaveAfterFade != null) {
+			// Fading out: the menu key does nothing more; any other key leaves now and is the game's (Esc opens the pause menu,
+			// E the inventory), as if the page had already gone.
+			if (MenuClose.press(MenuHost.isOpenKeyRelease(event), false) == MenuClose.Press.LEAVE_NOW) {
+				leaveNow();
+				return hostIsShown();
+			}
+			return true;
+		}
 		if (toggleKey.keyPressed(MenuHost.isOpenKey(event), typing() || hasModal(), capturingKeys())) {
 			editor.saveAndClose();
 			return true;
@@ -234,5 +262,10 @@ public final class HudPageScreen extends KitScreen implements MenuParent {
 	protected void update() {
 		super.update();
 		editor.tick();
+		// A fade that frames haven't finished (none are drawn under a resource reload) still ends: never an invisible page
+		// holding the keys and the mouse.
+		if (leaveAfterFade != null && fade.overdue(com.flintclient.client.platform.Clock.millis())) {
+			leaveNow();
+		}
 	}
 }

@@ -30,10 +30,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * The elytra layer, for Flint Store capes.
  * <ul>
  * <li>A player who wears a Store cape and the vanilla elytra (with "Cape design on elytra" on; {@link CapeElytra#use}) gets the
- * cape-derived elytra ({@link Mc263CapeElytra}): the elytra model with the cape's texture, in a back-face-culled cut-out pass,
- * plus the glint pass when the elytra is enchanted, exactly where Minecraft draws its own (0.125 behind the body, the glowing
- * outline included). The render state remembers it ({@link CapeWingsState}) so the elytra model draws the cape's wing mesh
- * instead of its boxes ({@code ElytraModelMixin}).</li>
+ * cape-derived elytra ({@link Mc263CapeElytra}): the elytra model with the cape's texture, in Minecraft's own elytra pass (cut
+ * out, both sides), plus the glint pass when the elytra is enchanted, exactly where Minecraft draws its own (0.125 behind the
+ * body, the glowing outline included). The render state remembers it ({@link CapeWingsState}) so the elytra model's wings draw
+ * their boxes cut to Minecraft's elytra silhouette with the cape's texture coordinates ({@code ElytraModelMixin}).</li>
  * <li>Everyone else: Minecraft's elytra and its texture rule (the skin's elytra texture, else its cape while shown, else the
  * elytra's), with one exception: a Flint Store cape without elytra art isn't put on Minecraft's wings (they would be empty);
  * Minecraft decides with the cape it gave the wearer instead ({@link Mc263StoreCapes#wingsCape}).</li>

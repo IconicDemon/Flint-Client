@@ -118,6 +118,17 @@ public final class ControlCenter {
 			com.flintclient.client.StartupTrace.titleShown();
 			try {
 				com.flintclient.client.control.rshift.ModMenuScreen.warmUp();
+				// Also made ahead on a worker: the open and close sounds' samples and the menu's icon font, which the first
+				// opening otherwise synthesised and read between the key and its first frame (QA, 26.3: a 29-50 ms frame).
+				com.flintclient.client.platform.Services.background(() -> {
+					try {
+						com.flintclient.client.control.sound.ToneSynth.openShared();
+						com.flintclient.client.control.sound.ToneSynth.closeShared();
+						com.flintclient.client.platform.GlyphRaster.preload();
+					} catch (RuntimeException | LinkageError e) {
+						FlintClient.LOGGER.debug("Flint: couldn't make the menu's sounds and icons ahead; the first opening does", e);
+					}
+				});
 			} catch (RuntimeException | LinkageError e) {
 				FlintClient.LOGGER.warn("Flint: couldn't ready the Right Shift menu ahead; it loads when first opened", e);
 			}

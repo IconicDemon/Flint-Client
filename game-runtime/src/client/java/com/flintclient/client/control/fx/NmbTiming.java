@@ -30,7 +30,7 @@ import java.util.Arrays;
  * </ul>
  */
 public final class NmbTiming {
-	/** The algorithms, in the order of the Blur algorithm setting ({@code VisualMods.MotionBlur.ALGORITHM}). */
+	/** Natural Motion Blur's passes (Natural draws VELOCITY; 1.8.9 draws Smooth with ACCUMULATION_MIX's, see BlurRules). */
 	public static final int VELOCITY = 0;
 	public static final int FRAME_BLENDING = 1;
 	public static final int HYBRID = 2;

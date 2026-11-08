@@ -14,11 +14,16 @@
  * - **No flicker**: while the Store's answer or the Flint cape's picture is on its way, the choice is *pending* and a preview
  *   keeps what it shows ({@link settleCape}), instead of showing the Minecraft cape and then swapping it out.
  * - Animated capes show their poster (frame 0, the Store's static texture) first, then play once their strips are decoded.
+ * - **Current**: while the window is in front ({@link CapeSource.setActive}), the accounts shown ask the Store's change feed
+ *   every `pollAfterSeconds` (one request per account, the Store page's included: it has no poll of its own), and at once
+ *   when the window comes to the front; a change reads the inventory again (an ETag's 304 when nothing did) and every view
+ *   hears of it through `storeFeed`. An answer older than the one kept (by the Store's inventory version) is dropped. Capes
+ *   the account newly owns have their texture fetched and checked ahead (`preload`), so wearing one shows it at once.
  *
  * Pure (dependencies injected), so the Node tests drive it; `displayedCape.ts` wires it to the app.
  */
 import type { CapeAnimation } from "./capeAnimation.ts";
-import { canonicalUuid, needsRefresh, type StoreChanges, type StoreItem, type StoreView } from "./storeSync.ts";
+import { canonicalUuid, isOlderView, needsRefresh, nextPollDelay, POLL_DEFAULT_MS, type StoreChanges, type StoreItem, type StoreView } from "./storeSync.ts";
 
 /** A Flint cape ready to show: its texture (a data URL; the poster when animated) and, once decoded, its frames. */
 export type FlintCape<S> = {
@@ -108,6 +113,8 @@ export type CapeSourceDeps<S> = {
   /** Frees decoded strips no longer shown. */
   release(strips: S[]): void;
   isPlayable(manifest: CapeAnimation | null | undefined): manifest is CapeAnimation;
+  /** Fetches and checks an owned item's texture ahead (into Flint's cache), for a cape the account newly owns. */
+  preload?(uuid: string, cosmeticId: string): void;
   now(): number;
   later(callback: () => void, ms: number): unknown;
   cancel(handle: unknown): void;
@@ -140,6 +147,8 @@ type Entry<S> = {
 export const RELEASE_AFTER_MS = 10_000;
 /** A window coming to the front checks the Store for changes (an equip in the game or on the website), at most this often. */
 export const CHECK_GAP_MS = 5_000;
+/** Newly owned capes whose textures are fetched ahead after one change. */
+export const PRELOAD_MAX = 8;
 
 export type CapeSource<S> = ReturnType<typeof createCapeSource<S>>;
 
@@ -234,6 +243,48 @@ export function createCapeSource<S>(deps: CapeSourceDeps<S>) {
     );
   };
 
+  /** Asks the Store whether the account changed (its change feed), and for its answer again if so. Null when not asked. */
+  const check = (e: Entry<S>, now: number): Promise<StoreChanges | null> => {
+    if (!e.store || e.loading || now - e.lastCheck < CHECK_GAP_MS) return Promise.resolve(null);
+    e.lastCheck = now;
+    if (!e.view?.signedIn) return source.refresh(e.uuid).then(() => null);
+    const since = e.view.inventory?.version ?? null;
+    return deps.changes(e.uuid, since).then(
+      (result) => {
+        if (entries.get(e.uuid) === e && needsRefresh(result, !!e.view?.stale)) void source.refresh(e.uuid);
+        return result;
+      },
+      (): StoreChanges => ({ state: "offline" }),
+    );
+  };
+
+  /** The change feed's pace: the Store's `pollAfterSeconds` (offline, doubling), only while the window is in front. */
+  const polling = { active: false, delay: POLL_DEFAULT_MS, timer: null as unknown, last: Number.NEGATIVE_INFINITY };
+  const stopPoll = () => {
+    if (polling.timer !== null) deps.cancel(polling.timer);
+    polling.timer = null;
+  };
+  const schedulePoll = () => {
+    if (!polling.active || polling.timer !== null) return;
+    polling.timer = deps.later(() => {
+      polling.timer = null;
+      void poll();
+    }, polling.delay);
+  };
+  const poll = async (): Promise<void> => {
+    stopPoll();
+    const now = deps.now();
+    polling.last = now;
+    const results = await Promise.all([...entries.values()].filter((e) => e.listeners.size > 0).map((e) => check(e, now)));
+    let next: number | null = null;
+    for (const result of results) {
+      const delay = result && nextPollDelay(polling.delay, result);
+      if (delay) next = next === null ? delay : Math.min(next, delay);
+    }
+    if (next !== null) polling.delay = next;
+    schedulePoll();
+  };
+
   const source = {
     /** The account's Flint cape state (stable between changes, for `useSyncExternalStore`). */
     state(uuid: string): FlintCapeState<S> {
@@ -252,6 +303,8 @@ export function createCapeSource<S>(deps: CapeSourceDeps<S>) {
           update(e);
         }
       } else if (e.view === undefined && !e.loading) void source.refresh(uuid);
+      // Shown again after a while (a page opened): asked whether anything changed meanwhile.
+      else if (e.listeners.size === 1 && polling.active && deps.now() - e.lastCheck >= POLL_DEFAULT_MS) void check(e, deps.now());
       return () => {
         e.listeners.delete(listener);
       };
@@ -286,9 +339,19 @@ export function createCapeSource<S>(deps: CapeSourceDeps<S>) {
     noteView(view: StoreView) {
       const e = entry(view.uuid);
       if (!view.signedIn) return source.signedOut(view.uuid, view);
+      // An answer from before one already here (a reload overtaken by an equip): never shown, so nothing goes back.
+      if (e.view && isOlderView(view, e.view)) return;
+      const before = e.view?.signedIn ? e.view.inventory : null;
       e.view = view;
       loadArt(e);
       update(e);
+      // Capes the account newly owns (a purchase, a gift, a grant): their textures are fetched and checked ahead.
+      const now = view.inventory;
+      if (before && now && now.version > before.version && deps.preload) {
+        const had = new Set(before.owned.map((o) => o.cosmeticId));
+        const fresh = now.owned.filter((o) => o.kind === "cape" && o.asset && !had.has(o.cosmeticId)).slice(0, PRELOAD_MAX);
+        for (const o of fresh) deps.preload(e.uuid, o.cosmeticId);
+      }
     },
 
     /** The account left the Store on this computer: its answer and art go at once (never shown as worn after sign-out). */
@@ -304,23 +367,19 @@ export function createCapeSource<S>(deps: CapeSourceDeps<S>) {
      * The window came to the front: accounts being shown ask the Store whether anything changed (an equip in the game or on
      * the website, a refund, the Store reachable again), at most every few seconds.
      */
-    checkShown() {
-      const now = deps.now();
-      for (const e of entries.values()) {
-        if (!e.store || e.listeners.size === 0 || e.loading || now - e.lastCheck < CHECK_GAP_MS) continue;
-        e.lastCheck = now;
-        if (!e.view?.signedIn) {
-          void source.refresh(e.uuid);
-          continue;
-        }
-        const since = e.view.inventory?.version ?? null;
-        void deps.changes(e.uuid, since).then(
-          (result) => {
-            if (entries.get(e.uuid) === e && needsRefresh(result, !!e.view?.stale)) void source.refresh(e.uuid);
-          },
-          () => {},
-        );
-      }
+    checkShown(): Promise<void> {
+      return poll();
+    },
+
+    /**
+     * The window is in front (`true`) or not: the change feed is asked every `pollAfterSeconds` only while it is, and at
+     * once when it comes to the front (at most every {@link CHECK_GAP_MS}).
+     */
+    setActive(active: boolean) {
+      polling.active = active;
+      if (!active) return stopPoll();
+      if (deps.now() - polling.last >= CHECK_GAP_MS) void poll();
+      else schedulePoll();
     },
 
     /** Forgets every account not in `uuids` (removed from Flint), with its art. */

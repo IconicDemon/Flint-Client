@@ -5,7 +5,7 @@
 //
 // usage: node qa/tools/mock-store.mjs [--port 8787] [--cape FILE.png] [--only UUID] [--revoke-after SECONDS] [--bad-hash]
 //        [--handoff GAME_DIR] [--equip-after SECONDS] [--animated standard|hd|long|region|region-fast] [--bad-strip]
-//        [--region-cape SCALE] [--asset FILE.json]
+//        [--region-cape SCALE] [--asset FILE.json] [--switch SECONDS] [--switch-after SECONDS] [--slow-ms MS]
 //
 // - Listens on 127.0.0.1 only. Point the game at it with -Dflint.store.baseUrl=http://127.0.0.1:8787 (for QA tours:
 //   FLINTQA_JVM="-Dflint.store.baseUrl=http://127.0.0.1:8787" node qa/run_qa_windows.mjs ...). A Store on loopback may be
@@ -30,6 +30,11 @@
 //   unit; region-fast: 120 frames in a 4 s loop (about 30 per second, as the Snowfall Cape plays); --region-cape: static.
 // - --asset FILE.json: answers with that asset as it is (a real cape's, from the Store's public lookup: its own Supabase
 //   addresses), for checking a production cape in game.
+// - --switch SECONDS (with --handoff): from the first lookup, every SECONDS the cape worn swaps between the cape and a second
+//   test cape (green and white stripes), and the handoff is rewritten with a new equipRevision each time, as the launcher does
+//   after an equip: cape switching A → B → A … in a running game (--switch-after: the first switch that many seconds after
+//   the first lookup instead). --slow-ms: the second cape's texture answers that much later
+//   (a slow download), so a game that shows nothing while it loads would show it.
 // Logs one line per request.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -80,14 +85,14 @@ function chunk(type, data) {
 	return Buffer.concat([len, td, crc]);
 }
 /** Minecraft's cape layout (front x1..10, back x12..21, rows 1..16), in loud stripes so it can't be mistaken for another. */
-function testCape() {
+function testCape(one = [255, 140, 0, 255], two = [20, 20, 160, 255]) {
 	const w = 64, h = 32, raw = Buffer.alloc((w * 4 + 1) * h);
 	for (let y = 0; y < h; y++) {
 		for (let x = 0; x < w; x++) {
 			const o = y * (w * 4 + 1) + 1 + x * 4;
 			const onCape = x <= 21 && y <= 16;
 			const stripe = Math.floor(y / 3) % 2 === 0;
-			const rgba = !onCape ? [0, 0, 0, 0] : stripe ? [255, 140, 0, 255] : [20, 20, 160, 255];
+			const rgba = !onCape ? [0, 0, 0, 0] : stripe ? one : two;
 			rgba.forEach((v, i) => (raw[o + i] = v));
 		}
 	}
@@ -196,6 +201,12 @@ const sha256 = badHash ? "0".repeat(64) : crypto.createHash("sha256").update(png
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 let firstLookup = 0;
 let requests = 0;
+const switchEvery = Number(option("--switch", "0"));
+const slowMs = Number(option("--slow-ms", "0"));
+const switchAfter = Number(option("--switch-after", "0"));
+const pngB = testCape([40, 200, 60, 255], [240, 240, 240, 255]);
+const sha256B = crypto.createHash("sha256").update(pngB).digest("hex");
+let wornB = false;
 
 http.createServer((req, res) => {
 	const url = new URL(req.url, `http://127.0.0.1:${port}`);
@@ -208,6 +219,15 @@ http.createServer((req, res) => {
 		if (!firstLookup) {
 			firstLookup = Date.now();
 			if (revokeAfter > 0) setTimeout(() => writeHandoff(Date.now()), revokeAfter * 1000);
+			const swap = () => {
+				wornB = !wornB;
+				console.log(`${new Date().toISOString()} switch: now wearing ${wornB ? "B (green)" : "A"}`);
+				writeHandoff(Date.now());
+			};
+			if (switchEvery > 0) setTimeout(() => {
+				swap();
+				setInterval(swap, switchEvery * 1000);
+			}, (switchAfter || switchEvery) * 1000);
 			if (!equipped) {
 				setTimeout(() => {
 					equipped = true;
@@ -221,6 +241,9 @@ http.createServer((req, res) => {
 		for (const id of uuids) {
 			if (revoked || !equipped || (only && id !== only)) continue;
 			if (realAsset) { players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555556", kind: "cape", asset: realAsset } }; continue; }
+			if (wornB) { players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555557", kind: "cape", asset: {
+				id: "6f9619ff-8b86-4d01-b42d-00cf4fc96500", version: 1, path: "/test-capes/qa-cape-b.png", sha256: sha256B, width: 64, height: 32,
+				url: `http://127.0.0.1:${port}/test-capes/qa-cape-b.png` } } }; continue; }
 			players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555555", kind: "cape", asset: {
 				id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff", version: 1, path: "/test-capes/qa-cape.png", sha256, width, height,
 				url: `http://127.0.0.1:${port}/test-capes/qa-cape.png`, animation } } };
@@ -231,6 +254,10 @@ http.createServer((req, res) => {
 	if (req.method === "GET" && url.pathname === "/test-capes/qa-cape.png") {
 		console.log(`${new Date().toISOString()} texture ${width}x${height} (${png.length} bytes)`);
 		return send(200, png, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
+	}
+	if (req.method === "GET" && url.pathname === "/test-capes/qa-cape-b.png") {
+		console.log(`${new Date().toISOString()} texture B (${pngB.length} bytes)${slowMs ? `, answered in ${slowMs} ms` : ""}`);
+		return void setTimeout(() => send(200, pngB, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" }), slowMs);
 	}
 	if (req.method === "GET" && files.has(url.pathname)) {
 		const strip = files.get(url.pathname);

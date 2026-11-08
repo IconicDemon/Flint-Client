@@ -310,9 +310,7 @@ public final class Mc263Features {
 		Minecraft mc = mc();
 		// Motion blur.
 		ModuleState motion = Mods.state(MOTION_BLUR);
-		MotionBlur.configure(Mods.on(MOTION_BLUR), motion.decimal(VisualMods.MotionBlur.STRENGTH), motion.option(VisualMods.MotionBlur.ALGORITHM),
-			motion.option(VisualMods.MotionBlur.PROFILE), motion.bool(VisualMods.MotionBlur.REFRESH_SCALING),
-			motion.option(VisualMods.MotionBlur.QUALITY), motion.bool(VisualMods.MotionBlur.MOVEMENT));
+		MotionBlur.configure(Mods.on(MOTION_BLUR), motion.option(VisualMods.MotionBlur.MODE), motion.integer(VisualMods.MotionBlur.STRENGTH));
 		// Color Saturation: read each tick (five numbers), applied by the grading pass each frame.
 		ModuleState grade = Mods.state(COLOR_GRADE);
 		com.flintclient.client.control.fx.ColorGrade.set(Mods.on(COLOR_GRADE), grade.integer(VisualMods.ColorSaturation.HUE),

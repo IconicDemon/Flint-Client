@@ -762,6 +762,7 @@
   "library.card.installed": "Встановлено",
   "library.card.needsProfile": "Спершу виберіть профіль",
   "library.card.open": "Відкрити {title}",
+  "library.card.uninstall": "Видалити",
   "library.card.updated": "Оновлено",
   "library.categories.label": "Категорії",
   "library.categories.selected.one": "Вибрано {count}",

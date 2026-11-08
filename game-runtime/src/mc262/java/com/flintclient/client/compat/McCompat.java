@@ -286,12 +286,12 @@ public final class McCompat {
 	}
 
 	/**
-	 * The cape-derived elytra (control/platform/Mc263CapeElytra): the elytra model with the cape texture in a back-face-culled
-	 * cut-out pass (entityCutoutCull), then the glint pass when the elytra is enchanted (armorEntityGlint), as the elytra layer orders its own.
+	 * The cape-derived elytra (control/platform/Mc263CapeElytra): the elytra model with the cape texture in Minecraft's own
+	 * elytra pass (armorCutoutNoCull: cut out, both sides), then the glint pass when the elytra is enchanted (armorEntityGlint), as the elytra layer orders its own.
 	 */
 	public static <S> void submitCapeWings(SubmitNodeCollector collector, Model<? super S> model, S state, PoseStack pose, Identifier texture,
 		int light, int outline, boolean foil) {
-		collector.order(0).submitModel(model, state, pose, net.minecraft.client.renderer.rendertype.RenderTypes.entityCutoutCull(texture), light,
+		collector.order(0).submitModel(model, state, pose, net.minecraft.client.renderer.rendertype.RenderTypes.armorCutoutNoCull(texture), light,
 			net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, -1, null, outline, null);
 		if (foil) {
 			collector.order(1).submitModel(model, state, pose, net.minecraft.client.renderer.rendertype.RenderTypes.armorEntityGlint(), light,

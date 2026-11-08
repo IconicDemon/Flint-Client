@@ -76,10 +76,32 @@ public final class GameOptions {
 	public static final BoolSetting FRIEND_NOTICES = new BoolSetting("friendNotices", "Friends notifications in game",
 		"A small note in game when a friend messages you, asks to be friends or comes online", true);
 
+	/**
+	 * The sizes of the main menu's parts, in percent of their design size (Utilities › Menu sizes, ui/screen/MenuSizesScreen):
+	 * each part grows or shrinks about its own corner or centre, and gives way (smaller) where the window has no room for it.
+	 * Minecraft's own title screen shows the switch and the cards at the same sizes.
+	 */
+	public static final IntSetting MENU_SIZE_LOGO = menuSize("menuSizeLogo", "FLINT logo");
+	public static final IntSetting MENU_SIZE_BUTTONS = menuSize("menuSizeButtons", "Main buttons");
+	public static final IntSetting MENU_SIZE_VERSION = menuSize("menuSizeVersion", "Version line");
+	public static final IntSetting MENU_SIZE_REWARDS = menuSize("menuSizeRewards", "Daily Rewards card");
+	public static final IntSetting MENU_SIZE_NEWS = menuSize("menuSizeNews", "What's New card");
+	public static final IntSetting MENU_SIZE_SWITCH = menuSize("menuSizeSwitch", "Flint | Vanilla switch");
+	public static final IntSetting MENU_SIZE_TOP_RIGHT = menuSize("menuSizeTopRight", "Account and icons");
+	/** The menu sizes, in the order Utilities › Menu sizes lists them. */
+	public static final List<IntSetting> MENU_SIZES = List.of(MENU_SIZE_LOGO, MENU_SIZE_BUTTONS, MENU_SIZE_VERSION, MENU_SIZE_REWARDS,
+		MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT);
+
 	/** Every option, in the order the file keeps them. */
 	public static final List<SettingDescriptor<?>> ALL = List.of(NO_HOTBAR_LOOPING, MINIMAL_BOBBING, CLOCK_24H, LEAVE_KEY, LEAVE_CONFIRM, MOD_KEYS,
 		INACTIVE_FPS, LIMIT_UNFOCUSED, LIMIT_IDLE, IDLE_MINUTES, IDLE_SECONDS, HUD_SCALE_STEP, MENU_SCALE, MENU_SOUND, FLINT_BADGE,
-		SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES, CAPE_ELYTRA);
+		SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES, CAPE_ELYTRA, MENU_SIZE_LOGO, MENU_SIZE_BUTTONS, MENU_SIZE_VERSION,
+		MENU_SIZE_REWARDS, MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT);
+
+	/** A main-menu part's size: 50 % to 200 % in steps of 10, 100 % (its design size) by default. */
+	private static IntSetting menuSize(String id, String label) {
+		return new IntSetting(id, label, "Its size on the main menu", 100, 50, 200, 10, "%");
+	}
 
 	private GameOptions() {
 	}

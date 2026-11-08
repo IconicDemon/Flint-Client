@@ -7,6 +7,7 @@ include control/feature/**
 include module/account/LauncherLinkMediaTest.java
 include control/rshift/CatalogTest.java
 include control/rshift/MenuMathTest.java
+include control/rshift/MenuCloseTest.java
 # The HUD's and the HUD editor's own rules (HudFormatTest compares with Minecraft's own formatting: newer lines only).
 include control/hud/render/*.java
 skip control/hud/render/HudFormatTest.java

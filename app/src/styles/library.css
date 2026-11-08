@@ -472,6 +472,7 @@
 .result-action {
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 14px 14px;
 }
 

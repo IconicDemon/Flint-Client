@@ -28,10 +28,11 @@ import org.jspecify.annotations.Nullable;
  * <li>Hearts {@code sameBarAbsorption} (absorption over your hearts, on by default) is retired, not read: golden hearts get their own
  * row above, as Minecraft draws them, until {@code sameRowAbsorption} is turned on.</li>
  * <li>Inventory {@code search} (the search bar, on by default) is retired, not read: its {@code searchBar} starts off.</li>
- * <li>Motion Blur {@code blurAlgorithm} {@code classic} (Flint's own trail, its default for a day before Natural Motion Blur's
- * algorithms became the whole list) needs nothing here: an option key the list no longer has reads as the default, Velocity
- * based, Natural Motion Blur's recommended one. Every other Motion Blur setting kept its id and meaning; the two new ones
- * ({@code quality}, {@code movementBlur}) start at their defaults.</li>
+ * <li>Motion Blur (Flint 1.0.3: two modes and one strength): {@code motionBlurStrength} (0 to 2, 1 the default) becomes
+ * {@code strength} (5 to 100%, 50% the default) at the same intensity. Every older algorithm ({@code blurAlgorithm}: velocity
+ * based, its default, frame blending, hybrid, accumulation, or the day-one {@code classic}) becomes Smooth, the new default,
+ * and Natural Motion Blur's fine settings ({@code refreshRateScaling}, {@code blurProfile}, {@code quality},
+ * {@code movementBlur}) leave the file: Natural keeps their recommended values. A Motion Blur that was on stays on.</li>
  * <li>Wavy Capes {@code capeMovement} → {@code movement}, whose new default is Realistic: the old default, Simulation 3D, becomes
  * Realistic (a file can't tell it from a choice); Vanilla, Simulation and Dungeons, which were chosen, stay.</li>
  * <li>The style's "Show label" off → {@code labelPosition} Hidden (Ping, CPS), {@code showLabel} off (FPS) or
@@ -71,6 +72,9 @@ public final class ModuleMigrations {
 	private static final List<String> TOASTS_RETIRED = List.of("enabled", "advancement", "recipe", "system", "tutorial");
 	/** Wavy Capes' movement was {@code capeMovement} (Simulation 3D by default); it is {@code movement} now, Realistic by default. */
 	private static final List<String> WAVY_CAPES_RETIRED = List.of("capeMovement");
+	/** Motion Blur before its two modes (Flint 1.0.2): Natural Motion Blur's algorithms and fine settings, its 0–2 strength. */
+	private static final List<String> MOTION_BLUR_RETIRED = List.of("blurAlgorithm", "motionBlurStrength", "refreshRateScaling", "blurProfile",
+		"quality", "movementBlur");
 
 	private ModuleMigrations() {
 	}
@@ -104,6 +108,7 @@ public final class ModuleMigrations {
 				}
 			}
 			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> wavyCapes(module, settings);
+			case com.flintclient.client.control.model.mods.VisualMods.MotionBlur.ID -> motionBlur(module, settings);
 			case com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.ID -> {
 				// Shulker Preview {@code show}: Holding Shift is now the hold switch (the key stays Shift).
 				if ("shift".equals(string(settings, "show")) && !has(settings, com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.HOLD)) {
@@ -186,6 +191,7 @@ public final class ModuleMigrations {
 			case com.flintclient.client.control.model.mods.VisualMods.ParticleChanger.ID -> PARTICLES_RETIRED;
 			case com.flintclient.client.control.model.mods.ToolMods.DropPrevention.ID -> DROP_RETIRED;
 			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> WAVY_CAPES_RETIRED;
+			case com.flintclient.client.control.model.mods.VisualMods.MotionBlur.ID -> MOTION_BLUR_RETIRED;
 			default -> NONE;
 		};
 	}
@@ -207,6 +213,22 @@ public final class ModuleMigrations {
 			default -> com.flintclient.client.control.model.mods.VisualMods.WavyCapes.REALISTIC;
 		};
 		module.set(movement, chosen);
+	}
+
+	/**
+	 * Motion Blur's older strength ({@code motionBlurStrength}, 0 to 2) as the new one: 1.00 (its default) is 50%, 2.00 is 100%, in
+	 * steps of 5%. Only when the file has no {@code strength} yet; the mode needs nothing (an older algorithm is Smooth, the default).
+	 */
+	private static void motionBlur(ModuleState module, @Nullable JsonObject settings) {
+		IntSetting strength = com.flintclient.client.control.model.mods.VisualMods.MotionBlur.STRENGTH;
+		JsonElement old = settings == null ? null : settings.get("motionBlurStrength");
+		if (old == null || !old.isJsonPrimitive() || !old.getAsJsonPrimitive().isNumber() || has(settings, strength)) {
+			return;
+		}
+		double value = old.getAsDouble();
+		if (Double.isFinite(value)) {
+			module.set(strength, strength.clamp((int) Math.round(value * 10) * 5));
+		}
 	}
 
 	/**

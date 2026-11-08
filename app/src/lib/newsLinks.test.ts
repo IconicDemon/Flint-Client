@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import notes from "../data/releaseNotes.json" with { type: "json" };
-import { newsReleases, releasePage } from "./newsLinks.ts";
+import { coverThumbnail, newsReleases, releasePage } from "./newsLinks.ts";
 
 test("every Flint release opens exactly its own page on flintclient.com", () => {
   for (const note of notes) assert.equal(releasePage(note), `https://flintclient.com/releases/${note.version}/`, note.version);
@@ -51,4 +51,17 @@ test("a feed release that fails any check is left out", () => {
   ]) {
     assert.deepEqual(versions(newsReleases(notes, [bad])), own, JSON.stringify(bad));
   }
+});
+
+test("a release's cover comes only from its own cover address on flintclient.com, as the 960-wide row picture", () => {
+  const base = "https://flintclient.com/releases/covers";
+  assert.equal(coverThumbnail("9.0.1", { url: `${base}/9.0.1.webp` }), `${base}/9.0.1-960.webp`);
+  assert.equal(coverThumbnail("9.0.1", { url: `${base}/9.0.1.png` }), `${base}/9.0.1-960.webp`);
+  for (const image of [null, undefined, "x", { url: `${base}/9.0.0.webp` }, { url: `http://flintclient.com/releases/covers/9.0.1.webp` }, { url: `${base}/9.0.1.svg` }, { url: `https://evil.example/releases/covers/9.0.1.webp` }]) {
+    assert.equal(coverThumbnail("9.0.1", image), null, JSON.stringify(image));
+  }
+  assert.equal(coverThumbnail("../9.0.1", { url: `${base}/../9.0.1.webp` }), null);
+  const [newer] = newsReleases(notes, [{ version: "9.0.1", date: "2026-12-01", title: "Next", summary: "", page_url: null, image: { url: `${base}/9.0.1.webp`, width: 1920, height: 1080, alt: "" } }]);
+  assert.equal(newer.cover, `${base}/9.0.1-960.webp`, "a newer release from the feed brings its cover");
+  for (const note of notes) assert.equal(coverThumbnail(note.version, note.image), `${base}/${note.version}-960.webp`, `${note.version} ships its cover address`);
 });

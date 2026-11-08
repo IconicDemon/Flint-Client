@@ -750,7 +750,7 @@
   height: 46px;
 }
 
-/* A release's own banner (1.0.1) as its row's picture: always whole at 16:9 (never cropped, dimmed or covered: its logo is
+/* A release's cover (the owner's art, 1.0.1+) as its row's picture: always whole at 16:9 (never cropped, dimmed or covered: its logo is
    top left and its text runs down the left half), framed by a hairline on every theme. */
 .news-item > .news-art.is-banner {
   background: #000;

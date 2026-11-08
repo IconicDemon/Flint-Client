@@ -490,6 +490,25 @@ public final class Mc263Inventory {
 		return screen == animated && closingAt != 0;
 	}
 
+	/**
+	 * A key pressed while {@code screen} animates out: it closes now, and the key is left for the game (true: closed), as it
+	 * would be had the screen already gone. So E, E reopens the inventory and E, Esc opens the pause menu, as without the
+	 * animation, instead of the second key being used up by a screen that is leaving.
+	 */
+	public static boolean finishClosing(Screen screen) {
+		if (!closing(screen)) {
+			return false;
+		}
+		try {
+			// Asked again while animating out: deferClose lets it close at once.
+			screen.onClose();
+			return Minecraft.getInstance().gui.screen() != screen;
+		} catch (RuntimeException | LinkageError e) {
+			GUARD.fail(e);
+			return false;
+		}
+	}
+
 	/** Fills {@link #MOTION} for {@code screen} now; false when it's drawn where it is. */
 	private static boolean motion(Screen screen) {
 		if (!animates(screen)) {

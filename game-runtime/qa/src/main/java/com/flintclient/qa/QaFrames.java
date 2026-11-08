@@ -40,6 +40,7 @@ public final class QaFrames {
 		}
 		turnLast = now;
 		QaCapes.frame();
+		QaCapeSwitch.frame();
 		if (!recording) {
 			return;
 		}
@@ -54,6 +55,11 @@ public final class QaFrames {
 	/** The {@code turn DEG_PER_S} step: the camera keeps turning at this rate every frame (0 stops it). */
 	public static void turn(double degreesPerSecond) {
 		turning = degreesPerSecond;
+	}
+
+	/** Whether a recording is running (a {@code frames} step then goes on with it instead of starting over). */
+	public static boolean recording() {
+		return recording;
 	}
 
 	public static void begin(double turn) {

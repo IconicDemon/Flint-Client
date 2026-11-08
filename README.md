@@ -4,7 +4,7 @@
 
 [Website](https://flintclient.com) · [Download](https://github.com/IconicDemon/Flint-Client/releases/latest) · [Discord](https://discord.gg/59rAHZMWb7) · [Changelog](https://flintclient.com/releases/)
 
-![Flint Friends inside Minecraft](docs/images/flint-friends.png)
+![The Flint Client launcher, version 1.0.3](docs/images/flint-launcher.jpg)
 
 Flint Client signs you in with your Microsoft account, installs Minecraft and Fabric for you, and keeps every version you
 play in its own tidy profile. Inside the game, Flint adds its own menu, HUD and quality-of-life mods, Flint Friends and
@@ -15,10 +15,13 @@ cosmetics, on every version it supports.
 | Platform | File |
 |---|---|
 | Windows 10 / 11 (64-bit) | [FlintClient-Setup.exe](https://github.com/IconicDemon/Flint-Client/releases/latest/download/FlintClient-Setup.exe) |
-| macOS, Apple silicon (M1 and newer) | [FlintClient-AppleSilicon.dmg](https://github.com/IconicDemon/Flint-Client/releases/latest/download/FlintClient-AppleSilicon.dmg) |
-| macOS, Intel | [FlintClient-Intel.dmg](https://github.com/IconicDemon/Flint-Client/releases/latest/download/FlintClient-Intel.dmg) |
+| macOS, Apple silicon (M1 and newer) | [FlintClient-AppleSilicon.dmg](https://github.com/IconicDemon/Flint-Client/releases/download/v1.0.2/FlintClient-AppleSilicon.dmg) (version 1.0.2) |
+| macOS, Intel | [FlintClient-Intel.dmg](https://github.com/IconicDemon/Flint-Client/releases/download/v1.0.2/FlintClient-Intel.dmg) (version 1.0.2) |
 | Linux, most distributions | [FlintClient.AppImage](https://github.com/IconicDemon/Flint-Client/releases/latest/download/FlintClient.AppImage) |
 | Linux, Debian and Ubuntu | [FlintClient.deb](https://github.com/IconicDemon/Flint-Client/releases/latest/download/FlintClient.deb) |
+
+Flint for Mac stays on version 1.0.2 for now: Mac updates are paused while we focus on Windows and Linux. Version 1.0.2 keeps
+working, and Mac updates will return in a future release.
 
 Each release lists the SHA-256 of every file in `SHA256SUMS.txt`. Flint updates itself: when a new version is out, an
 **Update** button appears in the top bar, and every update's signature is checked before it installs.
@@ -33,7 +36,7 @@ Each release lists the SHA-256 of every file in `SHA256SUMS.txt`. Flint updates 
 **Launcher**
 - Microsoft sign-in, with several Minecraft accounts side by side; sign-ins stay in your system's keychain.
 - One profile per version, with its own mods, resource packs, shader packs, worlds and memory.
-- Mods, resource packs and shader packs from Modrinth in a few clicks. Resource and shader packs can be added while you
+- Mods, resource packs and shader packs from Modrinth in a few clicks, and uninstalled from the same page. Resource and shader packs can be added while you
   play and show up in the game straight away.
 - Imports profiles from other launchers.
 - Skins and capes with a live 3D preview, including animated capes.
@@ -42,7 +45,8 @@ Each release lists the SHA-256 of every file in `SHA256SUMS.txt`. Flint updates 
 **In game**
 - The Right Shift menu: Flint's mods, HUD modules and settings, with a drag-and-drop HUD editor.
 - Armor HUD, keystrokes, CPS, FPS, coordinates, zoom, freelook, custom fog, nametags and many more quality-of-life mods.
-- Flint Friends and messages, and Flint cosmetics that other Flint players see on you.
+- Flint Friends and messages, Daily Rewards, and Flint cosmetics (animated capes too, also on the elytra) that other Flint
+  players see on you.
 - Performance tuning that keeps the game smooth, on every supported version.
 
 **Supported Minecraft versions:** 26.3, 26.2, 26.1.x, 1.21.11, 1.21.10, 1.21.1 and 1.8.9.

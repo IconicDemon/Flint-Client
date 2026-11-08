@@ -8,27 +8,24 @@ import { capeNoticeKey, type CapeConflict } from "../../lib/capeConflict";
 import { NO_CAPE, type ShownCape } from "../../lib/capeSource";
 import { joinRewards } from "../../lib/community";
 import { useDisplayedCape } from "../../lib/displayedCape";
+import { createEquipQueue, type EquipQueue, type Pick } from "../../lib/equipQueue";
 import { useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
 import { useStoreSelect } from "../../lib/store";
 import { meritShown, storePhase, withEquipped, wornIn, type MeritShown } from "../../lib/storePage";
 import {
-  FOCUS_CHECK_GAP_MS,
   formatStoreMerit,
+  isOlderView,
   meritText,
-  needsRefresh,
-  nextPollDelay,
-  POLL_DEFAULT_MS,
+  storeFeed,
   storeHost,
   updatedText,
   viewFor,
-  type StoreChanges,
   type StoreInfo,
   type StoreItem,
   type StoreSlot,
   type StoreView,
 } from "../../lib/storeSync";
-import { onWindowFocus } from "../../lib/windowFocus";
 import { Button, Callout, EmptyState, Spinner } from "../../ui/controls";
 import { Icon, type IconName } from "../../ui/Icon";
 import { FlintMark } from "../../ui/Logo";
@@ -181,6 +178,8 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<Wearing>(null);
+  /** The answer shown, for the equip queue and the version check (state is a render behind). */
+  const shownView = useRef<StoreView | null>(null);
   const [wearError, setWearError] = useState<{ slot: StoreSlot; text: string } | null>(null);
   const [pointed, setPointed] = useState<StoreItem | null>(null);
   const [activity, setActivity] = useState<ActivityState>(NO_ACTIVITY);
@@ -195,11 +194,12 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
   const host = storeHost(storeUrl);
   const phase = storePhase({ account, view, loadError });
 
-  /** Shows an answer only if it is for this account. */
+  /** Shows an answer only if it is for this account, and not older than the one shown (by the Store's inventory version). */
   const show = useCallback(
     (next: StoreView) => {
       const mine = viewFor(uuid, next);
-      if (mine) {
+      if (mine && !isOlderView(mine, shownView.current)) {
+        shownView.current = mine;
         setView(mine);
         setLoadError(null);
       }
@@ -222,7 +222,9 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
     void reload(false);
   }, [reload]);
 
-  useStoreChanges(uuid, view, reload);
+  // Every Store answer the launcher gets for this account, wherever it was asked for: the change feed's reloads
+  // (lib/capeSource.ts polls it for every account shown, this page's included), a game's equips, other pages.
+  useEffect(() => storeFeed.listen((event) => event.kind === "view" && show(event.view)), [show]);
 
   // Orders and Merit movements: with the page, again when the inventory's version changes (a purchase, a refund) and on
   // Refresh. Only while the Store answers; they're never cached.
@@ -279,33 +281,46 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
     });
 
   /**
-   * Shown at once; the Store's answer then replaces it, or the previous state comes back with the reason. A cape put on
+   * Shown at once; the Store's answer then replaces it, or the previous state comes back with the reason. Picks made while
+   * the Store answers replace each other, and only the last is sent (lib/equipQueue.ts): the latest pick wins. A cape put on
    * is the account's everywhere, but a mod that shows its own capes can hide it in its profile: once worn, a small notice
-   * names those mods and profiles (lib/capeConflict.ts), asked for while the Store answers.
+   * names those mods and profiles (lib/capeConflict.ts).
    */
-  const wear = async (slot: StoreSlot, cosmeticId: string | null) => {
-    if (pending) return;
-    setPending({ slot, cosmeticId });
+  const settled = useRef<(pick: Pick, error: unknown | null) => void>(() => {});
+  settled.current = (pick, error) => {
+    if (error !== null) {
+      const text = errorText(error);
+      setWearError({ slot: pick.slot, text });
+      toast({ tone: "danger", title: pick.cosmeticId ? t("store.wear.failed") : t("store.wear.takeOffFailed"), body: text });
+      // What the Store says now (the shown answer is its last; this asks again in case it changed meanwhile).
+      void reload(false);
+      return;
+    }
+    if (pick.slot !== "cape" || !pick.cosmeticId) return;
+    void api
+      .capeModConflicts()
+      .catch((): CapeConflict[] => [])
+      .then((found) => {
+        const key = capeNoticeKey(found);
+        if (found.length && !noticed.current.has(key)) {
+          noticed.current.add(key);
+          setCapeConflicts(found);
+        }
+      });
+  };
+  const queue = useRef<EquipQueue | null>(null);
+  if (!queue.current) {
+    queue.current = createEquipQueue<StoreView>({
+      send: (slot, cosmeticId) => api.storeEquip(uuid, slot, cosmeticId),
+      worn: (slot) => shownView.current?.inventory?.equipped[slot] ?? null,
+      answered: (answer) => show(answer),
+      changed: (next) => setPending(next),
+      settled: (pick, error) => settled.current(pick, error),
+    });
+  }
+  const wear = (slot: StoreSlot, cosmeticId: string | null) => {
     setWearError(null);
-    const conflicts = slot === "cape" && cosmeticId ? api.capeModConflicts().catch((): CapeConflict[] => []) : null;
-    let worn = false;
-    try {
-      show(await api.storeEquip(uuid, slot, cosmeticId));
-      worn = true;
-    } catch (e) {
-      const text = errorText(e);
-      setWearError({ slot, text });
-      toast({ tone: "danger", title: cosmeticId ? t("store.wear.failed") : t("store.wear.takeOffFailed"), body: text });
-      await reload(false);
-    } finally {
-      setPending(null);
-    }
-    const found = worn && conflicts ? await conflicts : [];
-    const key = capeNoticeKey(found);
-    if (found.length && !noticed.current.has(key)) {
-      noticed.current.add(key);
-      setCapeConflicts(found);
-    }
+    queue.current?.pick(slot, cosmeticId);
   };
 
   const openStore = () => void api.openExternal(storeUrl).catch((e) => toast({ tone: "danger", title: t("store.openFailed"), body: errorText(e) }));
@@ -612,58 +627,4 @@ function StoreSkeleton({ test }: { test: boolean }) {
       </div>
     </div>
   );
-}
-
-/** Keeps the page current: the Store's change feed at its own pace while the window is in front, and at once on focus. */
-function useStoreChanges(uuid: string, view: StoreView | null, reload: (interactive?: boolean) => Promise<void>) {
-  const live = useRef({ version: null as number | null, stale: false });
-  live.current = { version: view?.inventory?.version ?? null, stale: !!view?.stale };
-  const signedIn = !!view?.signedIn;
-
-  useEffect(() => {
-    if (!signedIn) return;
-    let disposed = false;
-    let timer: number | undefined;
-    let delay = POLL_DEFAULT_MS;
-    let lastCheck = 0;
-    let focused = typeof document === "undefined" || document.hasFocus();
-
-    const stopTimer = () => {
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = undefined;
-    };
-    const schedule = () => {
-      if (!disposed && focused && timer === undefined) timer = window.setTimeout(() => void check(), delay);
-    };
-    const check = async () => {
-      stopTimer();
-      lastCheck = Date.now();
-      const result: StoreChanges = await api.storeChanges(uuid, live.current.version).catch(() => ({ state: "offline" }) as const);
-      if (disposed) return;
-      if (needsRefresh(result, live.current.stale)) await reload(false);
-      const next = nextPollDelay(delay, result);
-      if (next === null) return; // signed out: the page now says so
-      delay = next;
-      schedule();
-    };
-    const onFocus = (now: boolean) => {
-      focused = now;
-      if (!now) stopTimer();
-      else if (Date.now() - lastCheck > FOCUS_CHECK_GAP_MS) void check();
-      else schedule();
-    };
-    const offNative = onWindowFocus(onFocus);
-    const onWebFocus = () => onFocus(true);
-    const onWebBlur = () => onFocus(false);
-    window.addEventListener("focus", onWebFocus);
-    window.addEventListener("blur", onWebBlur);
-    schedule();
-    return () => {
-      disposed = true;
-      stopTimer();
-      offNative();
-      window.removeEventListener("focus", onWebFocus);
-      window.removeEventListener("blur", onWebBlur);
-    };
-  }, [uuid, signedIn, reload]);
 }

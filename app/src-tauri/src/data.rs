@@ -1071,6 +1071,24 @@ fn feed_text(value: &Value, max: usize) -> Option<String> {
     (!text.is_empty() && text.chars().count() <= max && !text.chars().any(char::is_control)).then(|| text.to_string())
 }
 
+/// A release's cover picture from the feed (`image`, 1.0.3): passed on only when its address is exactly that version's
+/// cover on flintclient.com (`/releases/covers/<version>.webp` or `.png`, which the site also serves as a 960-wide
+/// `<version>-960.webp` for rows), with a sane size and a plain-text description; anything else is no picture.
+fn feed_image(value: &Value, version: &str) -> Value {
+    let url = value["url"].as_str().unwrap_or_default();
+    let base = format!("https://flintclient.com/releases/covers/{version}");
+    let url_ok = url == format!("{base}.webp") || url == format!("{base}.png");
+    let size = |key: &str| value[key].as_u64().filter(|n| (1..=8192).contains(n));
+    let alt = match &value["alt"] {
+        Value::Null => Some(String::new()),
+        other => feed_text(other, 200),
+    };
+    match (url_ok, size("width"), size("height"), alt) {
+        (true, Some(width), Some(height), Some(alt)) => json!({ "url": url, "width": width, "height": height, "alt": alt }),
+        _ => Value::Null,
+    }
+}
+
 /// The releases Home may show from Flint's feed: schema 1 only; each entry checked field by field and left out, never
 /// repaired, when any check fails; newest first, one per version, at most FEED_RELEASES. `page_url` is passed on only when
 /// it is exactly that version's page on flintclient.com (the one address the site serves a version at).
@@ -1095,7 +1113,8 @@ pub fn feed_releases(feed: &Value) -> Vec<Value> {
                     };
                     let page = format!("https://flintclient.com/releases/{version}/");
                     let page_url = (entry["page_url"].as_str() == Some(page.as_str())).then_some(page);
-                    Some((order, json!({ "version": version, "date": date, "title": title, "summary": summary, "page_url": page_url })))
+                    let image = feed_image(&entry["image"], version);
+                    Some((order, json!({ "version": version, "date": date, "title": title, "summary": summary, "page_url": page_url, "image": image })))
                 })
                 .collect()
         })
@@ -1198,9 +1217,36 @@ mod tests {
         let shown = feed_releases(&feed(json!([release("0.9.1", "2026-11-04"), release("1.0.1", "2026-11-08"), release("0.10.0", "2026-11-06"), release("1.0.1", "2026-11-08")])));
         let versions: Vec<&str> = shown.iter().map(|r| r["version"].as_str().unwrap()).collect();
         assert_eq!(versions, ["1.0.1", "0.10.0", "0.9.1"], "by version number, not text, one per version");
-        assert_eq!(shown[0], json!({ "version": "1.0.1", "date": "2026-11-08", "title": "Title", "summary": "Summary.", "page_url": "https://flintclient.com/releases/1.0.1/" }), "only what Home shows");
+        assert_eq!(shown[0], json!({ "version": "1.0.1", "date": "2026-11-08", "title": "Title", "summary": "Summary.", "page_url": "https://flintclient.com/releases/1.0.1/", "image": null }), "only what Home shows");
         let many: Vec<Value> = (0..20).map(|n| release(&format!("1.0.{n}"), "2026-11-08")).collect();
         assert_eq!(feed_releases(&feed(json!(many))).len(), FEED_RELEASES);
+    }
+
+    #[test]
+    fn news_passes_on_a_cover_only_from_that_versions_own_address() {
+        let with = |image: Value| {
+            let mut r = release("1.0.3", "2026-11-06");
+            r["image"] = image;
+            feed_releases(&feed(json!([r])))[0]["image"].clone()
+        };
+        let good = json!({ "url": "https://flintclient.com/releases/covers/1.0.3.webp", "width": 1920, "height": 1080, "alt": "Flint Client 1.0.3 update." });
+        assert_eq!(with(good.clone()), good);
+        assert_eq!(with(json!({ "url": "https://flintclient.com/releases/covers/1.0.3.png", "width": 1920, "height": 1080 }))["alt"], "", "no description is fine");
+        for url in [
+            "https://flintclient.com/releases/covers/1.0.2.webp",
+            "http://flintclient.com/releases/covers/1.0.3.webp",
+            "https://flintclient.com.evil.example/releases/covers/1.0.3.webp",
+            "https://flintclient.com/releases/covers/1.0.3.svg",
+            "https://flintclient.com/releases/covers/1.0.3.webp?x=1",
+            "https://flintclient.com/releases/covers/../1.0.3.webp",
+        ] {
+            assert_eq!(with(json!({ "url": url, "width": 1920, "height": 1080, "alt": "x" })), Value::Null, "{url}");
+        }
+        assert_eq!(with(json!({ "url": "https://flintclient.com/releases/covers/1.0.3.webp", "width": 0, "height": 1080 })), Value::Null);
+        assert_eq!(with(json!({ "url": "https://flintclient.com/releases/covers/1.0.3.webp", "width": 1920, "height": 99999 })), Value::Null);
+        assert_eq!(with(json!({ "url": "https://flintclient.com/releases/covers/1.0.3.webp", "width": 1920, "height": 1080, "alt": "ab" })), Value::Null);
+        assert_eq!(with(json!("https://flintclient.com/releases/covers/1.0.3.webp")), Value::Null, "not an object");
+        assert_eq!(with(Value::Null), Value::Null, "no cover");
     }
 
     #[test]

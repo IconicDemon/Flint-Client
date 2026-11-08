@@ -5578,34 +5578,14 @@
 					"title": "Blur",
 					"rows": [
 						{
-							"label": "Blur Algorithm",
+							"label": "Mode",
 							"kind": "choice",
-							"bind": "motion_blur/blurAlgorithm"
+							"bind": "motion_blur/mode"
 						},
 						{
-							"label": "Blur Amount",
+							"label": "Strength",
 							"kind": "slider",
-							"bind": "motion_blur/motionBlurStrength"
-						},
-						{
-							"label": "Refresh Rate Scaling",
-							"kind": "toggle",
-							"bind": "motion_blur/refreshRateScaling"
-						},
-						{
-							"label": "Blur Profile",
-							"kind": "choice",
-							"bind": "motion_blur/blurProfile"
-						},
-						{
-							"label": "Quality",
-							"kind": "choice",
-							"bind": "motion_blur/quality"
-						},
-						{
-							"label": "Blur When Moving",
-							"kind": "toggle",
-							"bind": "motion_blur/movementBlur"
+							"bind": "motion_blur/strength"
 						}
 					]
 				}

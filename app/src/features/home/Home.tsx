@@ -4,7 +4,9 @@ import flintMark from "../../assets/brand/flint-icon.svg";
 import flintSparks from "../../assets/news/flint-sparks.jpg";
 // The 1.0.1 release banner: the owner's original 1920×1080 PNG, byte for byte (SHA-256 e294ee29…a5910b3e9). The website
 // uses the same file as the release's cover.
-import banner101 from "../../assets/news/flint-1.0.1-release.png";
+import cover101 from "../../assets/news/flint-1.0.1-cover.png";
+import cover102 from "../../assets/news/flint-1.0.2-cover.png";
+import cover103 from "../../assets/news/flint-1.0.3-cover.png";
 import { RELEASE_NOTES } from "../../data/releaseNotes";
 import { api, errorText, type FeedRelease, type Profile, type ProfileState } from "../../lib/api";
 import { useDisplayedCape } from "../../lib/displayedCape";
@@ -385,8 +387,32 @@ function LaunchPanel({ profile, navigate }: { profile: Profile | null; navigate:
   );
 }
 
-/** A release's own banner, by version: its row's picture. A release without one has the sparks picture. */
-const RELEASE_BANNERS: Record<string, string | undefined> = { "1.0.1": banner101 };
+/**
+ * The owner's release covers this build carries (DownloadsVersion Changelogs, 480×270 copies, for the releases it ships notes
+ * for): a row's picture without the network. A newer release from the feed shows its cover from flintclient.com
+ * (`NewsRelease.cover`); a release with neither, or one whose picture fails to load, has the sparks picture.
+ */
+const RELEASE_COVERS: Record<string, string | undefined> = { "1.0.1": cover101, "1.0.2": cover102, "1.0.3": cover103 };
+
+/** A news row's picture: the release's cover, whole at 16:9 (never cropped), else Flint's own sparks and mark. */
+function NewsArt({ cover }: { cover: string | null | undefined }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [cover]);
+  if (cover && !failed) {
+    return (
+      // A cover is always shown whole: its logo is top left and its text runs down the left half.
+      <span className="news-art is-banner" aria-hidden="true">
+        <img src={cover} alt="" width={480} height={270} decoding="async" loading="lazy" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+  return (
+    <span className="news-art" aria-hidden="true">
+      <img src={flintSparks} alt="" decoding="async" />
+      <img className="news-art-mark" src={flintMark} alt="" />
+    </span>
+  );
+}
 
 /**
  * Home's news is Flint's own updates only (owner, 1.0.1), newest first: the releases this build ships notes for, shown at
@@ -414,27 +440,13 @@ function NewsSection() {
         <h2 id="news-title">{t("home.news.title")}</h2>
       </header>
       {newsReleases(RELEASE_NOTES, feed).map((note) => {
-        const banner = RELEASE_BANNERS[note.version];
         return (
           <NewsItem
             key={note.version}
             flint
             href={releasePage(note)}
             label={t("home.news.openFlint", { version: note.version })}
-            art={
-              banner ? (
-                // A release banner is always shown whole (16:9, never cropped): its logo is top left and its text runs
-                // down the left half.
-                <span className="news-art is-banner" aria-hidden="true">
-                  <img src={banner} alt="" width={1920} height={1080} decoding="async" />
-                </span>
-              ) : (
-                <span className="news-art" aria-hidden="true">
-                  <img src={flintSparks} alt="" decoding="async" />
-                  <img className="news-art-mark" src={flintMark} alt="" />
-                </span>
-              )
-            }
+            art={<NewsArt cover={RELEASE_COVERS[note.version] ?? note.cover} />}
             title={`Flint ${note.version} · ${note.title}`}
             // A date without a time is that day where the player is, not midnight UTC (the day before in the Americas).
             meta={`Flint · ${shortDate(`${note.date}T12:00:00`)}`}

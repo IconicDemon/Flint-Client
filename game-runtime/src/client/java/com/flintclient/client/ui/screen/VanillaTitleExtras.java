@@ -47,8 +47,9 @@ public final class VanillaTitleExtras {
 			});
 		toggle.tooltip(Component.translatable("flintclient.menu.choice.tooltip"));
 		MenuScaled switcher = new MenuScaled(toggle, drawn);
-		int[] spot = MenuLayout.switchSpot(toggle, width, height);
-		switcher.place(spot[0], spot[1], spot[2], spot[3]);
+		MenuGeometry.Box spot = MenuLayout.switchSpot(toggle, width, height);
+		switcher.place(spot.x(), spot.y(), spot.w(), spot.h());
+		toggle.drawScale(spot.scale());
 		parts.add(switcher);
 
 		WhatsNew.Note note = WhatsNew.current();
@@ -57,7 +58,7 @@ public final class VanillaTitleExtras {
 		MenuScaled rewards = new MenuScaled(new RewardsCard(() -> minecraft.gui.setScreen(new DailyRewardsScreen(screen))), drawn);
 		// Clear of Minecraft's buttons: their column's right edge, in menu units.
 		int columnRight = (int) Math.ceil((guiWidth / 2 + COLUMN_HALF) * Frame.windowGuiScale() / px) + CLEAR;
-		int topBarBottom = spot[1] + spot[3];
+		int topBarBottom = spot.bottom();
 		MenuLayout.placeCards(news == null ? null : spot(news), spot(rewards), width, height, columnRight, topBarBottom);
 		if (news != null) {
 			parts.add(news);
@@ -84,10 +85,11 @@ public final class VanillaTitleExtras {
 	}
 
 	private static MenuLayout.Spot spot(MenuScaled part) {
-		return (x, y, w, h, shown) -> {
-			part.place(x, y, w, h);
-			part.visible = shown;
-			part.active = shown;
+		return box -> {
+			part.place(box.x(), box.y(), box.w(), box.h());
+			part.inner().drawScale(box.scale());
+			part.visible = box.shown();
+			part.active = box.shown();
 		};
 	}
 }

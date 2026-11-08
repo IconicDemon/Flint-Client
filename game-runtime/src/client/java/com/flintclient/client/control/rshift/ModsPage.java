@@ -235,10 +235,14 @@ final class ModsPage extends Node {
 		scroll.setVisible(on);
 	}
 
-	/** What a mod's page says above its settings: nothing for a mod that works; for one that is coming, that it is. */
+	/**
+	 * What a mod's page says above its settings: for a mod that works, nothing (Motion Blur: how it runs with a shader pack on);
+	 * for one that is coming, that it is.
+	 */
 	static @Nullable String note(Catalog.Mod mod) {
 		if (works(mod)) {
-			return null;
+			return mod.module() != null && com.flintclient.client.control.model.mods.VisualMods.MotionBlur.ID.equals(mod.module().id())
+				? com.flintclient.client.control.fx.ShaderPacks.motionBlurNote() : null;
 		}
 		if (mod.unavailable() != null) {
 			return "Unavailable in Flint: " + mod.unavailable() + ". These are the settings it would have.";

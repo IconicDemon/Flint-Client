@@ -27,7 +27,8 @@ import org.jspecify.annotations.Nullable;
  * missing files. The sound instance answers its own sound event instead of looking one up, which would
  * fail for want of a sounds.json; and {@code SoundBufferLibraryMixin} answers the engine's request for
  * {@code flintclient:sounds/ui/open.ogg} (Minecraft's file path for the sound {@code flintclient:ui/open})
- * with the generated samples. The samples are synthesised once, on the first play.
+ * with the generated samples. The samples are synthesised once ({@link ToneSynth#openShared}: on a worker before the first
+ * opening, see {@code ControlCenter.onClientTick}; else on the first play).
  *
  * <p>A new sound stops the previous one, so quick open and close never overlap; and a sound asked for within 150 ms of
  * the last one played doesn't play at all ({@link SoundGate}), so turning the Control Center round mid-close lets the
@@ -104,14 +105,14 @@ public final class UiSounds {
 
 	private static Cue open() {
 		if (openCue == null) {
-			openCue = new Cue(OPEN, ToneSynth.open());
+			openCue = new Cue(OPEN, ToneSynth.openShared());
 		}
 		return openCue;
 	}
 
 	private static Cue close() {
 		if (closeCue == null) {
-			closeCue = new Cue(CLOSE, ToneSynth.close());
+			closeCue = new Cue(CLOSE, ToneSynth.closeShared());
 		}
 		return closeCue;
 	}

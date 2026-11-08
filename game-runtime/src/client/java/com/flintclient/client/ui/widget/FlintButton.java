@@ -43,6 +43,8 @@ public abstract class FlintButton extends AbstractButton {
 	/** Where the pointer was at the last drawing, in this control's units (a part of it under the pointer, say). */
 	protected int pointerX = Integer.MIN_VALUE;
 	protected int pointerY = Integer.MIN_VALUE;
+	/** See {@link #drawScale(float)}. */
+	private float drawScale = 1.0F;
 
 	protected FlintButton(Component message, Runnable action) {
 		super(0, 0, 0, 0, message);
@@ -121,9 +123,55 @@ public abstract class FlintButton extends AbstractButton {
 		press = Motion.smooth(pressLinear);
 		Canvas canvas = Canvas.begin(Frame.of(graphics));
 		try {
-			paint(canvas);
+			if (Math.abs(drawScale - 1.0F) < 0.001F) {
+				paint(canvas);
+			} else {
+				paintScaled(canvas);
+			}
 		} finally {
 			canvas.end();
+		}
+	}
+
+	/**
+	 * The size this control is drawn at, against its design size (a main-menu part the player resized: Utilities › Menu sizes).
+	 * Its rectangle is laid out at that size already, so it takes the pointer where it is drawn; it draws itself as at its design
+	 * size, in a frame this much larger, so its text is rasterised for the size it shows at and stays as crisp. 1: as designed.
+	 */
+	public void drawScale(float scale) {
+		this.drawScale = scale > 0.0F && Float.isFinite(scale) ? scale : 1.0F;
+	}
+
+	public float drawScale() {
+		return drawScale;
+	}
+
+	/**
+	 * {@link #paint} at {@link #drawScale}: for the paint the control is its design size at the origin of a frame
+	 * {@code drawScale} times the enclosing one's unit, moved onto its rectangle, and the pointer is in that frame's units too.
+	 * Its own rectangle and pointer are back as they were before anything else reads them.
+	 */
+	private void paintScaled(Canvas canvas) {
+		int x = getX();
+		int y = getY();
+		int w = getWidth();
+		int h = getHeight();
+		int px = pointerX;
+		int py = pointerY;
+		float s = drawScale;
+		canvas.pushOffset(canvas.px(x), canvas.px(y));
+		Canvas scaled = Canvas.beginAtGuiScale(canvas.frame(), canvas.unitScale() * s);
+		try {
+			setRectangle(Math.max(1, Math.round(w / s)), Math.max(1, Math.round(h / s)), 0, 0);
+			pointerX = px == Integer.MIN_VALUE ? px : (int) Math.floor((px - x) / s);
+			pointerY = py == Integer.MIN_VALUE ? py : (int) Math.floor((py - y) / s);
+			paint(scaled);
+		} finally {
+			scaled.end();
+			setRectangle(w, h, x, y);
+			pointerX = px;
+			pointerY = py;
+			canvas.popOffset();
 		}
 	}
 

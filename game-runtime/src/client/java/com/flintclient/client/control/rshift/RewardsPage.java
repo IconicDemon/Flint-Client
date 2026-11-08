@@ -6,134 +6,264 @@ import com.flintclient.client.control.feature.DailyRewards;
 import com.flintclient.client.control.rshift.MenuStyle.Label;
 import com.flintclient.client.control.rshift.MenuStyle.Type;
 import com.flintclient.client.control.store.RewardsClient;
+import com.flintclient.client.control.store.StoreEndpoint;
+import com.flintclient.client.control.store.StoreHandoff;
 import com.flintclient.client.platform.Clock;
 import com.flintclient.client.platform.MenuHost;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.MeritIcon;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.kit.Kit;
+import com.flintclient.client.ui.kit.KitScreen;
 import com.flintclient.client.ui.kit.Node;
 import com.flintclient.client.ui.kit.Pressable;
 import java.util.List;
 import java.util.Locale;
+import net.fabricmc.loader.api.FabricLoader;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Daily Rewards window's content ({@link DailyRewardsScreen}): the daily streak and the Merit balance
- * ({@link DailyRewards}). Across the top, DAILY REWARDS with the streak, the best streak, the balance and the Claim button
- * (a countdown once today's reward is claimed); under it the week, a card per day (a tick on the days claimed, TODAY on
- * today's, a crown on the week's last day, the reward in its corner, the Merit in the middle, the day at the bottom) over a
- * row of segments that fill as the streak grows; then what Merits will buy. A claim is a moment: Flint's chime, the day's
- * card springs and is ticked, its "+15" rises, a spray of Merits flies from the button into the balance, which counts up.
- * Opening, the cards rise in one after another and the segments fill; today's card glows and Merits twinkle at its corners
- * (no motion with reduced motion). While the rewards are loading the cards shimmer; without them the page says why. Same
- * page on every Minecraft line. Sizes in Dawn's design pixels ({@link MenuStyle#d}).
+ * The Daily Rewards window's content ({@link DailyRewardsScreen}), a check-in in three calm rows on one plain panel, nothing
+ * boxed inside boxes, with room to breathe: the header (the back button, the title with a quiet line under it, the Flint Store
+ * button and the Merit balance); the week, seven days spread evenly across the panel, each its reward over its Merit (bright
+ * once claimed and for today's reward, dim for the days to come; the crown on the week's last day) and "Day N" under it with a
+ * tick once claimed, the Merits joined by a thin line that fills as the streak grows ("COLLECT NOW" over today's reward while
+ * it waits); a hairline, then
+ * the streak and the best streak at the left and one big button at the right: Claim, or once claimed the wait for the
+ * next day, counting down inside it (or why the claim was refused). Without rewards to show, that row says why. One accent
+ * (the theme's), quiet grey for what is secondary, Minecraft's font without a shadow.
+ *
+ * <p>Motion is quick and small: the days and the row rise in one after another, the balance counts up, the line fills. A claim
+ * plays Flint's chime, the day's Merit pops, is ticked and shows what it gave, a few Merits fly into the balance, which counts
+ * up. None of it with reduced motion. While the rewards are loading the days shimmer. When the window is short the gaps
+ * tighten, then the Merits shrink, so nothing overlaps. Same page on every Minecraft line. Sizes in Dawn's design pixels
+ * ({@link MenuStyle#d}).
  */
 final class RewardsPage extends Node {
-	private static final float PAD = 34;
-	private static final float HEAD = 64;
 	private static final int DAYS = 7;
-	/** The Merit's own colours, from its picture: the light face, the gold, the deep edge, and ink on gold. */
-	static final int GOLD_LIGHT = 0xFFFCE7A1;
+	private static final float PAD_X = 48;
+	private static final float PAD_TOP = 44;
+	private static final float PAD_BOTTOM = 48;
+	private static final float GAP_HEAD = 72;
+	private static final float GAP_ROW = 48;
+	private static final float GAP_DIVIDER = 44;
+	private static final float STAR = 88;
+	/** The fewest of the gaps a short window keeps (a share of each) before the Merits shrink. */
+	private static final float MIN_GAPS = 0.35F;
+	/** The layers of Claim's hover glow (each 2/255 of the accent, so no step between them shows). */
+	private static final int PILL_GLOW_LAYERS = 14;
+	/** The Merit's gold, for the crown on the week's last day. */
 	static final int GOLD = 0xFFE3B23C;
-	static final int GOLD_DEEP = 0xFFB27A1C;
-	static final int GOLD_INK = 0xFF2B1B04;
-	private static final long COUNT_MILLIS = DailyRewards.COUNT_MILLIS;
-	private static final long POP_MILLIS = 520;
-	private static final long FLIGHT_MILLIS = 820;
-	private static final long FLIGHT_STAGGER = 34;
-	private static final int SPARKS = 12;
+	/** A refusal's mark: the Flint Store's warning amber. */
+	private static final int WARN = 0xFFD9BD5C;
+	private static final long POP_MILLIS = 460;
+	private static final long FLIGHT_MILLIS = 720;
+	private static final long FLIGHT_STAGGER = 55;
+	private static final int SPARKS = 6;
+	private static final long ENTER_MILLIS = 420;
+	private static final long ENTER_STAGGER = 45;
+	/** The time between claims. */
+	private static final long WAIT_MILLIS = 86_400_000L;
 
 	private final DailyRewards rewards = DailyRewards.get();
-	private final Label title = new Label(Type.HEADER_TITLE, "DAILY REWARDS");
-	private final Label streakValue = new Label(Type.PILL, "0");
-	private final Label streakCaption = new Label(Type.PILL_NOTE, "Streak");
-	private final Label bestValue = new Label(Type.PILL, "0");
-	private final Label bestCaption = new Label(Type.PILL_NOTE, "Best");
+	private final Label title = new Label(Type.HEADER_TITLE, "Daily Rewards");
+	private final Label subtitle = new Label(Type.PILL_NOTE, "Come back every day: rewards grow through the week.");
 	private final Label balance = new Label(Type.PILL, "0");
+	/** The balance the chip always keeps room for, so the Store button beside it stays put while the balance counts up. */
+	private final Label balanceRoom = new Label(Type.PILL, "0,000");
+	private final Label collect = new Label(Type.PILL_NOTE, "COLLECT NOW");
+	private final Label streak = new Label(Type.PILL, "");
+	private final Label best = new Label(Type.PILL_NOTE, "");
 	private final Label[] dayNames = new Label[DAYS];
+	private final Label[] dayNumbers = new Label[DAYS];
 	private final Label[] dayRewards = new Label[DAYS];
-	private final Label today = new Label(Type.BADGE, "TODAY");
-	private final Label spendTitle = new Label(Type.SECTION_TITLE, "SPEND YOUR MERITS");
-	private final Label soon = new Label(Type.CAPTION, "FLINT STORE");
-	private final Label bannerTitle = new Label(Type.NAME, "Capes, wings and more");
-	private final Label bannerNote = new Label(Type.EMPTY_NOTE, "Spend your Merits on Flint cosmetics in the Store page of the Flint app.");
-	/** The streak rule (with the server's largest reward), or why the last claim was refused while that holds. */
-	private final Label bannerRule = new Label(Type.CAPTION, "Come back every day: rewards grow through the week.");
-	private final Label message = new Label(Type.EMPTY, "");
-	private final Label messageNote = new Label(Type.EMPTY_NOTE, "");
+	private final Label message = new Label(Type.PILL, "");
+	private final Label note = new Label(Type.PILL_NOTE, "");
 	private final Label plus = new Label(Type.PILL, "");
+	private final Parts.Square back;
 	private final ClaimButton claim;
+	private final StoreButton store;
 	/** The value each label was last set from, so text is remade only when it changes. */
 	private long shownBalance = Long.MIN_VALUE;
 	private int shownStreak = -1;
 	private int shownBest = -1;
 	private int shownFirstDay = -1;
-	// ---------- layout (set in layout and placeHeader) ----------
+	private long shownSeconds = -1;
+	// ---------- layout (set in layout) ----------
+	private float line;
 	private float left;
 	private float right;
-	private float headY;
-	private float cardsY;
-	private float cardW;
-	private float cardH;
-	private float gap;
-	private float segY;
-	private float spendY;
-	private float bannerY;
-	private float bannerH;
-	private float balanceX;
-	private float balanceW;
-	private float bestX;
-	private float bestW;
-	private float streakX;
-	private float streakW;
+	private float hb;
+	private float headerCY;
+	private float subCY;
+	private float colW;
+	private float star;
+	private float collectCY;
+	private float amountCY;
+	private float starCY;
+	private float dividerY;
+	private float dayCY;
+	private float actionY;
+	private float actionH;
+	/** Whether the Store button fits in the header beside the title at all (the window's width decides). */
+	private boolean storeRoom = true;
+	// ---------- drawn this frame, for the claim moment ----------
+	private float chipIconX;
+	/** How far the page shows today's claim (1) rather than the wait for the next one (0), eased. */
+	private float claimLit = -1;
 	// ---------- the claim moment ----------
 	private int seenClaims;
 	private long momentAt = -1;
 	private int momentDay;
 	private final long openedAt = Clock.millis();
-	/** When the rewards were first there to show, for the entrance (the cards rising in one after another). */
+	/** When the rewards were first there to show, for the entrance (the days rising in one after another). */
 	private long dataAt = -1;
 
-	RewardsPage() {
+	RewardsPage(Runnable onClose) {
 		for (int i = 0; i < DAYS; i++) {
-			dayNames[i] = new Label(Type.PILL, "");
+			dayNames[i] = new Label(Type.PILL_NOTE, "Day " + (i + 1));
+			dayNumbers[i] = new Label(Type.PILL_NOTE, Integer.toString(i + 1));
 			dayRewards[i] = new Label(Type.PILL_NOTE, "");
 		}
+		back = add(new Parts.Square(Glyph.CHEVRON_LEFT, "Back", onClose));
 		claim = add(new ClaimButton());
+		store = add(new StoreButton());
 		seenClaims = rewards.claims();
 		rewards.update(System.currentTimeMillis());
 	}
 
-	@Override
-	protected void layout() {
-		float pad = d(PAD);
-		left = x + pad;
-		right = x + w - pad;
-		headY = y + pad;
-		gap = d(18);
-		cardW = (right - left - (DAYS - 1) * gap) / DAYS;
-		// Top to bottom: the header (64), 30, the cards, 16, the segments (8), 44, SPEND YOUR MERITS (24), 16, the banner, the pad.
-		float room = y + h - pad - (headY + d(HEAD + 30 + 16 + 8 + 44 + 24 + 16));
-		cardH = Math.clamp(room * 0.56F, d(150), Math.min(d(228), cardW * 1.08F));
-		cardsY = headY + d(HEAD + 30);
-		segY = cardsY + cardH + d(16);
-		spendY = segY + d(8 + 44);
-		bannerY = spendY + d(24 + 16);
-		bannerH = Math.clamp(y + h - pad - bannerY, d(96), d(240));
-		float cw = d(270);
-		claim.setBounds(right - cw, headY, cw, d(HEAD));
+	/** The height of one line of the menu's type, in layout units (Minecraft's 9-pixel line at the menu's pixel scale). */
+	private static float lineHeight(Canvas c) {
+		return MenuStyle.pixelScale() * 9F / Math.max(1, c.scale());
 	}
 
-	/** The header's pills, right to left from the Claim button: the balance, the best streak, the streak (each sized to its text). */
-	private void placeHeader(Canvas c) {
-		float g = d(10);
-		balanceW = d(18 + 28 + 12) + Math.max(d(48), balance.width(c)) + d(20);
-		balanceX = claim.x() - g - balanceW;
-		bestW = d(18 + 22 + 10) + 2 * bestValue.width(c) + d(10) + bestCaption.width(c) + d(18);
-		bestX = balanceX - g - bestW;
-		streakW = d(18) + 2 * streakValue.width(c) + d(10) + streakCaption.width(c) + d(18);
-		streakX = bestX - g - streakW;
+	private static float headerHeight(float line) {
+		return Math.max(d(44), line + d(18));
+	}
+
+	/** The header row and the quiet line under the title. */
+	private static float headerBlock(float line) {
+		return headerHeight(line) + d(10) + line;
+	}
+
+	private static float actionHeight(float line) {
+		return Math.max(d(56), 2 * line + d(18));
+	}
+
+	/** A day's column without its Merit: "COLLECT NOW", the reward, "Day N" and the space between them. */
+	private static float dayFixed(float line) {
+		return 3 * line + d(8) + d(16) + d(18);
+	}
+
+	/** Every gap at its full size: the panel's padding, header to week, week to the hairline, hairline to the button. */
+	private static float gapsTotal() {
+		return d(PAD_TOP + GAP_HEAD + GAP_ROW + GAP_DIVIDER + PAD_BOTTOM);
+	}
+
+	/** The page's height with its full gaps and Merits: the window is at least this tall when it can be. */
+	static float naturalHeight(Canvas m) {
+		float line = lineHeight(m);
+		return headerBlock(line) + dayFixed(line) + d(STAR) + d(1) + actionHeight(line) + gapsTotal();
+	}
+
+	/** A Merit's size at a whole multiple of its art (sharp), never above {@code size} by more than a little. */
+	private static float crisp(Canvas m, float size) {
+		int px = m.px(size);
+		int sharp = MeritIcon.crispSize(px);
+		if (sharp > px * 1.1F) {
+			sharp = px >= 46 ? px / 23 * 23 : px;
+		}
+		return sharp / (float) Math.max(1, m.scale());
+	}
+
+	@Override
+	protected void layout() {
+		Canvas m = measure();
+		line = lineHeight(m);
+		left = x + d(PAD_X);
+		right = Math.max(left, x + w - d(PAD_X));
+		hb = headerHeight(line);
+		actionH = actionHeight(line);
+		colW = (right - left) / DAYS;
+		star = Math.max(d(20), Math.min(d(STAR), colW - d(40)));
+		// Every gap grows or shrinks in proportion to fill the window; below a third of their size the Merits shrink instead.
+		float fixed = headerBlock(line) + dayFixed(line) + d(1) + actionH;
+		float gaps = gapsTotal();
+		float k = (h - fixed - star) / gaps;
+		if (k < MIN_GAPS) {
+			k = MIN_GAPS;
+			star = Math.max(d(20), h - fixed - gaps * k);
+		}
+		star = crisp(m, star);
+		k = Math.max(MIN_GAPS, (h - fixed - star) / gaps);
+		float at = y + d(PAD_TOP) * k;
+		headerCY = at + hb / 2;
+		subCY = at + hb + d(10) + line / 2;
+		at += headerBlock(line) + d(GAP_HEAD) * k;
+		collectCY = at + line / 2;
+		amountCY = collectCY + line + d(8);
+		starCY = amountCY + line / 2 + d(16) + star / 2;
+		dayCY = starCY + star / 2 + d(18) + line / 2;
+		dividerY = dayCY + line / 2 + d(GAP_ROW) * k;
+		actionY = dividerY + d(1) + d(GAP_DIVIDER) * k;
+
+		back.setBounds(left, headerCY - hb / 2, hb, hb);
+		float reserve = chipWidth(m, balanceRoom);
+		float sw = store.preferredWidth(m);
+		float sx = right - reserve - d(10) - sw;
+		storeRoom = sx >= left + hb + d(16) + 2 * title.width(m) + d(20);
+		store.setBounds(sx, headerCY - hb / 2, sw, hb);
+		store.setVisible(storeRoom);
+		float width = right - left;
+		// The button: a pill sized to what it says, right-aligned and centred in the row.
+		float bh = Math.min(actionH, Math.max(d(42), line + d(20)));
+		float bw = Math.min(width, claim.preferredWidth(m));
+		claim.setBounds(right - bw, actionY + (actionH - bh) / 2, bw, bh);
+	}
+
+	// ---------- colours (from the menu's theme, so every look keeps them) ----------
+
+	/** Secondary text: the theme's grey, lifted a little so Minecraft's font stays easy to read. */
+	private static int muted() {
+		return Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, 0.3F);
+	}
+
+	/** The accent as text: a touch lighter than the accent itself. */
+	private static int accentText() {
+		return Palette.lerp(MenuStyle.ACCENT, 0xFFFFFFFF, 0.28F);
+	}
+
+	private static int hairline() {
+		return Palette.withAlpha(MenuStyle.TEXT, 0.08F);
+	}
+
+	/**
+	 * A soft glow of the accent around the box at ({@code x}, {@code y}, {@code w} × {@code h}, corners {@code radius}), reaching
+	 * {@code out} beyond it: {@code layers} faint boxes, each {@code peak / layers} of the accent, grown from the box by
+	 * {@code out × (1 - √(k / layers))}, so they lie sparse at the rim and dense near the box. Together they fade as the square
+	 * of the way out, with no edge and no rings.
+	 */
+	private static void glow(Canvas c, float x, float y, float w, float h, float radius, float out, int layers, float peak) {
+		int ink = Palette.withAlpha(MenuStyle.ACCENT, peak / layers);
+		if ((ink >>> 24) == 0) {
+			return;
+		}
+		for (int k = 0; k < layers; k++) {
+			float g = out * (1 - (float) Math.sqrt(k / (float) layers));
+			MenuStyle.box(c, x - g, y - g, w + 2 * g, h + 2 * g, radius + g, ink);
+		}
+	}
+
+	/** The ink on an accent fill: dark on a light accent (Flint's orange, as the Store's buttons), light on a deep one. */
+	static int onAccent() {
+		int a = MenuStyle.ACCENT;
+		float lum = 0.2126F * channel(a >> 16) + 0.7152F * channel(a >> 8) + 0.0722F * channel(a);
+		return lum > 0.18F ? Palette.lerp(a, 0xFF000000, 0.86F) : MenuStyle.TEXT;
+	}
+
+	private static float channel(int v) {
+		float c = (v & 0xFF) / 255.0F;
+		return c <= 0.04045F ? c / 12.92F : (float) Math.pow((c + 0.055F) / 1.055F, 2.4);
 	}
 
 	// ---------- drawing ----------
@@ -147,328 +277,339 @@ final class RewardsPage extends Node {
 		if (data != null && dataAt < 0) {
 			dataAt = Clock.millis();
 		}
-		refreshLabels(data);
-		placeHeader(c);
-		float cy = headY + d(HEAD) / 2;
-		big(c, title, left, cy, MenuStyle.WORDMARK);
-		float titleRight = left + 2 * title.width(c) + d(12);
-		if (data == null) {
-			claim.setVisible(false);
-			paintWithout(c);
-			return;
+		refreshLabels(data, now);
+		boolean can = data != null && rewards.claimable(now);
+		boolean busy = data != null && rewards.claiming();
+		claimLit = MenuStyle.ease(claimLit, can || busy);
+		if (claim.visible() != (data != null)) {
+			claim.setVisible(data != null);
 		}
-		claim.setVisible(true);
-		if (streakX > titleRight) {
-			pill(c, streakX, streakW, cy, null, streakValue, streakCaption, MenuStyle.ACCENT);
-		}
-		if (bestX > titleRight) {
-			pill(c, bestX, bestW, cy, Glyph.TROPHY, bestValue, bestCaption, GOLD);
-		}
-		paintBalance(c, cy);
 
-		List<RewardsClient.Day> track = data.track();
-		boolean can = rewards.claimable(now);
-		int todayDay = can ? data.nextDay() : Math.max(1, data.nextDay() - 1);
-		for (int i = 0; i < DAYS && i < track.size(); i++) {
-			float in = enter(i);
-			float before = entering(c, in);
-			try {
-				paintDay(c, i, track.get(i), data, todayDay, can);
-				paintSegment(c, i, track.get(i), data, can);
-			} finally {
-				entered(c, in, before);
-			}
-		}
-		float in = enter(DAYS);
+		paintHeader(c, data);
+		paintWeek(c, data, can || busy);
+		float in = enter(DAYS + 1);
 		float before = entering(c, in);
 		try {
-			paintSpend(c);
+			// A hairline between the week and the row under it.
+			c.fill(c.px(left), c.px(dividerY), c.px(right), c.px(dividerY) + Math.max(1, c.px(d(1))), hairline());
+			if (data == null) {
+				paintWithout(c);
+			} else {
+				paintStats(c, data);
+			}
 		} finally {
 			entered(c, in, before);
 		}
 	}
 
-	/** A header pill: an optional glyph, the number twice its size, and its caption. */
-	private void pill(Canvas c, float px, float pw, float cy, @Nullable Glyph glyph, Label value, Label caption, int valueInk) {
-		float ph = d(HEAD);
-		MenuStyle.block(c, px, cy - ph / 2, pw, ph, MenuStyle.radius(), 0, 0);
-		float at = px + d(20);
-		if (glyph != null) {
-			glyph.draw(c, at + d(11), cy, d(22), valueInk);
-			at += d(22 + 10);
-		}
-		big(c, value, at, cy, valueInk);
-		MenuStyle.text(c, caption, at + 2 * value.width(c) + d(10), cy + d(2), MenuStyle.NEUTRAL);
+	/** The Store button rises in with the header, Claim with its row. */
+	@Override
+	protected void paintChildren(Canvas c) {
+		paintChild(c, back);
+		MenuStyle.appearing(c, store, enter(0), d(10), (canvas, node) -> paintChild(canvas, node));
+		MenuStyle.appearing(c, claim, enter(DAYS + 1), d(10), (canvas, node) -> paintChild(canvas, node));
 	}
 
-	/** The balance pill: the Merit and the balance (counting up after a claim and on opening), lit as the Merits arrive. */
-	private void paintBalance(Canvas c, float cy) {
-		float ph = d(HEAD);
-		float pulse = momentPulse();
-		MenuStyle.block(c, balanceX, cy - ph / 2, balanceW, ph, MenuStyle.radius(), 0.25F * pulse, 0);
-		MenuStyle.ring(c, balanceX, cy - ph / 2, balanceW, ph, MenuStyle.radius(), Math.max(1, c.px(d(1.25F))),
-			Palette.withAlpha(GOLD, 0.30F + 0.5F * pulse));
-		float iconX = balanceX + d(18) + d(14);
-		if (pulse > 0.001F) {
-			MeritIcon.drawMoving(c, c.px(iconX), c.px(cy), c.px(d(28) * (1 + 0.2F * pulse)), 0xFFFFFFFF);
-		} else {
-			MeritIcon.draw(c, c.px(iconX), c.px(cy), c.px(d(28)), 0xFFFFFFFF);
+	/** The title (twice the type's size) after the back button, and the balance at the right with the Store button before it. */
+	private void paintHeader(Canvas c, RewardsClient.@Nullable Rewards data) {
+		float chipW = data != null ? paintBalance(c) : 0;
+		// A balance wider than the room kept for it (10,000 Merits and up) moves the Store button along, or hides it.
+		float sx = right - Math.max(chipW, chipWidth(c, balanceRoom)) - d(10) - store.width();
+		float tx = left + hb + d(16);
+		boolean fits = storeRoom && sx >= tx + 2 * title.width(c) + d(20);
+		if (fits && Math.abs(store.x() - sx) > 0.25F) {
+			store.setBounds(sx, store.y(), store.width(), store.height());
 		}
-		MenuStyle.text(c, balance, iconX + d(14) + d(12), cy, Palette.lerp(MenuStyle.TEXT, GOLD_LIGHT, 0.4F + 0.6F * pulse));
+		if (store.visible() != fits) {
+			store.setVisible(fits);
+		}
+		float room = (fits ? sx : right - chipW) - d(16) - tx;
+		if (2 * title.width(c) <= room) {
+			big(c, title, tx, headerCY, MenuStyle.TEXT);
+		} else {
+			MenuStyle.fitted(c, title, tx, headerCY, MenuStyle.TEXT, Math.max(0, room));
+		}
+		MenuStyle.fitted(c, subtitle, tx, subCY, muted(), Math.max(0, right - tx));
+	}
+
+	private float chipWidth(Canvas c, Label text) {
+		float icon = Math.min(d(22), hb - d(12));
+		return d(14) + icon + d(10) + text.width(c) + d(16);
+	}
+
+	/**
+	 * The balance, as the Store's header shows it: the Merit and the number in a hairline box at the top right, counting up after a
+	 * claim; the box takes the accent for a moment as the Merits arrive. Returns its width.
+	 */
+	private float paintBalance(Canvas c) {
+		float ch = hb;
+		float icon = Math.min(d(22), ch - d(12));
+		float cw = Math.max(chipWidth(c, balance), chipWidth(c, balanceRoom));
+		float cx = right - cw;
+		float cy = headerCY - ch / 2;
+		float pulse = momentPulse();
+		float rad = d(10);
+		MenuStyle.box(c, cx, cy, cw, ch, rad, Palette.withAlpha(MenuStyle.ACCENT, 0.10F * pulse));
+		MenuStyle.ring(c, cx, cy, cw, ch, rad, Math.max(1, c.px(d(1))),
+			Palette.lerp(Palette.withAlpha(MenuStyle.TEXT, 0.12F), Palette.withAlpha(MenuStyle.ACCENT, 0.7F), pulse));
+		// The Merit and the number centred in the box (it keeps room for four digits).
+		float content = icon + d(10) + balance.width(c);
+		float at = cx + (cw - content) / 2;
+		chipIconX = at + icon / 2;
+		if (pulse > 0.001F) {
+			MeritIcon.drawMoving(c, c.px(chipIconX), c.px(headerCY), c.px(icon * (1 + 0.15F * pulse)), 0xFFFFFFFF);
+		} else {
+			MeritIcon.draw(c, c.px(chipIconX), c.px(headerCY), c.px(icon), 0xFFFFFFFF);
+		}
+		MenuStyle.text(c, balance, at + icon + d(10), headerCY, MenuStyle.TEXT);
+		return cw;
 	}
 
 	/** The balance shown: counting up from nothing on opening, and from the old total after a claim (as every view does). */
-	private long shownValue(RewardsClient.@Nullable Rewards data) {
+	private long shownValue(RewardsClient.@Nullable Rewards data, long now) {
 		if (data == null) {
 			return -2;
 		}
-		long value = rewards.shownBalance(System.currentTimeMillis());
-		float k = momentAt >= 0 || dataAt < 0 || Kit.reduced() ? 1 : MenuStyle.appear(dataAt + 150, 950);
+		long value = rewards.shownBalance(now);
+		float k = momentAt >= 0 || dataAt < 0 || Kit.reduced() ? 1 : MenuStyle.appear(dataAt + 150, 900);
 		return Math.round(value * (double) k);
 	}
 
-	/** One day: its card, the tick or TODAY or crown at the top left, the reward at the top right, the Merit, the day. */
-	private void paintDay(Canvas c, int i, RewardsClient.Day day, RewardsClient.Rewards data, int todayDay, boolean can) {
-		float cx = left + i * (cardW + gap);
-		float rad = MenuStyle.radius();
-		boolean claimed = data.streak() > 0 && day.day() <= data.streak();
-		boolean isToday = can && day.day() == todayDay;
-		boolean upcoming = !claimed && !isToday;
+	/** The week: the line joining the days, then each day rising in after the one before. */
+	private void paintWeek(Canvas c, RewardsClient.@Nullable Rewards data, boolean open) {
+		List<RewardsClient.Day> track = data == null ? List.of() : data.track();
+		int count = data == null ? DAYS : Math.min(DAYS, track.size());
+		int claimed = 0;
+		if (data != null) {
+			for (int i = 0; i < count; i++) {
+				if (data.streak() > 0 && track.get(i).day() <= data.streak()) {
+					claimed++;
+				}
+			}
+		}
+		float in = enter(1);
+		float before = entering(c, in);
+		try {
+			paintLinks(c, data == null ? 0 : progress(claimed), count);
+		} finally {
+			entered(c, in, before);
+		}
+		boolean loading = data == null && rewards.state() == DailyRewards.State.LOADING;
+		for (int i = 0; i < count; i++) {
+			in = enter(1 + i);
+			before = entering(c, in);
+			try {
+				if (data == null) {
+					paintGhost(c, i, loading);
+				} else {
+					paintDay(c, i, track.get(i), data, open);
+				}
+			} finally {
+				entered(c, in, before);
+			}
+		}
+	}
+
+	/** How many days the line shows claimed (fractional while it fills): on opening from none, after a claim from the day before. */
+	private float progress(int claimed) {
+		if (claimed <= 0 || Kit.reduced()) {
+			return claimed;
+		}
+		if (momentAt >= 0 && momentDay - Math.max(1, shownFirstDay) + 1 == claimed) {
+			return claimed - 1 + MenuStyle.appear(momentAt + 120, 560);
+		}
+		return claimed * (dataAt < 0 ? 0 : MenuStyle.appear(dataAt + 260, 720));
+	}
+
+	/** How full the stretch of line from day {@code link + 1} to the next is, with {@code progress} days claimed. */
+	static float linkFill(float progress, int link) {
+		return Math.clamp(progress - (link + 1), 0, 1);
+	}
+
+	/** A thin line between each two days' Merits, at their middle: faint, filling with the accent as the streak reaches each day. */
+	private void paintLinks(Canvas c, float progress, int count) {
+		float th = d(3);
+		for (int i = 0; i + 1 < count; i++) {
+			float x0 = left + colW * (i + 0.5F) + star / 2 + d(16);
+			float x1 = left + colW * (i + 1.5F) - star / 2 - d(16);
+			if (x1 - x0 < d(8)) {
+				return;
+			}
+			float ty = starCY - th / 2;
+			MenuStyle.box(c, x0, ty, x1 - x0, th, th / 2, Palette.withAlpha(MenuStyle.TEXT, 0.08F));
+			float fill = linkFill(progress, i);
+			if (fill > 0.005F) {
+				MenuStyle.box(c, x0, ty, Math.max(th, (x1 - x0) * fill), th, th / 2, MenuStyle.ACCENT);
+			}
+		}
+	}
+
+	/**
+	 * One day, in a column: its reward over its Merit (bright once claimed and for today's reward, dimmer for the next day, dim
+	 * after), with the crown on the week's last day, and "Day N" under it with a tick once claimed. Today's, while its reward
+	 * waits, has "COLLECT NOW" over its reward and its reward and name in the accent.
+	 */
+	private void paintDay(Canvas c, int i, RewardsClient.Day day, RewardsClient.Rewards data, boolean open) {
+		float cx = left + colW * (i + 0.5F);
+		boolean claimedDay = data.streak() > 0 && day.day() <= data.streak();
+		boolean current = !claimedDay && day.day() == data.nextDay();
+		boolean ready = current && open;
+		float lit = Math.clamp(claimLit, 0, 1);
+		// The glow and the words over today's reward fade out from the day just claimed, not from the next one.
+		int litDay = momentAt >= 0 ? momentDay : data.nextDay();
+		float shine = day.day() == litDay ? lit : 0;
 		long millis = Clock.millis();
+		if (shine > 0.01F) {
+			float before = c.opacity();
+			c.setOpacity(before * shine);
+			float cw = collect.width(c);
+			float lx = Math.clamp(cx, left - d(PAD_X) / 2 + cw / 2, right + d(PAD_X) / 2 - cw / 2);
+			MenuStyle.centered(c, collect, lx, collectCY, accentText(), cw + d(4));
+			c.setOpacity(before);
+		}
+		paintAmount(c, i, cx, day.day() % DAYS == 0, claimedDay, ready ? lit : 0);
 		float pop = 0;
-		if (momentAt >= 0 && day.day() == momentDay) {
+		if (momentAt >= 0 && day.day() == momentDay && !Kit.reduced()) {
 			float t = Math.clamp((millis - momentAt) / (float) POP_MILLIS, 0, 1);
-			pop = (float) Math.sin(Math.PI * t) * (1 - t * 0.3F);
+			pop = (float) Math.sin(Math.PI * t) * (1 - t * 0.35F);
 		}
 		boolean zoomed = pop > 0.001F;
 		if (zoomed) {
-			c.pushZoom(1 + 0.07F * pop, c.px(cx + cardW / 2), c.px(cardsY + cardH / 2));
+			c.pushZoom(1 + 0.08F * pop, c.px(cx), c.px(starCY));
 		}
 		try {
-			int x0 = c.px(cx);
-			int y0 = c.px(cardsY);
-			int pw = c.px(cx + cardW) - x0;
-			int ph = c.px(cardsY + cardH) - y0;
-			int rp = c.px(rad);
-			if (isToday) {
-				float breathe = Kit.reduced() ? 0.6F : 0.5F + 0.5F * (float) Math.sin((millis - openedAt) / 520.0);
-				halo(c, cx, cardsY, cardW, cardH, rad, 0.16F + 0.2F * breathe);
-				MenuStyle.block(c, cx, cardsY, cardW, cardH, rad, 0, 0);
-				// The orange coming up from the bottom of today's card.
-				c.roundGradient(x0, y0 + ph / 3, pw, ph - ph / 3, rp, Palette.withAlpha(MenuStyle.ACCENT, 0),
-					Palette.withAlpha(MenuStyle.ACCENT, 0.32F + 0.08F * breathe));
-				sheen(c, cx, cardsY, cardW, cardH, millis);
-				MenuStyle.ring(c, cx, cardsY, cardW, cardH, rad, Math.max(2, c.px(d(2))), MenuStyle.ACCENT);
-			} else {
-				MenuStyle.block(c, cx, cardsY, cardW, cardH, rad, 0, 0);
-				if (claimed) {
-					c.roundGradient(x0, y0 + ph / 2, pw, ph - ph / 2, rp, Palette.withAlpha(MenuStyle.ACCENT, 0),
-						Palette.withAlpha(MenuStyle.ACCENT, 0.12F));
-					MenuStyle.ring(c, cx, cardsY, cardW, cardH, rad, Math.max(1, c.px(d(1.25F))), Palette.withAlpha(MenuStyle.ACCENT, 0.38F));
-				}
-			}
-			float inset = d(16);
-			// Top left: the tick of a claimed day, TODAY on today's, a crown on the week's last day.
-			if (claimed) {
-				float k = momentAt >= 0 && day.day() == momentDay ? Math.clamp((millis - momentAt - POP_MILLIS * 0.35F) / 240.0F, 0, 1) : 1;
-				float s = d(26);
-				MenuStyle.box(c, cx + inset, cardsY + inset, s, s, s / 2, Palette.withAlpha(MenuStyle.ACCENT, k));
-				Glyph.CHECK.draw(c, cx + inset + s / 2, cardsY + inset + s / 2, d(13) * (0.6F + 0.4F * k), Palette.withAlpha(0xFFFFFFFF, k));
-			} else if (isToday) {
-				float bw = today.width(c) + d(20);
-				float bh = d(24);
-				MenuStyle.box(c, cx + inset, cardsY + inset, bw, bh, bh / 2, MenuStyle.ACCENT);
-				MenuStyle.centered(c, today, cx + inset + bw / 2, cardsY + inset + bh / 2 + d(0.5F), 0xFFFFFFFF, bw);
-			} else if (day.day() % DAYS == 0) {
-				Glyph.CROWN.draw(c, cx + inset + d(11), cardsY + inset + d(12), d(20), Palette.withAlpha(GOLD, 0.85F));
-			}
-			// Top right: the reward.
-			int rewardInk = upcoming ? Palette.withAlpha(Palette.lerp(MenuStyle.NEUTRAL, GOLD_LIGHT, 0.25F), 0.8F) : GOLD_LIGHT;
-			float rw = dayRewards[i].width(c);
-			MenuStyle.text(c, dayRewards[i], cx + cardW - inset - rw, cardsY + inset + d(13), rewardInk);
-			// The Merit, dimmed on the days still to come; today's floats gently.
-			int iconPx = MeritIcon.crispSize(c.px(Math.min(cardW * 0.44F, cardH * 0.38F)));
-			float bob = isToday && !Kit.reduced() ? (float) Math.sin((millis - openedAt) / 640.0) * d(3) : 0;
-			MeritIcon.draw(c, c.px(cx + cardW / 2), c.px(cardsY + cardH * 0.5F + bob), iconPx, upcoming ? 0x73FFFFFF : 0xFFFFFFFF);
-			if (isToday) {
-				twinkles(c, cx, cardsY, cardW, cardH, millis);
-			}
-			// The day at the bottom.
-			int nameInk = upcoming ? MenuStyle.NEUTRAL : MenuStyle.TEXT;
-			MenuStyle.centered(c, dayNames[i], cx + cardW / 2, cardsY + cardH - d(26), nameInk, cardW - d(16));
+			float bob = ready && !Kit.reduced() ? (float) Math.sin((millis - openedAt) / 640.0) * d(2.5F) * lit : 0;
+			int tint = claimedDay || ready ? 0xFFFFFFFF : current ? 0x99FFFFFF : 0x4DFFFFFF;
+			MeritIcon.draw(c, c.px(cx), c.px(starCY + bob), MeritIcon.crispSize(c.px(star)), tint);
 		} finally {
 			if (zoomed) {
 				c.popOffset();
 			}
 		}
+		float tick = 0;
+		if (claimedDay) {
+			tick = momentAt >= 0 && day.day() == momentDay && !Kit.reduced()
+				? Math.clamp((millis - momentAt - POP_MILLIS * 0.35F) / 220.0F, 0, 1) : 1;
+		}
+		paintDayName(c, i, day, cx, ready ? lit : 0, claimedDay, tick);
 	}
 
-	/** The segment under a day: the accent once claimed, half lit on today, grey to come; it fills in as the streak arrives. */
-	private void paintSegment(Canvas c, int i, RewardsClient.Day day, RewardsClient.Rewards data, boolean can) {
-		float sx = left + i * (cardW + gap);
-		float th = d(8);
-		MenuStyle.box(c, sx, segY, cardW, th, th / 2, MenuStyle.SOFT_ON_BLOCK);
-		boolean claimed = data.streak() > 0 && day.day() <= data.streak();
-		boolean isToday = can && day.day() == data.nextDay();
-		if (!claimed && !isToday) {
-			return;
+	/** The day's reward, centred over its Merit: the crown before it on the week's last day. */
+	private void paintAmount(Canvas c, int i, float cx, boolean crown, boolean claimedDay, float today) {
+		Label reward = dayRewards[i];
+		float s = line * 0.8F;
+		float total = reward.width(c) + (crown ? s + d(6) : 0);
+		float at = cx - total / 2;
+		if (crown) {
+			Glyph.CROWN.draw(c, at + s / 2, amountCY, s, Palette.withAlpha(GOLD, claimedDay || today > 0.5F ? 1 : 0.7F));
+			at += s + d(6);
 		}
-		float k = 1;
-		if (momentAt >= 0 && day.day() == momentDay) {
-			k = Math.clamp((Clock.millis() - momentAt) / 600.0F, 0, 1);
-		} else if (dataAt >= 0 && !Kit.reduced()) {
-			k = MenuStyle.appear(dataAt + 220 + i * 70L, 520);
-		}
-		float fw = Math.max(th, cardW * (1 - (1 - k) * (1 - k)));
-		int x0 = c.px(sx);
-		int y0 = c.px(segY);
-		int top = claimed ? Palette.lerp(MenuStyle.ACCENT, 0xFFFFFFFF, 0.12F) : Palette.withAlpha(MenuStyle.ACCENT, 0.55F);
-		int low = claimed ? MenuStyle.ACCENT : Palette.withAlpha(MenuStyle.ACCENT, 0.4F);
-		c.roundGradient(x0, y0, c.px(sx + fw) - x0, Math.max(1, c.px(segY + th) - y0), c.px(th / 2), top, low);
+		int ink = claimedDay ? MenuStyle.TEXT : Palette.lerp(muted(), accentText(), today);
+		MenuStyle.text(c, reward, at, amountCY, ink);
 	}
 
-	/** SPEND YOUR MERITS: what Merits will buy, in a banner (the Store isn't open yet). */
-	private void paintSpend(Canvas c) {
-		big(c, spendTitle, left, spendY + d(12), MenuStyle.WORDMARK);
-		float chipW = soon.width(c) + d(28);
-		float chipH = d(30);
-		float chipX = right - chipW;
-		MenuStyle.box(c, chipX, spendY + d(12) - chipH / 2, chipW, chipH, MenuStyle.radius(), Palette.withAlpha(MenuStyle.ACCENT, 0.14F));
-		MenuStyle.centered(c, soon, chipX + chipW / 2, spendY + d(12), MenuStyle.ACCENT, chipW);
-		float rad = MenuStyle.radius();
-		MenuStyle.block(c, left, bannerY, right - left, bannerH, rad, 0, 0);
-		int x0 = c.px(left);
-		int y0 = c.px(bannerY);
-		int pw = c.px(right) - x0;
-		int ph = c.px(bannerY + bannerH) - y0;
-		// A warm light from the banner's left, behind its Merits.
-		c.roundLinear(x0, y0, pw, ph, c.px(rad), 0, new int[] {Palette.withAlpha(MenuStyle.ACCENT, 0.16F), Palette.withAlpha(MenuStyle.ACCENT, 0)},
-			Math.max(2, pw / 48));
-		float art = Math.min(bannerH - d(36), d(128));
-		float ax = left + d(28) + art / 2;
-		float ay = bannerY + bannerH / 2;
-		long t = Clock.millis() - openedAt;
-		float drift = Kit.reduced() ? 0 : (float) Math.sin(t / 900.0) * d(3);
-		MeritIcon.draw(c, c.px(ax - art * 0.34F), c.px(ay + art * 0.12F - drift), MeritIcon.crispSize(c.px(art * 0.5F)), 0x99FFFFFF);
-		MeritIcon.draw(c, c.px(ax + art * 0.34F), c.px(ay + art * 0.16F + drift), MeritIcon.crispSize(c.px(art * 0.44F)), 0x80FFFFFF);
-		MeritIcon.draw(c, c.px(ax), c.px(ay - art * 0.08F + drift * 0.5F), MeritIcon.crispSize(c.px(art * 0.72F)), 0xFFFFFFFF);
-		float tx = left + d(28) + art + d(28);
-		float tw = right - d(28) - tx;
-		MenuStyle.fitted(c, bannerTitle, tx, ay - d(26), MenuStyle.TEXT, tw);
-		MenuStyle.fitted(c, bannerNote, tx, ay + d(2), MenuStyle.INFO, tw);
-		String refused = rewards.refusal(System.currentTimeMillis());
-		RewardsClient.Rewards shown = rewards.rewards();
-		bannerRule.set(refused != null ? refusalText(refused)
-			: shown != null && shown.maxReward() > 0 ? "Come back every day: rewards grow through the week, up to " + shown.maxReward() + " Merits."
-			: "Come back every day: rewards grow through the week.");
-		MenuStyle.fitted(c, bannerRule, tx, ay + d(30), refused != null ? MenuStyle.TEXT : Palette.lerp(MenuStyle.NEUTRAL, GOLD, 0.45F), tw);
-	}
-
-	/** A slow band of light crossing today's card every three seconds. */
-	private void sheen(Canvas c, float cx, float cy, float cw, float ch, long millis) {
-		if (Kit.reduced()) {
-			return;
+	/**
+	 * "Day N" under the Merit ("N" in a narrow column), after a tick in the accent once claimed ({@code tick}: how far it is
+	 * in); just claimed, it gives way to what the day gave for a moment.
+	 */
+	private void paintDayName(Canvas c, int i, RewardsClient.Day day, float cx, float today, boolean claimedDay, float tick) {
+		Label name = dayNames[i].width(c) <= colW - d(8) ? dayNames[i] : dayNumbers[i];
+		float swap = 0;
+		if (momentAt >= 0 && day.day() == momentDay && !Kit.reduced()) {
+			long since = Clock.millis() - momentAt;
+			float in = MenuStyle.appear(momentAt + 80, 260);
+			float out = since < 1300 ? 0 : MenuStyle.appear(momentAt + 1300, 300);
+			swap = in * (1 - out);
 		}
-		float phase = ((millis - openedAt) % 3000) / 3000.0F;
-		if (phase > 0.55F) {
-			return;
-		}
-		float t = phase / 0.55F;
-		int x0 = c.px(cx);
-		int y0 = c.px(cy);
-		int x1 = c.px(cx + cw);
-		int y1 = c.px(cy + ch);
-		int band = Math.max(4, c.px(cw * 0.35F));
-		int at = x0 - band + Math.round((x1 - x0 + 2 * band) * t);
-		c.pushClip(x0, y0, x1, y1);
-		try {
-			int step = Math.max(1, band / 16);
-			for (int i = 0; i < band; i += step) {
-				float a = (float) Math.sin(Math.PI * i / band) * 0.12F;
-				c.fill(at + i, y0, at + i + step, y1, Palette.withAlpha(0xFFFFE6C8, a));
+		int ink = claimedDay ? Palette.lerp(muted(), MenuStyle.TEXT, 0.45F) : Palette.lerp(Palette.withAlpha(muted(), 0.8F), accentText(), today);
+		float before = c.opacity();
+		if (swap < 0.99F) {
+			c.setOpacity(before * (1 - swap));
+			float s = line * 0.8F;
+			boolean mark = claimedDay && s + d(6) + name.width(c) <= colW - d(8);
+			float total = (mark ? s + d(6) : 0) + name.width(c);
+			float at = cx - total / 2;
+			if (mark) {
+				Glyph.CHECK.draw(c, at + s / 2, dayCY - swap * d(8), s, Palette.withAlpha(MenuStyle.ACCENT, tick));
+				at += s + d(6);
 			}
-		} finally {
-			c.popClip();
-		}
-	}
-
-	/** Three small Merits twinkling around today's Merit, each in its own time. */
-	private static void twinkles(Canvas c, float cx, float cy, float cw, float ch, long millis) {
-		if (Kit.reduced()) {
-			return;
-		}
-		float[][] at = {{cx + cw * 0.24F, cy + ch * 0.36F}, {cx + cw * 0.78F, cy + ch * 0.58F}, {cx + cw * 0.70F, cy + ch * 0.30F}};
-		for (int i = 0; i < at.length; i++) {
-			float phase = ((millis + i * 700L) % 2100) / 2100.0F;
-			float s = (float) Math.sin(Math.PI * phase);
-			if (s < 0.05F) {
-				continue;
-			}
-			MeritIcon.drawMoving(c, c.px(at[i][0]), c.px(at[i][1]), Math.max(3, c.px(d(13) * s)), Palette.withAlpha(0xFFFFFFFF, s));
-		}
-	}
-
-	/** A soft glow around a card: rings in the accent fading outward. */
-	private static void halo(Canvas c, float x, float y, float w, float h, float radius, float alpha) {
-		for (int k = 1; k <= 4; k++) {
-			float out = d(2.5F * k);
-			MenuStyle.ring(c, x - out, y - out, w + 2 * out, h + 2 * out, radius + out, Math.max(1, c.px(d(2.5F))),
-				Palette.withAlpha(MenuStyle.ACCENT, alpha * (1 - k / 5.0F) * 0.6F));
-		}
-	}
-
-	/** No rewards to show yet: shimmering cards while loading, or why there are none. */
-	private void paintWithout(Canvas c) {
-		DailyRewards.State state = rewards.state();
-		float t = Clock.millis() - openedAt;
-		for (int i = 0; i < DAYS; i++) {
-			float cx = left + i * (cardW + gap);
-			float before = c.opacity();
-			float wave = Kit.reduced() || state != DailyRewards.State.LOADING ? 0 : (float) Math.sin(t / 300.0 - i * 0.5);
-			c.setOpacity(before * (state == DailyRewards.State.LOADING ? 0.55F + 0.3F * wave : 0.35F));
-			MenuStyle.block(c, cx, cardsY, cardW, cardH, MenuStyle.radius(), 0, 0);
-			MenuStyle.box(c, cx, segY, cardW, d(8), d(4), MenuStyle.SOFT_ON_BLOCK);
+			MenuStyle.fitted(c, name, at, dayCY - swap * d(8), ink, colW - d(4));
 			c.setOpacity(before);
 		}
+		if (swap > 0.01F) {
+			c.setOpacity(before * swap);
+			MenuStyle.centered(c, plus, cx, dayCY + (1 - swap) * d(8), accentText(), colW - d(4));
+			c.setOpacity(before);
+		}
+	}
+
+	/** A day while there are none to show: its Merit faint and its name, shimmering while the rewards load. */
+	private void paintGhost(Canvas c, int i, boolean loading) {
+		float cx = left + colW * (i + 0.5F);
+		float wave = Kit.reduced() || !loading ? 0 : (float) Math.sin((Clock.millis() - openedAt) / 300.0 - i * 0.5);
+		float alpha = loading ? 0.28F + 0.12F * wave : 0.22F;
+		MeritIcon.draw(c, c.px(cx), c.px(starCY), MeritIcon.crispSize(c.px(star)), Palette.withAlpha(0xFFFFFFFF, alpha));
+		MenuStyle.centered(c, dayNames[i], cx, dayCY, Palette.withAlpha(muted(), 0.6F), colW - d(4));
+	}
+
+	/** The streak (its flame in the accent once there is one) and the best streak under it, left of the big button. */
+	private void paintStats(Canvas c, RewardsClient.Rewards data) {
+		float maxW = claim.x() - d(24) - left;
+		if (maxW < d(60)) {
+			return;
+		}
+		float s = line * 0.9F;
+		float cy = actionY + actionH / 2;
+		float topY = cy - line / 2 - d(7);
+		float lowY = cy + line / 2 + d(7);
+		Glyph.FIRE.draw(c, left + s / 2, topY, s, data.streak() > 0 ? MenuStyle.ACCENT : MenuStyle.NEUTRAL);
+		MenuStyle.fitted(c, streak, left + s + d(10), topY, MenuStyle.TEXT, maxW - s - d(10));
+		Glyph.TROPHY.draw(c, left + s / 2, lowY, s * 0.9F, MenuStyle.NEUTRAL);
+		MenuStyle.fitted(c, best, left + s + d(10), lowY, muted(), maxW - s - d(10));
+	}
+
+	/** Why there are no rewards to show, where the button would be: what is happening over what to do. */
+	private void paintWithout(Canvas c) {
+		DailyRewards.State state = rewards.state();
 		switch (state) {
-			case LOADING -> {
-				message.set("Getting your rewards…");
-				messageNote.set("One moment while Flint checks your account.");
-			}
-			case NO_ACCOUNT -> {
-				message.set("Rewards need a Microsoft account");
-				messageNote.set("Sign in with Microsoft in the Flint app and play with that account to collect Merits.");
-			}
-			case OFFLINE -> {
-				message.set("Can't reach Flint right now");
-				messageNote.set("Check your connection. Flint tries again by itself.");
-			}
+			case LOADING -> say("Getting your rewards…", "One moment while Flint checks your account.");
+			case NO_ACCOUNT -> say("Rewards need a Microsoft account", "Sign in with Microsoft in the Flint app, then play with it.");
+			case OFFLINE -> say("Can't reach Flint right now", "Check your connection. Flint tries again by itself.");
 			case PAUSED -> {
 				String why = rewards.closedReason();
 				if ("locked".equals(why)) {
-					message.set("Rewards are on hold for this account");
-					messageNote.set("Contact Flint support if you think this is a mistake.");
+					say("Rewards are on hold for this account", "Contact Flint support if you think this is a mistake.");
 				} else if ("account_too_new".equals(why)) {
-					message.set("Rewards open a little later for new accounts");
-					messageNote.set("Keep playing with this account and check back in a few days.");
+					say("Rewards open a little later for new accounts", "Keep playing and check back in a few days.");
 				} else {
-					message.set("Daily rewards are paused");
-					messageNote.set("Flint has them switched off for now. This page updates by itself when they're back.");
+					say("Daily rewards are paused", "This page updates by itself when they're back.");
 				}
 			}
-			case STORE_ACCOUNT -> {
-				message.set("Sign in to the Flint Store first");
-				messageNote.set("Open the Store page in the Flint app and sign in once with this account, then collect Merits here.");
-			}
-			default -> {
-				message.set("Daily rewards aren't in this build");
-				messageNote.set("Update Flint to collect Merits every day.");
-			}
+			case STORE_ACCOUNT -> say("Sign in to the Flint Store first", "Sign in once on the Store page in the Flint app.");
+			default -> say("Daily rewards aren't in this build", "Update Flint to collect Merits every day.");
 		}
-		float my = bannerY + bannerH / 2;
-		MeritIcon.draw(c, c.px((left + right) / 2), c.px(my - d(56)), c.px(d(46)), state == DailyRewards.State.LOADING ? 0xFFFFFFFF : 0x99FFFFFF);
-		MenuStyle.centered(c, message, (left + right) / 2, my, MenuStyle.EMPTY_TEXT, right - left);
-		MenuStyle.centered(c, messageNote, (left + right) / 2, my + d(30), MenuStyle.EMPTY_NOTE, right - left);
+		float rad = d(12);
+		float bw = right - left;
+		MenuStyle.box(c, left, actionY, bw, actionH, rad, Palette.withAlpha(MenuStyle.TEXT, 0.04F));
+		MenuStyle.ring(c, left, actionY, bw, actionH, rad, Math.max(1, c.px(d(1))), hairline());
+		float s = line * 1.1F;
+		float cy = actionY + actionH / 2;
+		float gx = left + d(22) + s / 2;
+		boolean loading = state == DailyRewards.State.LOADING;
+		(loading ? Glyph.HOURGLASS : Glyph.INFO).draw(c, gx, cy, s, loading ? MenuStyle.NEUTRAL : WARN);
+		float tx = gx + s / 2 + d(16);
+		float maxW = Math.max(0, right - d(22) - tx);
+		MenuStyle.fitted(c, message, tx, cy - line / 2 - d(4), MenuStyle.TEXT, maxW);
+		MenuStyle.fitted(c, note, tx, cy + line / 2 + d(4), muted(), maxW);
+	}
+
+	private void say(String what, String why) {
+		if (!message.text().equals(what)) {
+			message.set(what);
+		}
+		if (!note.text().equals(why)) {
+			note.set(why);
+		}
 	}
 
 	/** What a refused claim means for the player, by the server's code. */
@@ -482,9 +623,41 @@ final class RewardsPage extends Node {
 		};
 	}
 
+	/** {@link #refusalText} in a few words, for the button. */
+	static String refusalShort(String code) {
+		return switch (code) {
+			case "ip_daily_limit" -> "Already collected on this network today.";
+			case "daily_cap_reached" -> "Today's rewards are all handed out.";
+			case "disabled" -> "Daily rewards were just switched off.";
+			case "store_account_required" -> "Sign in to the Flint Store first.";
+			default -> "Flint couldn't give this reward right now.";
+		};
+	}
+
+	/** The streak as the page says it. */
+	static String streakText(int days) {
+		return days <= 0 ? "No streak yet" : "Streak: " + days + (days == 1 ? " day" : " days");
+	}
+
+	/** The best streak as the page says it. */
+	static String bestText(int days) {
+		return "Best: " + Math.max(0, days) + (days == 1 ? " day" : " days");
+	}
+
+	/** The wait for the next reward, as hours, minutes and seconds ("19:57:05"). */
+	static String countdown(long millis) {
+		long seconds = Math.max(0, millis) / 1000;
+		return String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60);
+	}
+
+	/** How far the 24 hours between claims have come (0 just after a claim, 1 at the unlock), from the time still to wait. */
+	static float waitProgress(long untilMillis) {
+		return Math.clamp(1 - untilMillis / (float) WAIT_MILLIS, 0, 1);
+	}
+
 	/** Remakes the texts whose numbers changed. */
-	private void refreshLabels(RewardsClient.@Nullable Rewards data) {
-		long value = shownValue(data);
+	private void refreshLabels(RewardsClient.@Nullable Rewards data, long now) {
+		long value = shownValue(data, now);
 		if (value != shownBalance) {
 			shownBalance = value;
 			balance.set(data == null ? "—" : String.format(Locale.ROOT, "%,d", value));
@@ -499,16 +672,22 @@ final class RewardsPage extends Node {
 			for (int i = 0; i < DAYS; i++) {
 				RewardsClient.Day day = i < track.size() ? track.get(i) : null;
 				dayNames[i].set(day == null ? "" : "Day " + day.day());
+				dayNumbers[i].set(day == null ? "" : Integer.toString(day.day()));
 				dayRewards[i].set(day == null ? "" : "+" + day.reward());
 			}
 		}
 		if (data.streak() != shownStreak) {
 			shownStreak = data.streak();
-			streakValue.set(Integer.toString(data.streak()));
+			streak.set(streakText(data.streak()));
 		}
 		if (data.best() != shownBest) {
 			shownBest = data.best();
-			bestValue.set(Integer.toString(data.best()));
+			best.set(bestText(data.best()));
+		}
+		long seconds = rewards.untilNext(now) / 1000;
+		if (seconds != shownSeconds) {
+			shownSeconds = seconds;
+			claim.time.set(countdown(seconds * 1000));
 		}
 	}
 
@@ -522,19 +701,25 @@ final class RewardsPage extends Node {
 		}
 	}
 
-	/** How far entrance {@code step} has come (0 to 1): the cards one after another, then the section under them. */
+	/**
+	 * How far entrance {@code step} has come (0 to 1): the header with the window, then the days one after another, then the
+	 * row under them. The days come in with the rewards (at once when they are already there, as they usually are: the main
+	 * menu's card reads them first).
+	 */
 	private float enter(int step) {
 		if (Kit.reduced()) {
 			return 1;
 		}
-		return dataAt < 0 ? 0 : MenuStyle.appear(dataAt + 40 + step * 55L, 460);
+		boolean days = step > 0 && step <= DAYS;
+		long base = days && dataAt >= 0 ? Math.max(dataAt, openedAt) : openedAt;
+		return MenuStyle.appear(base + step * ENTER_STAGGER, ENTER_MILLIS);
 	}
 
 	/** Begins drawing something entering: faded and lowered by how far it has to come. Returns the opacity to restore. */
 	private static float entering(Canvas c, float in) {
 		float before = c.opacity();
 		if (in < 1) {
-			c.pushOffset(0, Math.round((1 - in) * d(18) * c.scale()));
+			c.pushOffset(0, Math.round((1 - in) * d(10) * c.scale()));
 			c.setOpacity(before * in);
 		}
 		return before;
@@ -549,7 +734,7 @@ final class RewardsPage extends Node {
 
 	// ---------- the claim moment ----------
 
-	/** A claim that just succeeded starts the moment once: the chime, the card, the Merits flying, the count. */
+	/** A claim that just succeeded starts the moment once: the chime, the day, the Merits flying, the count. */
 	private void noticeClaim(RewardsClient.@Nullable Rewards data) {
 		int claims = rewards.claims();
 		if (claims == seenClaims) {
@@ -574,82 +759,75 @@ final class RewardsPage extends Node {
 		if (momentAt < 0) {
 			return 0;
 		}
-		float t = (Clock.millis() - momentAt - FLIGHT_MILLIS * 0.6F) / (float) (COUNT_MILLIS + 300);
+		float t = (Clock.millis() - momentAt - FLIGHT_MILLIS * 0.6F) / (float) (DailyRewards.COUNT_MILLIS + 300);
 		return t <= 0 || t >= 1 ? 0 : (float) Math.sin(Math.PI * t);
 	}
 
-	/** The Merits flying into the balance and the "+15" rising from the day's card, over everything. */
+	/** A few Merits flying from the button into the balance, over everything (the moment ends with the count). */
 	@Override
 	protected void paintOver(Canvas c) {
 		if (momentAt < 0) {
 			return;
 		}
 		long since = Clock.millis() - momentAt;
-		if (since > FLIGHT_MILLIS + SPARKS * FLIGHT_STAGGER + COUNT_MILLIS + 400) {
+		if (since > FLIGHT_MILLIS + SPARKS * FLIGHT_STAGGER + DailyRewards.COUNT_MILLIS + 400) {
 			momentAt = -1;
+			return;
+		}
+		if (Kit.reduced()) {
 			return;
 		}
 		float sx = claim.x() + claim.width() / 2;
 		float sy = claim.y() + claim.height() / 2;
-		float ex = balanceX + d(18) + d(14);
-		float ey = headY + d(HEAD) / 2;
-		if (!Kit.reduced()) {
-			for (int i = 0; i < SPARKS; i++) {
-				float t = (since - i * FLIGHT_STAGGER) / (float) FLIGHT_MILLIS;
-				if (t <= 0 || t >= 1) {
-					continue;
-				}
-				float e = t < 0.5F ? 4 * t * t * t : 1 - (float) Math.pow(-2 * t + 2, 3) / 2;
-				// Each Merit leaves the button in its own direction (downward first), then curves round into the balance.
-				double angle = Math.PI * (0.15 + 0.7 * ((i * 7) % SPARKS) / (double) SPARKS);
-				float spread = d(110 + 40 * (i % 3));
-				float cx1 = sx - (float) Math.cos(angle) * spread;
-				float cy1 = sy + (float) Math.sin(angle) * spread;
-				float u = 1 - e;
-				float px = u * u * sx + 2 * u * e * cx1 + e * e * ex;
-				float py = u * u * sy + 2 * u * e * cy1 + e * e * ey;
-				float size = d(26) * (1 - 0.45F * e);
-				float alpha = Math.min(1, t * 6) * (t > 0.85F ? (1 - t) / 0.15F : 1);
-				MeritIcon.drawMoving(c, c.px(px), c.px(py), c.px(size), Palette.withAlpha(0xFFFFFFFF, alpha));
+		float ex = chipIconX;
+		float ey = headerCY;
+		for (int i = 0; i < SPARKS; i++) {
+			float t = (since - i * FLIGHT_STAGGER) / (float) FLIGHT_MILLIS;
+			if (t <= 0 || t >= 1) {
+				continue;
 			}
-		}
-		int index = momentDay - shownFirstDay;
-		if (index < 0 || index >= DAYS) {
-			return;
-		}
-		float rise = Math.clamp(since / 1100.0F, 0, 1);
-		float fade = since < 900 ? Math.min(1, since / 140.0F) : Math.max(0, 1 - (since - 900) / 450.0F);
-		if (fade > 0) {
-			float px = left + index * (cardW + gap) + cardW / 2;
-			float py = cardsY + cardH * 0.3F - d(46) * (1 - (1 - rise) * (1 - rise));
-			float pw = plus.width(c);
-			c.pushZoom(2, c.px(px), c.px(py));
-			try {
-				MenuStyle.centered(c, plus, px, py, Palette.withAlpha(GOLD_LIGHT, fade), pw + d(10));
-			} finally {
-				c.popOffset();
-			}
+			float e = t < 0.5F ? 4 * t * t * t : 1 - (float) Math.pow(-2 * t + 2, 3) / 2;
+			// Each Merit leaves the button on its own gentle curve, then settles into the balance.
+			float spread = d(40 + 22 * (i % 3)) * (i % 2 == 0 ? 1 : -1);
+			float cx1 = (sx + ex) / 2 + spread;
+			float cy1 = Math.min(sy, ey) - d(30 + 10 * (i % 2));
+			float u = 1 - e;
+			float px = u * u * sx + 2 * u * e * cx1 + e * e * ex;
+			float py = u * u * sy + 2 * u * e * cy1 + e * e * ey;
+			float size = d(18) * (1 - 0.35F * e);
+			float alpha = Math.min(1, t * 6) * (t > 0.85F ? (1 - t) / 0.15F : 1);
+			MeritIcon.drawMoving(c, c.px(px), c.px(py), Math.max(2, c.px(size)), Palette.withAlpha(0xFFFFFFFF, alpha));
 		}
 	}
 
-	// ---------- the button ----------
+	// ---------- the buttons ----------
 
 	/**
-	 * Claim: an orange button with the Merit, "Claim Daily Reward", lifting a touch under the pointer, a slow sheen crossing
-	 * it; while the claim travels it says so; once claimed it is a quiet panel counting down to the next reward.
+	 * Claim, the page's one accent button, a pill sized to what it says (as the Store's primary buttons: the accent, dark ink):
+	 * smoothly lighter under the pointer with a soft glow of the accent around it, darker and a pixel lower while held. While
+	 * the claim travels it says so; once claimed it is a quiet pill of the same size with the wait for the next reward counting
+	 * down in it (filling faintly as the day passes), or, wider, why the claim was refused. The two cross-fade.
 	 */
 	private final class ClaimButton extends Pressable {
-		private final Label ready = new Label(Type.HUB_BUTTON, "Claim Daily Reward");
-		private final Label working = new Label(Type.HUB_BUTTON, "Claiming…");
-		private final Label countdown = new Label(Type.PILL, "");
-		private final Label nextCaption = new Label(Type.PILL_NOTE, "Next reward in");
-		private long countdownFor = -1;
-		private float lit = -1;
+		private final Label ready = new Label(Type.BUTTON, "Claim Daily Reward");
+		private final Label working = new Label(Type.BUTTON, "Claiming…");
+		private final Label nextIn = new Label(Type.BUTTON, "Next reward in");
+		final Label time = new Label(Type.BUTTON, "00:00:00");
+		private final Label refusedLong = new Label(Type.BUTTON, "");
+		private final Label refusedShort = new Label(Type.BUTTON, "");
+		private @Nullable String shownRefusal;
 
 		ClaimButton() {
 			super(null);
 			setAction(() -> rewards.claim(System.currentTimeMillis()));
 			name("Claim daily reward");
+		}
+
+		/** Wide enough for its labels with room around them, so it never changes size. */
+		float preferredWidth(Canvas m) {
+			float s = lineHeight(m) * 0.8F + d(10);
+			float widest = Math.max(Math.max(ready.width(m), working.width(m)), s + nextIn.width(m) + d(8) + time.width(m));
+			return Math.max(d(220), widest + 2 * d(32));
 		}
 
 		private boolean open() {
@@ -674,90 +852,158 @@ final class RewardsPage extends Node {
 
 		@Override
 		protected void paint(Canvas c) {
-			RewardsClient.Rewards data = rewards.rewards();
-			if (data == null) {
+			if (rewards.rewards() == null) {
 				return;
 			}
 			long now = System.currentTimeMillis();
-			boolean can = rewards.claimable(now);
 			boolean busy = rewards.claiming();
-			lit = MenuStyle.ease(lit, can || busy);
-			float rad = MenuStyle.radius();
-			float lift = can && !busy && !Kit.reduced() ? hover * 0.015F - press * 0.012F : 0;
-			if (lift != 0) {
-				c.pushZoom(1 + lift, c.px(x + w / 2), c.px(y + h / 2));
-			}
+			float lit = Math.clamp(claimLit, 0, 1);
+			float rad = h / 2;
+			int drop = Math.round(press * Math.max(1, c.px(d(1))));
+			c.pushOffset(0, drop);
 			try {
+				float before = c.opacity();
 				if (lit > 0.01F) {
-					float before = c.opacity();
 					c.setOpacity(before * lit);
-					paintReady(c, rad, busy);
+					float halo = busy ? 0 : hover * (1 - 0.5F * press);
+					if (halo > 0.01F) {
+						// A soft glow of the accent around the pill, fading into the panel.
+						glow(c, x, y, w, h, rad, d(12), PILL_GLOW_LAYERS, 0.12F * halo);
+					}
+					int fill = Palette.lerp(MenuStyle.ACCENT, MenuStyle.ACCENT_HOVER, busy ? 0 : hover);
+					fill = Palette.lerp(fill, MenuStyle.ACCENT_PRESS, press);
+					MenuStyle.box(c, x, y, w, h, rad, busy ? Palette.withAlpha(fill, 0.75F) : fill);
+					MenuStyle.centered(c, busy ? working : ready, x + w / 2, y + h / 2, onAccent(), w - d(16));
 					c.setOpacity(before);
 				}
 				if (lit < 0.99F) {
-					float before = c.opacity();
 					c.setOpacity(before * (1 - lit));
-					paintWaiting(c, rad, now);
+					String code = rewards.refusal(now);
+					if (code != null) {
+						paintRefused(c, code, rad);
+					} else {
+						MenuStyle.box(c, x, y, w, h, rad, Palette.withAlpha(MenuStyle.TEXT, 0.04F));
+						// The day passing, as a faint fill from the left.
+						float k = waitProgress(rewards.untilNext(now));
+						if (k * w > h) {
+							MenuStyle.box(c, x, y, w * k, h, rad, Palette.withAlpha(MenuStyle.ACCENT, 0.07F));
+						}
+						MenuStyle.ring(c, x, y, w, h, rad, Math.max(1, c.px(d(1))), hairline());
+						paintWait(c);
+					}
 					c.setOpacity(before);
 				}
 				MenuStyle.focusRing(c, x, y, w, h, rad, focus);
 			} finally {
-				if (lift != 0) {
-					c.popOffset();
-				}
+				c.popOffset();
 			}
 		}
 
-		private void paintReady(Canvas c, float rad, boolean busy) {
-			float glow = busy ? 0 : hover;
-			for (int k = 1; k <= 3; k++) {
-				float out = d(2.5F * k);
-				MenuStyle.ring(c, x - out, y - out, w + 2 * out, h + 2 * out, rad + out, Math.max(1, c.px(d(2.5F))),
-					Palette.withAlpha(MenuStyle.ACCENT, (0.10F + 0.22F * glow) * (1 - k / 4.0F)));
-			}
-			int top = Palette.lerp(Palette.lerp(MenuStyle.ACCENT, 0xFFFFFFFF, 0.14F + 0.08F * glow), 0xFF000000, press * 0.18F);
-			int bottom = Palette.lerp(Palette.lerp(MenuStyle.ACCENT, 0xFF000000, 0.06F), 0xFF000000, press * 0.25F);
-			int x0 = c.px(x);
-			int y0 = c.px(y);
-			int x1 = c.px(x + w);
-			int y1 = c.px(y + h);
-			c.roundGradient(x0, y0, x1 - x0, y1 - y0, c.px(rad), top, bottom);
-			if (!busy && !Kit.reduced()) {
-				float phase = ((Clock.millis() - openedAt) % 3200) / 3200.0F;
-				int sw = c.px(d(60));
-				int sx = c.px(x - w * 0.3F + w * 1.6F * phase);
-				c.pushClip(x0, y0, x1, y1);
-				try {
-					int step = Math.max(1, sw / 24);
-					for (int i = 0; i < sw; i += step) {
-						float a = (float) Math.sin(Math.PI * i / sw) * 0.2F;
-						c.fill(sx + i, y0, sx + i + step, y1, Palette.withAlpha(0xFFFFFFFF, a));
-					}
-				} finally {
-					c.popClip();
-				}
-			}
-			Label label = busy ? working : ready;
-			float icon = Math.min(d(30), h * 0.5F);
-			float total = icon + d(12) + label.width(c);
-			float lx = x + (w - total) / 2;
-			float cy = y + h / 2 + press * d(1);
-			MeritIcon.draw(c, c.px(lx + icon / 2), c.px(cy), c.px(icon), busy ? 0xB3FFFFFF : 0xFFFFFFFF);
-			MenuStyle.text(c, label, lx + icon + d(12), cy + d(1), 0xFFFFFFFF);
-		}
-
-		private void paintWaiting(Canvas c, float rad, long now) {
-			MenuStyle.block(c, x, y, w, h, rad, 0, 0);
-			long left = rewards.untilNext(now) / 1000;
-			if (left != countdownFor) {
-				countdownFor = left;
-				countdown.set(String.format(Locale.ROOT, "%d:%02d:%02d", left / 3600, left / 60 % 60, left % 60));
-			}
+		/** "Next reward in 19:57:05" with a clock, or just the clock and the time when that doesn't fit. */
+		private void paintWait(Canvas c) {
+			float s = line * 0.8F;
 			float cy = y + h / 2;
-			Glyph.CLOCK.draw(c, x + d(28), cy, d(20), MenuStyle.ACCENT);
-			float tx = x + d(28) + d(10) + d(14);
-			MenuStyle.text(c, nextCaption, tx, cy - d(10), MenuStyle.NEUTRAL);
-			MenuStyle.text(c, countdown, tx, cy + d(12), MenuStyle.TEXT);
+			boolean words = s + d(10) + nextIn.width(c) + d(8) + time.width(c) <= w - d(24);
+			float total = s + d(10) + (words ? nextIn.width(c) + d(8) : 0) + time.width(c);
+			float at = x + (w - total) / 2;
+			Glyph.CLOCK.draw(c, at + s / 2, cy, s, muted());
+			at += s + d(10);
+			if (words) {
+				MenuStyle.text(c, nextIn, at, cy, muted());
+				at += nextIn.width(c) + d(8);
+			}
+			MenuStyle.text(c, time, at, cy, MenuStyle.TEXT);
 		}
+
+		/**
+		 * Why the claim was refused, with the warning mark, in a quiet pill that grows to the left to fit it (up to most of the
+		 * row; the short words when the long ones don't fit).
+		 */
+		private void paintRefused(Canvas c, String code, float rad) {
+			if (!code.equals(shownRefusal)) {
+				shownRefusal = code;
+				refusedLong.set(refusalText(code));
+				refusedShort.set(refusalShort(code));
+			}
+			float s = line * 0.85F;
+			float pad = d(24);
+			float most = Math.max(w, (right - left) * 0.62F);
+			float roomMost = most - 2 * pad - s - d(10);
+			Label why = refusedLong.width(c) <= roomMost ? refusedLong : refusedShort;
+			float pw = Math.min(most, Math.max(w, 2 * pad + s + d(10) + why.width(c)));
+			float px = x + w - pw;
+			MenuStyle.box(c, px, y, pw, h, rad, Palette.withAlpha(MenuStyle.TEXT, 0.04F));
+			MenuStyle.ring(c, px, y, pw, h, rad, Math.max(1, c.px(d(1))), hairline());
+			float room = pw - 2 * pad - s - d(10);
+			float total = s + d(10) + Math.min(room, why.width(c));
+			float at = px + (pw - total) / 2;
+			float cy = y + h / 2;
+			Glyph.INFO.draw(c, at + s / 2, cy, s, WARN);
+			MenuStyle.fitted(c, why, at + s + d(10), cy, muted(), room);
+		}
+	}
+
+	/**
+	 * Flint Store: a quiet button as the Store's own (the text at 6% with a hairline, lighter under the pointer, its arrow nudging
+	 * right); it opens the Store's cosmetics in the browser after Minecraft's link confirmation, which comes back here.
+	 */
+	private final class StoreButton extends Pressable {
+		private final Label label = new Label(Type.BUTTON, "Flint Store");
+
+		StoreButton() {
+			super(null);
+			setAction(this::open);
+			name("Flint Store");
+			tooltip("Opens the Flint Store in your browser");
+		}
+
+		float preferredWidth(Canvas m) {
+			return label.width(m) + d(10) + lineHeight(m) * 0.7F + 2 * d(16);
+		}
+
+		private void open() {
+			KitScreen screen = screen();
+			if (screen == null) {
+				return;
+			}
+			String url = storeUrl();
+			try {
+				MenuHost.openLink(screen, url);
+			} catch (RuntimeException | LinkageError e) {
+				com.flintclient.client.FlintLog.LOGGER.warn("Flint: couldn't open {}", url, e);
+			}
+		}
+
+		@Override
+		protected void paint(Canvas c) {
+			float rad = d(10);
+			int drop = Math.round(press * Math.max(1, c.px(d(1.5F))));
+			c.pushOffset(0, drop);
+			try {
+				MenuStyle.box(c, x, y, w, h, rad, Palette.withAlpha(MenuStyle.TEXT, 0.04F + 0.05F * hover - 0.02F * press));
+				MenuStyle.ring(c, x, y, w, h, rad, Math.max(1, c.px(d(1))), Palette.withAlpha(MenuStyle.TEXT, 0.10F + 0.08F * hover));
+				float s = line * 0.7F;
+				float total = label.width(c) + d(10) + s;
+				float lx = x + (w - total) / 2;
+				MenuStyle.text(c, label, lx, y + h / 2, Palette.lerp(muted(), MenuStyle.TEXT, 0.6F + 0.4F * hover));
+				Glyph.CHEVRON_RIGHT.draw(c, lx + total - s / 2 + d(3) * hover, y + h / 2, s, Palette.lerp(muted(), MenuStyle.TEXT, hover));
+				MenuStyle.focusRing(c, x, y, w, h, rad, focus);
+			} finally {
+				c.popOffset();
+			}
+		}
+	}
+
+	/** The Flint Store's cosmetics, at the address the Flint app handed over (else Flint's own Store). */
+	private static String storeUrl() {
+		String base = StoreEndpoint.DEFAULT_BASE;
+		try {
+			StoreHandoff handoff = new StoreHandoff(FabricLoader.getInstance().getGameDir());
+			handoff.poll();
+			base = handoff.endpoint().origin();
+		} catch (RuntimeException | LinkageError e) {
+			// The built-in Store, as the game's capes use without a handoff.
+		}
+		return base + "/cosmetics/";
 	}
 }

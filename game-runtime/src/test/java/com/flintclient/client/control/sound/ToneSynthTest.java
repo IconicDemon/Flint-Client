@@ -3,6 +3,7 @@ package com.flintclient.client.control.sound;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,14 @@ class ToneSynthTest {
 	void lengthsMatchTheDesign() {
 		assertEquals(7497, ToneSynth.open().length, "170 ms at 44.1 kHz");
 		assertEquals(4410, ToneSynth.close().length, "100 ms at 44.1 kHz");
+	}
+
+	@Test
+	void theKeptSoundsAreTheSynthesisedOnesMadeOnce() {
+		assertArrayEquals(ToneSynth.open(), ToneSynth.openShared());
+		assertArrayEquals(ToneSynth.close(), ToneSynth.closeShared());
+		assertSame(ToneSynth.openShared(), ToneSynth.openShared(), "made once, then kept");
+		assertSame(ToneSynth.closeShared(), ToneSynth.closeShared(), "made once, then kept");
 	}
 
 	@Test

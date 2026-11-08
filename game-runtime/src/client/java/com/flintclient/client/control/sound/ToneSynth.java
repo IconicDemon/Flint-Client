@@ -1,5 +1,7 @@
 package com.flintclient.client.control.sound;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Flint's two interface sounds, synthesised rather than shipped, so they're original, cost no asset and work without
  * any resource pack. Both are short and quiet on purpose: they confirm an action and get out of the way.
@@ -43,6 +45,34 @@ public final class ToneSynth {
 	/** The close sound as signed 16-bit samples. A new array each call. */
 	public static short[] close() {
 		return toPcm(closeWave(), CLOSE_PEAK_DBFS);
+	}
+
+	/** {@link #open()} made once and kept (shared: never written to), so the first menu opening needn't synthesise it. */
+	private static volatile short @Nullable [] openKept;
+	private static volatile short @Nullable [] closeKept;
+
+	/**
+	 * The open sound, made once and kept: callers only read it. Any thread; the warm-up makes it on a worker before the first
+	 * opening (synthesising it on the render thread took about 6 ms of the first opening's frame). Two threads asking at once
+	 * both make the same samples (the maths is bit-identical), and either copy is kept.
+	 */
+	public static short[] openShared() {
+		short[] pcm = openKept;
+		if (pcm == null) {
+			pcm = open();
+			openKept = pcm;
+		}
+		return pcm;
+	}
+
+	/** The close sound, made once and kept, as {@link #openShared}. */
+	public static short[] closeShared() {
+		short[] pcm = closeKept;
+		if (pcm == null) {
+			pcm = close();
+			closeKept = pcm;
+		}
+		return pcm;
 	}
 
 	/** The samples as signed 16-bit little-endian bytes (the layout of a WAV file's data). */

@@ -14,21 +14,41 @@ import org.lwjgl.system.MemoryUtil;
  * Font Awesome 6 Free Solid glyphs (SIL OFL 1.1, {@code assets/flintclient/font/fa-solid-900.ttf}) rasterised with
  * stb_truetype into square white masks for the mask atlas ({@code render.MaskAtlas}): one em, the glyph centred across and on Font Awesome's
  * baseline, its edges antialiased. One font is read once for every size, where a Minecraft font set would be made per
- * size. Platform class (see {@link Clock}): engines without stb rasterise the same glyphs their own way. Render thread.
+ * size. Platform class (see {@link Clock}): engines without stb rasterise the same glyphs their own way. Render thread, except
+ * {@link #preload}.
  */
 public final class GlyphRaster {
 	private static final String FILE = "/assets/flintclient/font/fa-solid-900.ttf";
 	/** Font Awesome's em is 512 units, 448 of them above the baseline. */
 	private static final float ASCENT = 448 / 512.0F;
-	private static @Nullable STBTTFontinfo font;
+	private static volatile @Nullable STBTTFontinfo font;
 	/** The file's bytes, kept for as long as stb reads from them. */
 	private static @Nullable ByteBuffer data;
-	private static boolean failed;
+	private static volatile boolean failed;
 
 	private GlyphRaster() {
 	}
 
+	/**
+	 * Reads the font now, on any thread (the Right Shift menu's warm-up does it on a worker, so the first opening doesn't
+	 * read and parse the file between the key and its first frame). Once read it is kept; a failure is kept too.
+	 */
+	public static void preload() {
+		font();
+	}
+
+	/** The font, read the first time it is needed (synchronized: the warm-up may read it while the menu asks for it). */
 	private static @Nullable STBTTFontinfo font() {
+		STBTTFontinfo ready = font;
+		if (ready != null || failed) {
+			return ready;
+		}
+		synchronized (GlyphRaster.class) {
+			return read();
+		}
+	}
+
+	private static @Nullable STBTTFontinfo read() {
 		if (font != null || failed) {
 			return font;
 		}

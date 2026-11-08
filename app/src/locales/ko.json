@@ -645,6 +645,7 @@
   "library.card.installed": "설치됨",
   "library.card.needsProfile": "먼저 프로필을 선택하세요",
   "library.card.open": "{title} 열기",
+  "library.card.uninstall": "제거",
   "library.card.updated": "마지막 업데이트",
   "library.categories.label": "카테고리",
   "library.categories.selected.other": "{count}개 선택됨",
