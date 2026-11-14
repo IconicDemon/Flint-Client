@@ -20,9 +20,32 @@ public final class Texture {
 	final int glId;
 	private boolean released;
 
-	/** Bundled pictures (the shared {@code Texture.bundled}) aren't drawn on 1.8.9: its screens show their text without them. */
+	/**
+	 * A picture bundled in Flint's jar at {@code assets/flintclient/<path>} (the "What's new" page's cover), decoded and uploaded
+	 * the first time it is asked for and kept (sampled smoothly, clamped at its edges); null when this jar doesn't carry it or it
+	 * can't be read. Render thread.
+	 */
 	public static @org.jspecify.annotations.Nullable Texture bundled(String path) {
-		return null;
+		String key = "bundled/" + path;
+		Texture known = BY_PATH.get(key);
+		if (known != null && !known.released) {
+			return known;
+		}
+		try (java.io.InputStream in = Texture.class.getResourceAsStream("/assets/flintclient/" + path)) {
+			if (in == null) {
+				return null;
+			}
+			java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(in);
+			if (image == null) {
+				return null;
+			}
+			int w = image.getWidth();
+			int h = image.getHeight();
+			int[] argb = image.getRGB(0, 0, w, h, null, 0, w);
+			return upload(key, w, h, argb, true);
+		} catch (java.io.IOException | RuntimeException e) {
+			return null;
+		}
 	}
 
 	Texture(int glId) {
@@ -46,6 +69,25 @@ public final class Texture {
 		// Smooth pictures clamp at their edges; the rest repeat past them (the HUD editor's dot grid and dashes are tiles), as on 26.x.
 		Texture texture = new Texture(create(width, height, smooth, !smooth));
 		write(texture.glId, 0, 0, width, height, argb, 0, width);
+		BY_PATH.put(path, texture);
+		return texture;
+	}
+
+	/**
+	 * A {@code width × height} texture of {@code pixels} already in {@link #WRITE_LAYOUT} (row by row), sampled as they are and
+	 * clamped at its edges, for a picture that is never written again (a Cosmetics tile's picture, an animated cape's frames
+	 * side by side): written in blocks of rows, so the staging buffer stays small.
+	 */
+	public static Texture uploadFixed(String path, int width, int height, int[] pixels) {
+		Texture old = BY_PATH.remove(path);
+		if (old != null) {
+			old.release();
+		}
+		Texture texture = new Texture(create(width, height, false, false));
+		int rows = Math.max(1, 256 * 256 / Math.max(1, width));
+		for (int y = 0; y < height; y += rows) {
+			write(texture.glId, 0, y, width, Math.min(rows, height - y), pixels, y * width, width);
+		}
 		BY_PATH.put(path, texture);
 		return texture;
 	}

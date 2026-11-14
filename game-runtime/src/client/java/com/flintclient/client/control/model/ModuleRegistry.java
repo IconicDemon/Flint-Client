@@ -8,7 +8,9 @@ import com.flintclient.client.control.model.mods.PlayerMods;
 import com.flintclient.client.control.model.mods.UtilityMods;
 import com.flintclient.client.control.model.mods.VisualMods;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -126,8 +128,19 @@ public final class ModuleRegistry {
 			HudPlacement.of(Anchor.TOP_RIGHT, 1, 1), ModuleDescriptor.Requirement.WORLD, null));
 
 	private static final List<ModuleDescriptor> ALL = all(CORE);
+	/** Each module's position in {@link #ALL} by id: hooks look modules up by id every tick, so not by walking the list. */
+	private static final Map<String, Integer> INDEX = index(ALL);
 
 	private ModuleRegistry() {
+	}
+
+	private static Map<String, Integer> index(List<ModuleDescriptor> all) {
+		Map<String, Integer> index = new HashMap<>();
+		for (int i = 0; i < all.size(); i++) {
+			// The first of a repeated id wins, as the scan this replaces found it.
+			index.putIfAbsent(all.get(i).id(), i);
+		}
+		return Map.copyOf(index);
 	}
 
 	private static List<ModuleDescriptor> all(List<ModuleDescriptor> core) {
@@ -207,11 +220,7 @@ public final class ModuleRegistry {
 
 	/** The module's position in {@link #all()}, or -1. */
 	public static int indexOf(String id) {
-		for (int i = 0; i < ALL.size(); i++) {
-			if (ALL.get(i).id().equals(id)) {
-				return i;
-			}
-		}
-		return -1;
+		Integer index = INDEX.get(id);
+		return index == null ? -1 : index;
 	}
 }

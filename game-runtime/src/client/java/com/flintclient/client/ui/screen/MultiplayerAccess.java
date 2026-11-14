@@ -6,11 +6,11 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /** Why multiplayer is unavailable for this account, worded exactly as Minecraft's title screen does. */
-final class MultiplayerAccess {
+public final class MultiplayerAccess {
 	private MultiplayerAccess() {
 	}
 
-	static @Nullable Component disabledReason(Minecraft minecraft) {
+	public static @Nullable Component disabledReason(Minecraft minecraft) {
 		if (minecraft.allowsMultiplayer()) {
 			return null;
 		}

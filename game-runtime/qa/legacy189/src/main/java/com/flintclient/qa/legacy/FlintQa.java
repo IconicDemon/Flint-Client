@@ -87,6 +87,8 @@ public final class FlintQa implements ClientModInitializer {
 	private static int heldButton = -1;
 	private static long fpsFrames;
 	private static int releaseKey = -1;
+	/** Bounds kept by remember-node (window pixels: x, y, w, h). */
+	private static int[] remembered;
 	private static MultiplayerServerListPinger pinger;
 	private static ServerListEntry pinged;
 
@@ -110,8 +112,86 @@ public final class FlintQa implements ClientModInitializer {
 		}
 	}
 
-	private static void log(String text) {
+	static void log(String text) {
 		LOG.info("QA " + text);
+	}
+
+	/** A failure the crash sweep logged itself (QaSweep189), counted in "QA DONE failures=N". */
+	static void countFailure() {
+		failures++;
+	}
+
+	/** The crash sweep's click on the shown element named {@code name} (Flint's screens) or button (vanilla's); false if none. */
+	static boolean clickNamed(Minecraft mc, String name) throws Exception {
+		Screen screen = mc.screen;
+		if (screen == null) {
+			return false;
+		}
+		int[] b = (int[]) hook("bounds", new Class<?>[] {String.class}, name);
+		if (b != null) {
+			moveTo(b[0] + b[2] / 2, b[1] + b[3] / 2);
+			((ScreenAccessor) screen).flintqa$mouseClicked(guiX(mc), guiY(mc), 0);
+			Screen after = mc.screen;
+			if (after != null) {
+				((ScreenAccessor) after).flintqa$mouseReleased(guiX(mc), guiY(mc), 0);
+			}
+			return true;
+		}
+		for (ButtonWidget w : ((ScreenAccessor) screen).flintqa$buttons()) {
+			if (w.visible && w.message.equals(name)) {
+				int gx = w.x + w.getWidth() / 2;
+				int gy = w.y + 10;
+				Window window = new Window(mc);
+				moveTo(gx * mc.width / window.getWidth(), gy * mc.height / window.getHeight());
+				((ScreenAccessor) screen).flintqa$mouseClicked(gx, gy, 0);
+				Screen after = mc.screen;
+				if (after != null) {
+					((ScreenAccessor) after).flintqa$mouseReleased(gx, gy, 0);
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The names the sweep can click on the shown screen: Flint's elements, else vanilla's shown, active buttons. */
+	static List<String> clickable(Minecraft mc) throws Exception {
+		List<String> out = new ArrayList<String>();
+		Screen screen = mc.screen;
+		if (screen == null) {
+			return out;
+		}
+		String names = (String) hook("names", new Class<?>[0]);
+		if (names != null && !names.isEmpty()) {
+			// " | 'First' | 'Second'": each name between " | '" and the next one (or the end, less its closing quote).
+			String mark = " | '";
+			int at = names.indexOf(mark);
+			while (at >= 0) {
+				int next = names.indexOf(mark, at + mark.length());
+				String n = names.substring(at + mark.length(), next < 0 ? names.length() : next);
+				if (n.endsWith("'")) {
+					n = n.substring(0, n.length() - 1);
+				}
+				if (!n.isEmpty() && !out.contains(n)) {
+					out.add(n);
+				}
+				at = next;
+			}
+			return out;
+		}
+		for (ButtonWidget w : ((ScreenAccessor) screen).flintqa$buttons()) {
+			if (w.visible && w.active && !out.contains(w.message)) {
+				out.add(w.message);
+			}
+		}
+		return out;
+	}
+
+	/** Escape on the shown screen, as the player would press it. */
+	static void escape(Minecraft mc) {
+		if (mc.screen != null) {
+			((ScreenAccessor) mc.screen).flintqa$keyPressed((char) 0, Keyboard.KEY_ESCAPE);
+		}
 	}
 
 	private static void pass(String text) {
@@ -226,7 +306,8 @@ public final class FlintQa implements ClientModInitializer {
 		Screen screen = mc.screen;
 		String op = c[0];
 		if (op.equals("wait-title")) {
-			if (screen instanceof TitleScreen) {
+			// Minecraft's title screen, or Flint's main menu in its place.
+			if (screen instanceof TitleScreen || screen != null && screen.getClass().getSimpleName().equals("FlintTitleScreen")) {
 				pass("title screen " + name(screen) + " uptimeMs=" + java.lang.management.ManagementFactory.getRuntimeMXBean().getUptime() + " cpuMs=" + ((com.sun.management.OperatingSystemMXBean) java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getProcessCpuTime() / 1000000 + " threadCpuMs=" + java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime() / 1000000);
 				return true;
 			}
@@ -366,6 +447,30 @@ public final class FlintQa implements ClientModInitializer {
 			} else {
 				moveTo(b[0] + b[2] / 2, b[1] + b[3] / 2);
 			}
+		} else if (op.equals("move-node-at") || op.equals("drag-node-at")) {
+			// move-node-at FX FY NAME: the pointer at a fraction of a node's box (0 0 its top-left corner; below 0 or above 1: beside
+			// it), for a row's tooltip. drag-node-at FX FY NAME: the same while a button is held (after mouse-down), moved there in
+			// steps as a real drag (the crosshair pad's strokes).
+			String node = rest(c, 3);
+			int[] b = (int[]) hook("bounds", new Class<?>[] {String.class}, node);
+			if (b == null) {
+				fail("no node " + node + " on " + name(screen));
+			} else {
+				int tx = (int) Math.round(b[0] + Double.parseDouble(c[1]) * b[2]);
+				int ty = (int) Math.round(b[1] + Double.parseDouble(c[2]) * b[3]);
+				if (op.equals("move-node-at")) {
+					moveTo(tx, ty);
+					log("moved to node " + node);
+				} else {
+					int fromX = mouseX;
+					int fromY = mouseY;
+					for (int k = 1; k <= 12; k++) {
+						moveTo(fromX + (tx - fromX) * k / 12, fromY + (ty - fromY) * k / 12);
+						((ScreenAccessor) screen).flintqa$mouseDragged(guiX(mc), guiY(mc), Math.max(0, heldButton), 100L);
+					}
+					log("dragged to node " + node + " at " + tx + "," + ty);
+				}
+			}
 		} else if (op.equals("click-node") || op.equals("expect-node") || op.equals("expect-no-node")) {
 			String node = rest(c, 1);
 			int[] b = (int[]) hook("bounds", new Class<?>[] {String.class}, node);
@@ -384,6 +489,27 @@ public final class FlintQa implements ClientModInitializer {
 				((ScreenAccessor) screen).flintqa$mouseClicked(guiX(mc), guiY(mc), 0);
 				((ScreenAccessor) screen).flintqa$mouseReleased(guiX(mc), guiY(mc), 0);
 				log("clicked " + node);
+			}
+		} else if (op.equals("remember-node")) {
+			// remember-node NAME: keeps the element's bounds for click-remembered (a place two screens share, as the menu switch).
+			String node = rest(c, 1);
+			int[] b = (int[]) hook("bounds", new Class<?>[] {String.class}, node);
+			if (b == null) {
+				fail("no node " + node + " on " + name(screen));
+			} else {
+				remembered = b;
+				log("remembered " + node + " at " + b[0] + "," + b[1] + " " + b[2] + "x" + b[3]);
+			}
+		} else if (op.equals("click-remembered")) {
+			// click-remembered FX FY: a click at that share of the remembered bounds (0..1 across, 0..1 down), on the screen shown now.
+			if (remembered == null) {
+				fail("nothing remembered");
+			} else {
+				int[] b = remembered;
+				moveTo(b[0] + Math.round(b[2] * Float.parseFloat(c[1])), b[1] + Math.round(b[3] * Float.parseFloat(c[2])));
+				((ScreenAccessor) screen).flintqa$mouseClicked(guiX(mc), guiY(mc), 0);
+				((ScreenAccessor) screen).flintqa$mouseReleased(guiX(mc), guiY(mc), 0);
+				log("clicked the remembered place");
 			}
 		} else if (op.equals("call")) {
 			call(c);
@@ -406,6 +532,104 @@ public final class FlintQa implements ClientModInitializer {
 		} else if (op.equals("turn")) {
 			// turn DEG_PER_S: the camera keeps turning every frame (0 stops).
 			turning = Double.parseDouble(c[1]);
+		} else if (op.equals("fly")) {
+			// fly on|off: creative flight, as a double jump starts it.
+			boolean on = c[1].equals("on");
+			mc.player.abilities.canFly = on || mc.player.abilities.creativeMode;
+			mc.player.abilities.flying = on;
+			mc.player.syncAbilities();
+			log("fly " + c[1]);
+		} else if (op.equals("chunks")) {
+			// chunks NAME [RADIUS]: the client's chunks around the player within RADIUS (default the render distance less 2, all
+			// inside what the server sends): how many are missing (a hole: the client never got that chunk, or dropped it), and
+			// WorldRenderer's own counts. A hole stays a hole until the chunk is sent again.
+			int radius = c.length > 2 ? Integer.parseInt(c[2]) : Math.max(1, mc.options.viewDistance - 2);
+			int cx = net.minecraft.util.math.MathHelper.floor(mc.player.x) >> 4;
+			int cz = net.minecraft.util.math.MathHelper.floor(mc.player.z) >> 4;
+			int holes = 0;
+			int total = 0;
+			StringBuilder where = new StringBuilder();
+			for (int dx = -radius; dx <= radius; dx++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					total++;
+					if (mc.world.getChunkAt(cx + dx, cz + dz).isEmpty()) {
+						holes++;
+						if (where.length() < 200) {
+							where.append(' ').append(cx + dx).append(',').append(cz + dz);
+						}
+					}
+				}
+			}
+			log(String.format(java.util.Locale.ROOT, "chunks %s dim=%d at=%d,%d radius=%d holes=%d/%d%s render=[%s]", c[1], mc.player.dimension, cx, cz,
+				radius, holes, total, holes > 0 ? " missing:" + where : "", mc.worldRenderer.getChunkDebugInfo()));
+		} else if (op.equals("dimension")) {
+			// dimension N: the player travels to dimension N (-1 the Nether, 0 the Overworld) on the integrated server, as a portal
+			// takes them (a portal is built where they arrive).
+			final int target = Integer.parseInt(c[1]);
+			final java.util.UUID id = mc.player.getUuid();
+			mc.getServer().executeTask(new Runnable() {
+				@Override
+				public void run() {
+					net.minecraft.server.entity.living.player.ServerPlayerEntity p = mc.getServer().getPlayerManager().get(id);
+					if (p != null) {
+						// As if they had stepped into a portal where they stand (the portal forcer reads where they entered it).
+						com.flintclient.qa.legacy.mixin.EntityPortalAccessor portal = (com.flintclient.qa.legacy.mixin.EntityPortalAccessor) p;
+						portal.flintqa$setLastPortalPos(new net.minecraft.util.math.BlockPos(p.x, p.y, p.z));
+						portal.flintqa$setLastPortalOffset(new net.minecraft.util.math.Vec3d(0.5, 0.0, 0.0));
+						portal.flintqa$setLastPortalFacing(net.minecraft.util.math.Direction.NORTH);
+						mc.getServer().getPlayerManager().changeDimension(p, target);
+						// Not straight back through the portal it arrives in (a creative player crosses a portal at once).
+						p.portalCooldown = 600;
+					}
+				}
+			});
+			log("dimension " + target);
+		} else if (op.equals("leave-world")) {
+			// leave-world: as Save and Quit to Title does.
+			mc.world.disconnect();
+			mc.setWorld(null);
+			mc.openScreen(null);
+			log("left the world");
+		} else if (op.equals("type-race")) {
+			// type-race: what the integrated server and the client do to Minecraft's shared set of entity types at once, made
+			// likely: a worker keeps making entity maps (each walks the shared set) while this thread looks up 250 new types (each
+			// adds to it; array types, as Java allows 255 dimensions). Logs how many walks threw ConcurrentModificationException
+			// (1.8.9's own bug: dropped chunks). Leaves 250 array types in the set: run it last.
+			final java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean();
+			final java.util.concurrent.atomic.AtomicInteger thrown = new java.util.concurrent.atomic.AtomicInteger();
+			final java.util.concurrent.atomic.AtomicInteger made = new java.util.concurrent.atomic.AtomicInteger();
+			Thread maker = new Thread(new Runnable() {
+				@Override
+				public void run() {
+					while (!stop.get()) {
+						try {
+							new net.minecraft.util.TypeInstanceMultiMap<Object>(Object.class);
+							made.incrementAndGet();
+						} catch (java.util.ConcurrentModificationException e) {
+							thrown.incrementAndGet();
+						}
+					}
+				}
+			}, "QA type race");
+			maker.start();
+			net.minecraft.util.TypeInstanceMultiMap<Object> map = new net.minecraft.util.TypeInstanceMultiMap<Object>(Object.class);
+			Class<?> type = Object.class;
+			for (int i = 0; i < 250; i++) {
+				type = java.lang.reflect.Array.newInstance(type, 0).getClass();
+				map.find(type);
+				Thread.yield();
+			}
+			stop.set(true);
+			maker.join();
+			// Which set the maps share (Minecraft's HashSet, or the concurrent one Flint's 1.8.9 runtime puts there).
+			String shared = "?";
+			for (Field f : net.minecraft.util.TypeInstanceMultiMap.class.getDeclaredFields()) {
+				if (Modifier.isStatic(f.getModifiers()) && java.util.Set.class.isAssignableFrom(f.getType())) {
+					f.setAccessible(true);
+					shared = f.get(null).getClass().getName();
+				}
+			}
+			log("type-race walks=" + made.get() + " threw=" + thrown.get() + " set=" + shared);
 		} else if (op.equals("render-distance")) {
 			// render-distance CHUNKS: as the Video Settings slider sets it (the world reloads its chunks at the new distance).
 			mc.options.viewDistance = Integer.parseInt(c[1]);
@@ -536,6 +760,9 @@ public final class FlintQa implements ClientModInitializer {
 					log("set " + c[1] + "/" + c[2] + " " + rest(c, 3) + " -> " + set.invoke(module, setting, json));
 				}
 			}
+		} else if (op.equals("sweep")) {
+			// sweep title|mods [WxH]|pause|rshift|net|summary: the crash sweep (QaSweep189), driven by Flint's registries.
+			return QaSweep189.step(mc, c);
 		} else if (op.equals("quit")) {
 			done = true;
 			log("DONE failures=" + failures);

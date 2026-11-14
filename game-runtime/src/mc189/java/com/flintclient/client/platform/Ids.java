@@ -55,6 +55,20 @@ public final class Ids {
 		return pictures.get(id);
 	}
 
+	/** The id of the item in your hand ({@code minecraft:diamond_sword}), or null outside a world or with an empty hand. */
+	public static @Nullable String heldItem() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return null;
+		}
+		ItemStack held = mc.player.inventory.getSelectedItem();
+		if (held == null || held.getItem() == null) {
+			return null;
+		}
+		Identifier id = (Identifier) Item.REGISTRY.getKey(held.getItem());
+		return id == null ? null : id.toString();
+	}
+
 	/** Plays sound {@code id} once, as a menu sound (1.8.9's menu sounds play at one volume); nothing for an id that isn't one. */
 	public static void playSound(String id, float volume) {
 		if (id.isEmpty()) {

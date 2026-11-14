@@ -1,0 +1,132 @@
+# How Minecraft 1.19 (1.19.0) builds the sources, on top of the 1.19.2 overlay (overlay.properties): these rules apply to the shared
+# sources as the 1.21.11, 1.21.10, 1.21.1 and 1.19.2 layers left them (their own files included); files in java/ replace those of the
+# same path. Rule forms: legacy/buildSrc/src/main/java/SharedSources.java. Every rule must still match.
+#
+# 1.19.0 predates what 1.19.1 (the chat reporting update) brought, which 1.19.2 has: ChatListener and its delay queue, message
+# tags and trust levels, GuiMessage.Line, ChatType.Bound, player reporting and multiplayer bans, PlayerFaceRenderer, the
+# user's profile id and the narrator on Minecraft itself. Its chat is 1.19's first signed chat (ChatSender, a salt signature per
+# message, LocalPlayer.chat and command), and its authlib (3.5) has no abuse reports. java/compat/v1190 has the stand-ins.
+# loom/fabric.mod.json is 1.19.2's with GuiMessage's bridge in place of GuiMessage.Line's (keep the rest the same as 1.19.2's).
+
+# ---------- the chat's messages and lines (1.19.1 split 1.19.0's generic GuiMessage in two) ----------
+# A chat line is a GuiMessage too (of a FormattedCharSequence; a kept message's is a Component): compat.v1190.GuiMessageBridge
+# gives both 1.19.1's content() and 26.x's parent() (mixin.bridge.ChatLineBridgeMixin, java/).
+replace GuiMessage.Line GuiMessage
+# A line's own text is its getMessage() (content() is a kept message's).
+file control/platform/Mc263ChatHeads.java
+s line\.content\(\)\.accept\( => ((net.minecraft.util.FormattedCharSequence) line.getMessage()).accept(
+
+# ---------- chat types (1.19.1's ChatType.Bound: 1.19.0 hands the type and the sender's name over apart) ----------
+replace net.minecraft.network.chat.ChatType.Bound com.flintclient.client.compat.v1190.ChatBound
+replace ChatType.Bound com.flintclient.client.compat.v1190.ChatBound
+# 1.19.0 has one /msg type and one /teammsg type (1.19.1 split each into incoming and outgoing).
+file control/platform/Mc263Nametags.java
+s ChatType\.(TEAM_)?MSG_COMMAND_(?:INCOMING|OUTGOING)\b => ChatType.$1MSG_COMMAND
+
+# ---------- what 1.19.1 added to Minecraft's classes ----------
+# A player's face (1.19.1's PlayerFaceRenderer: Flint's, drawn the same way).
+replace net.minecraft.client.gui.components.PlayerFaceRenderer com.flintclient.client.compat.v1190.PlayerFaceRenderer
+# The user's profile id: 1.19.0's user keeps it as text, which its game profile reads (null when it isn't a UUID).
+replace .getProfileId() .getGameProfile().getId()
+# The narrator: 1.19.0's is the narrator chat listener, and its status says what it reads by priority.
+replace .narrator().get().shouldNarrateSystem() .narrator().get().shouldNarrate(net.minecraft.network.chat.ChatType.Narration.Priority.SYSTEM)
+s-in {platform/HostScreen.java,control/platform/Mc263ControlPlatform.java} (?:minecraft|Minecraft\.getInstance\(\))\.getNarrator\(\) => net.minecraft.client.gui.chat.NarratorChatListener.INSTANCE
+# The skin a player head shows (1.19.1's SkinManager.getInsecureSkinLocation).
+file mixin/feature/SkullBlockRendererMixin.java
+s Minecraft\.getInstance\(\)\.getSkinManager\(\)\.getInsecureSkinLocation\(profile\) => com.flintclient.client.compat.v1190.HeadSkins.insecureSkinLocation(profile)
+# 1.19.0's fonts don't filter "fishy" glyphs (1.19.1 added that flag, and the font manager's second font with it).
+file mixin/FontManagerMixin.java
+s method = \{"createFont", "createFontFilterFishy"\} => method = "createFont"
+s Font;<init>\(Ljava/util/function/Function;Z\)V => Font;<init>(Ljava/util/function/Function;)V
+# 1.19.0 has no "waiting" screen (1.19.1 added GenericWaitingScreen for reports and Realms).
+file control/platform/Mc263LivePacks.java
+s import net\.minecraft\.client\.gui\.screens\.GenericWaitingScreen;\n =>
+s  \|\| screen instanceof GenericWaitingScreen\) => )
+
+# ---------- McCompat ----------
+file compat/McCompat.java
+s public static final String MINECRAFT = "1\.19\.2"; => public static final String MINECRAFT = "1.19";
+# 1.19.0's player signs what it sends with chat and command (with no preview here; command(String) alone is a clicked command's).
+s player\.commandSigned\(command, null\) => player.command(command, null)
+s player\.chatSigned\(message, null\) => player.chat(message, null)
+# 1.19.0 has no message tags: Flint remembers which kept messages a player sent (compat.v1190.ChatSenders).
+s /\*\* Whether a chat message came from a player \(1\.19\.2 marks the client's and server's own as system\)\. \*/ => /** Whether a chat message came from a player (1.19.0 has no message tags: Flint remembers which a player sent). */
+s (?s)(public static boolean fromPlayer\(net\.minecraft\.client\.GuiMessage message\) \{\n).*?\n\t\} => $1\t\treturn com.flintclient.client.compat.v1190.ChatSenders.fromPlayer(message);\n\t}
+# 1.19.0's player chat packet is the message itself (1.19.1 wrapped it in a PlayerChatMessage).
+s packet\.message\(\)\.unsignedContent\(\)\.orElse\(null\) => packet.unsignedContent().orElse(null)
+# 1.19.0's Realms client is made for the signed-in user without being handed the game.
+s RealmsClient\.create\(minecraft\) => RealmsClient.create()
+
+# ---------- what 1.19.0 lacks of 1.19.2's ----------
+# Multiplayer bans came with reporting in 1.19.1 (and authlib 3.5 has no BanDetails).
+file ui/screen/MultiplayerAccess.java
+s import com\.mojang\.authlib\.minecraft\.BanDetails;\n =>
+s (?s)\t\tBanDetails ban = .*?\n\t\t\}\n =>
+# Player reporting came in 1.19.1: no reporting context to make again on an account switch, and 1.19.0's Realms screen makes its
+# own data fetcher (Minecraft keeps none).
+file mixin/MinecraftSessionAccessor.java
+s import com\.mojang\.realmsclient\.gui\.RealmsDataFetcher;\n =>
+s import net\.minecraft\.client\.multiplayer\.chat\.report\.ReportingContext;\n =>
+s \(blocking, chat signing keys, reporting, Realms\) => (blocking, chat signing keys; 1.19 has no reporting, and its Realms screen makes its own data fetcher)
+s \n\t@Accessor\("reportingContext"\)\n\tvoid flint\$setReportingContext\(ReportingContext context\);\n =>
+s \n\t@Mutable\n\t@Accessor\("realmsDataFetcher"\)\n\tvoid flint\$setRealmsDataFetcher\(RealmsDataFetcher fetcher\);\n =>
+file module/account/SessionSwitch.java
+s import net\.minecraft\.client\.multiplayer\.chat\.report\.ReportEnvironment;\nimport net\.minecraft\.client\.multiplayer\.chat\.report\.ReportingContext;\n =>
+s \t\tgame\.flint\$setReportingContext\(ReportingContext\.create\(ReportEnvironment\.local\(\), api\)\);\n\t\tgame\.flint\$setRealmsDataFetcher\(new RealmsDataFetcher\(McCompat\.realmsClient\(minecraft\)\)\);\n =>
+
+# ---------- chat safety (No Chat Reports) ----------
+# authlib 3.5's user API service has no abuse reports, and 1.19.0's key manager hands the login hello its public key's data
+# (1.19.1 prepares it as a future).
+file compat/net/NoKeys.java
+s import com\.mojang\.authlib\.minecraft\.report\.AbuseReportLimits;\n =>
+s import com\.mojang\.authlib\.yggdrasil\.request\.AbuseReportRequest;\n =>
+s (?s)\n\n\t\t@Override\n\t\tpublic void reportAbuse\(.*?getAbuseReportLimits\(\);\n\t\t\} =>
+s public CompletableFuture<Optional<ProfilePublicKey\.Data>> preparePublicKey\(\) \{\n\t\treturn CompletableFuture\.completedFuture\(Optional\.empty\(\)\); => public Optional<ProfilePublicKey.Data> profilePublicKeyData() {\n\t\treturn Optional.empty();
+# 1.19.0's warning screen always has a "don't show again" box (1.19.1 made it optional): this one has nothing to remember.
+file compat/net/LoginSigning.java
+s super\(TITLE, CONTENT, (TITLE\.copy\(\)[^;]*)\); => super(TITLE, CONTENT, Component.empty(), $1);
+s (protected void initButtons\(int textHeight\) \{\n) => $1\t\t\tremoveWidget(stopShowing);\n
+# 1.19.0 has no trust levels (1.19.1 brought them, with their grey bars): nothing to change (NcrChatListenerMixin, java/). Its
+# player chat packet carries the message and the sender's name itself, and the client decorates it by its type's chat display.
+file control/platform/Mc263ChatSafety.java
+s import net\.minecraft\.client\.multiplayer\.chat\.ChatTrustLevel;\n =>
+s (?s)\t/\*\*\n\t \* A player message's trust level as it shows.*?\n\t\}\n\n =>
+s (?s)\t\treturn host == null \? null : chat\.chatType\(\)\.resolve\(host\.registryAccess\(\)\)\n.*?\.orElse\(null\); => \t\tif (host == null) {\n\t\t\treturn null;\n\t\t}\n\t\tnet.minecraft.core.Registry<net.minecraft.network.chat.ChatType> types = host.registryAccess().registryOrThrow(net.minecraft.core.Registry.CHAT_TYPE_REGISTRY);\n\t\tnet.minecraft.network.chat.ChatType type = types.byId(chat.typeId());\n\t\tComponent body = content != null ? content : chat.signedContent();\n\t\treturn type == null ? null : type.chat()\n\t\t\t.map(display -> new ClientboundSystemChatPacket(display.decorate(body, chat.sender()), types.getId(types.get(net.minecraft.network.chat.ChatType.SYSTEM))))\n\t\t\t.orElse(null);
+# 1.19.0 finds a command's signable arguments in its parse (1.19.1 has PreviewableCommand).
+file mixin/ncr/NcrClientPacketListenerMixin.java
+s import net\.minecraft\.network\.chat\.PreviewableCommand;\n =>
+s return ArgumentSignatures\.hasSignableArguments\(PreviewableCommand\.of\(commands\.parse\(command, suggestionsProvider\)\)\); => return !ArgumentSignatures.collectLastChildPlainSignableComponents(commands.parse(command, suggestionsProvider).getContext()).isEmpty();
+# 1.19.0's chat screen answers nothing as it sends (the screen closes after any sent message).
+file mixin/ncr/NcrChatScreenMixin.java
+s private void flint\$lastMessage\(String message, boolean addToHistory, CallbackInfoReturnable<Boolean> callback\) => private void flint\$lastMessage(String message, boolean addToHistory, CallbackInfo callback)
+# Message tags, the report button and the "can't be verified" toast came in 1.19.1: nothing to hide (the settings show
+# unavailable, compat/ModuleAvailability below).
+skip mixin/ncr/NcrGuiMessageTagMixin.java
+skip mixin/ncr/NcrPlayerEntryMixin.java
+skip mixin/ncr/NcrToastManagerMixin.java
+
+# ---------- the chat screen ----------
+file mixin/feature/ChatScreenMixin.java
+s /\*\* A message Flint answers itself is used up: true, so the screen closes as after any sent message\. \*/ => /** A message Flint answers itself is used up (the screen closes after it, as after any sent message). */
+s private void flint\$submit\(String message, boolean addToHistory, CallbackInfoReturnable<Boolean> callback\) \{\n\t\tif \(Mc263ChatScreen\.submit\(message, addToHistory\)\) \{\n\t\t\tcallback\.setReturnValue\(true\); => private void flint\$submit(String message, boolean addToHistory, CallbackInfo callback) {\n\t\tif (Mc263ChatScreen.submit(message, addToHistory)) {\n\t\t\tcallback.cancel();
+# 1.19.0 draws a chat preview in place of the command suggestions (1.19.1 draws the suggestions over it).
+s /\*\* \.\.\.or under the suggestions over a chat preview \(1\.19\.2's preview of a signed message, when the server asks for one\)\. \*/ => /** ...or under the chat preview 1.19.0 draws in their place (its preview of a signed message, when the server asks for one). */
+s Lnet/minecraft/client/gui/components/CommandSuggestions;renderSuggestions\(Lcom/mojang/blaze3d/vertex/PoseStack;II\)Z => Lnet/minecraft/client/gui/screens/ChatScreen;renderChatPreview(Lcom/mojang/blaze3d/vertex/PoseStack;)V
+
+# ---------- the HUD ----------
+# 1.19.0 draws the action bar's text without a shadow (1.19.1 gave it one): the title is the HUD's first shadowed text, the
+# subtitle its second.
+file mixin/feature/HudFeatureMixin.java
+s ordinal = 1,(\n\t\ttarget = "Lnet/minecraft/client/gui/Font;drawShadow\(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/network/chat/Component;FFI\)I"\)\)\n\tprivate int flint\$title\() => ordinal = 0,$1
+s ordinal = 2,(\n\t\ttarget = "Lnet/minecraft/client/gui/Font;drawShadow\(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/network/chat/Component;FFI\)I"\)\)\n\tprivate int flint\$subtitle\() => ordinal = 1,$1
+
+# ---------- login ----------
+# 1.19.0's connection sends with a Netty listener (1.19.1 has PacketSendListener).
+file mixin/network/ClientHandshakePacketListenerImplMixin.java
+s Lnet/minecraft/network/PacketSendListener; => Lio/netty/util/concurrent/GenericFutureListener;
+
+# ---------- what 1.19.0 can't have (shown on the module's page) ----------
+# Every reason 1.19.2 gives holds for 1.19 too; then what 1.19.1 added.
+file compat/ModuleAvailability.java
+s 1\.19\.2 => 1.19
+s (\t\tif \(setting == UtilityMods\.Chat\.HEAD_POSITION\) \{) => \t\tif (setting == ServerMods.NoChatReports.HIDE_INSECURE || setting == ServerMods.NoChatReports.HIDE_MODIFIED) {\n\t\t\treturn "Minecraft 1.19 doesn't mark chat messages as unverified or modified (1.19.1 added those indicators)";\n\t\t}\n\t\tif (setting == ServerMods.NoChatReports.HIDE_SYSTEM) {\n\t\t\treturn "Minecraft 1.19 draws no indicator beside system messages (1.19.1 added it)";\n\t\t}\n\t\tif (setting == ServerMods.NoChatReports.HIDE_TOAST) {\n\t\t\treturn "Minecraft 1.19 has no toast saying chat messages can't be verified (1.19.1 added it)";\n\t\t}\n\t\tif (setting == ServerMods.NoChatReports.ALWAYS_HIDE_REPORT) {\n\t\t\treturn "Minecraft 1.19 has no player reporting, so there's no report button to hide (1.19.1 added it)";\n\t\t}\n\t\tif (setting == UtilityMods.ToastControl.TOAST_COUNT) {\n\t\t\treturn "Minecraft 1.19 shows toasts in five fixed slots (1.19.1 made their number changeable)";\n\t\t}\n$1

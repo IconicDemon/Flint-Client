@@ -49,7 +49,7 @@ public final class Marks {
 			}
 			Minecraft mc = Minecraft.getInstance();
 			boolean you = mc.player != null && player.equals(mc.player.getUuid());
-			FlintPlayers.Tag tag = you ? FlintPlayers.own() : FlintPlayers.tag(player);
+			FlintPlayers.Tag tag = you ? FlintPlayers.worn() : FlintPlayers.tag(player);
 			if (tag == null) {
 				return name;
 			}

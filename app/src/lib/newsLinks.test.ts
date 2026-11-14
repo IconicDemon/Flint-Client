@@ -2,10 +2,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import notes from "../data/releaseNotes.json" with { type: "json" };
-import { coverThumbnail, newsReleases, releasePage } from "./newsLinks.ts";
+import { coverThumbnail, NEWS_SINCE, newsReleases, releasePage } from "./newsLinks.ts";
 
 test("every Flint release opens exactly its own page on flintclient.com", () => {
-  for (const note of notes) assert.equal(releasePage(note), `https://flintclient.com/releases/${note.version}/`, note.version);
+  for (const note of notes) assert.equal(releasePage(note), "https://flintclient.com/changelog/", note.version);
   assert.equal(releasePage({ version: "1.0.0", page_url: "https://flintclient.com/releases/0.9.1/" }), null, "never another version's page");
   assert.equal(releasePage({ version: "1.0.0", page_url: "https://flintclient.com/releases/1.0.0" }), null, "the exact form only");
   assert.equal(releasePage({ version: "1.0.0", page_url: "http://flintclient.com/releases/1.0.0/" }), null);
@@ -14,10 +14,19 @@ test("every Flint release opens exactly its own page on flintclient.com", () => 
 });
 
 const versions = (list: { version: string }[]) => list.map((n) => n.version);
+/** Whether a version is the news floor (NEWS_SINCE) or newer. */
+const atLeastSince = (version: string) => {
+  const x = version.split(".").map(Number);
+  const y = NEWS_SINCE.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return true;
+};
+/** This build's own releases that count as news, newest first (the notes are newest first). */
+const ownNews = () => versions(notes.filter((n) => atLeastSince(n.version)));
 const feedRelease = (version: string, extra: Record<string, unknown> = {}) => ({ version, date: "2026-11-20", title: "Next", summary: "What's new.", page_url: `https://flintclient.com/releases/${version}/`, ...extra });
 
 test("news is this build's own releases when the feed can't be read", () => {
-  const own = versions(notes.slice(0, 3));
+  const own = ownNews().slice(0, 3);
   assert.deepEqual(versions(newsReleases(notes, null)), own);
   assert.deepEqual(versions(newsReleases(notes, undefined)), own);
   assert.deepEqual(versions(newsReleases(notes, [])), own);
@@ -26,15 +35,22 @@ test("news is this build's own releases when the feed can't be read", () => {
 test("a release this build doesn't know comes from the feed, newest first, and opens its own page", () => {
   // 9.x: newer than any release this build ships notes for.
   const shown = newsReleases(notes, [feedRelease("9.0.2"), feedRelease("0.9.1", { title: "Changed" })]);
-  assert.deepEqual(versions(shown), ["9.0.2", notes[0].version, notes[1].version]);
-  assert.equal(releasePage(shown[0]), "https://flintclient.com/releases/9.0.2/");
-  assert.equal(newsReleases(notes, [feedRelease("0.9.1", { title: "Changed" })], 9).find((n) => n.version === "0.9.1")?.title, notes.find((n) => n.version === "0.9.1")?.title, "this build's own notes win for a version both have");
+  assert.deepEqual(versions(shown), ["9.0.2", ...ownNews()].slice(0, 3));
+  assert.equal(releasePage(shown[0]), "https://flintclient.com/changelog/", "a release opens the changelog directly (no /releases/ redirect)");
+  assert.equal(newsReleases(notes, [feedRelease(NEWS_SINCE, { title: "Changed" })], 9).find((n) => n.version === NEWS_SINCE)?.title, notes.find((n) => n.version === NEWS_SINCE)?.title, "this build's own notes win for a version both have");
   assert.deepEqual(versions(newsReleases(notes, [feedRelease("9.0.9"), feedRelease("9.0.10")])).slice(0, 2), ["9.0.10", "9.0.9"], "by number, not text");
   assert.equal(releasePage(newsReleases(notes, [feedRelease("9.0.2", { page_url: null })])[0]), null, "no page: shown, not clickable");
 });
 
+test("news starts at ${NEWS_SINCE}: older releases never show, from this build or the feed", () => {
+  const shown = versions(newsReleases(notes, [feedRelease("1.0.2"), feedRelease("0.9.9"), feedRelease("9.0.2")], 9));
+  assert.ok(shown.every(atLeastSince), shown.join(", "));
+  assert.ok(shown.includes("9.0.2") && shown.includes(NEWS_SINCE));
+  assert.ok(!shown.includes("1.0.2") && !shown.includes("1.0.1"));
+});
+
 test("a feed release that fails any check is left out", () => {
-  const own = versions(notes.slice(0, 3));
+  const own = ownNews().slice(0, 3);
   for (const bad of [
     feedRelease("9.0.2-beta"),
     feedRelease("../9.0.2"),

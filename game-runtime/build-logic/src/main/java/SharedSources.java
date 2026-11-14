@@ -36,6 +36,9 @@ import java.util.stream.Stream;
  *                           takes part of the shared sources (1.8.9: the Minecraft-free packages); each must match a file.
  *                           For the tests, shared-tests.rules has its own includes (those in shared-sources.rules name
  *                           source files)
+ * adapt GLOB                an include whose files are NOT platform-free: compiled for the line only through its rules and
+ *                           overlay (1.8.9: Flint's main menu, its 26.x GUI types mapped onto stand-ins). PlatformFreeSourcesTest
+ *                           checks the includes only, so a Minecraft call in an adapted file is the line's build's business
  * </pre>
  *
  * A layer's rules apply to the shared files as the layers before it left them, their overlay files included; then the
@@ -174,9 +177,10 @@ public final class SharedSources {
 				if (!globalsOnly) {
 					perFile.computeIfAbsent(current, k -> new ArrayList<>());
 				}
-			} else if (line.startsWith("include ")) {
+			} else if (line.startsWith("include ") || line.startsWith("adapt ")) {
 				if (!globalsOnly) {
-					java.nio.file.PathMatcher files = java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + path(line.substring(8).strip()));
+					String glob = line.substring(line.indexOf(' ') + 1).strip();
+					java.nio.file.PathMatcher files = java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + path(glob));
 					includes.add(new Include(files, where + " " + line, new int[1]));
 				}
 			} else if (line.startsWith("skip ")) {

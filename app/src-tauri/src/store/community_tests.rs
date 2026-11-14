@@ -266,7 +266,8 @@ async fn a_store_sending_another_authorize_page_is_refused_and_nothing_is_kept()
     let c = connections(&rig.state, STEVE).await;
     assert_eq!(c.discord.as_ref().unwrap().avatar_url, None);
     let r = rewards(&rig.state, STEVE).await;
-    assert!(r.rewards.iter().all(|x| x.action.kind == "join_discord" && x.action.url.is_none()), "{r:?}");
+    // The Store's invite address is never used: every invite action opens Flint's own server.
+    assert!(r.rewards.iter().all(|x| x.action.kind == "join_discord" && x.action.url.as_deref() == Some(crate::data::DISCORD_INVITE)), "{r:?}");
 }
 
 // ---------- linking ----------
@@ -301,7 +302,7 @@ async fn linking_through_discords_page_unlocks_the_member_cape_and_it_can_be_wor
 
     let after = rewards(&rig.state, STEVE).await;
     assert_eq!(status_of(&after, &member), ("eligible".into(), "none".into(), None));
-    assert_eq!(status_of(&after, &booster), ("locked".into(), "boost_discord".into(), Some("https://discord.gg/flint".into())));
+    assert_eq!(status_of(&after, &booster), ("locked".into(), "boost_discord".into(), Some(crate::data::DISCORD_INVITE.into())));
     let view = rig.view(STEVE).await;
     let cape = item(&view, &member).expect("in the inventory while it counts");
     assert_eq!((cape.obtained_via.as_deref(), cape.permanence.as_deref(), cape.state.as_deref()), (Some("discord_member"), Some("conditional"), Some("eligible")));
@@ -424,7 +425,7 @@ async fn check_again_runs_at_most_once_a_minute_and_reports_when_it_may_run_agai
     rig.sign_in(STEVE).await;
     rig.sign_in(ALEX).await;
     link(&rig, STEVE, newface());
-    assert_eq!(status_of(&rewards(&rig.state, STEVE).await, &member), ("locked".into(), "join_discord".into(), Some("https://discord.gg/flint".into())));
+    assert_eq!(status_of(&rewards(&rig.state, STEVE).await, &member), ("locked".into(), "join_discord".into(), Some(crate::data::DISCORD_INVITE.into())));
 
     // NewFace joins the server, then presses Check again.
     change(&rig, STEVE, |d| d.member = true);
@@ -473,7 +474,7 @@ async fn joining_unlocks_leaving_takes_it_away_and_boosting_comes_and_goes() {
     assert_eq!(status_of(&rewards(&rig.state, STEVE).await, &booster).0, "eligible");
     change(&rig, STEVE, |d| d.booster = false);
     let r = rewards(&rig.state, STEVE).await;
-    assert_eq!(status_of(&r, &booster), ("locked".into(), "boost_discord".into(), Some("https://discord.gg/flint".into())));
+    assert_eq!(status_of(&r, &booster), ("locked".into(), "boost_discord".into(), Some(crate::data::DISCORD_INVITE.into())));
     assert_eq!(status_of(&r, &member).0, "eligible");
 
     // Leave: the member cape is gone and taken off; the bought cape is untouched.
@@ -513,7 +514,7 @@ async fn a_discord_outage_keeps_rewards_through_the_grace_period_and_never_unloc
     let r = rewards(&rig.state, STEVE).await;
     assert_eq!((r.discord.as_ref().unwrap().state.as_str(), status_of(&r, &member).0.as_str()), ("unavailable", "unavailable"));
     let view = rig.view(STEVE).await;
-    assert!(item(&view, &member).is_none() && view.inventory.unwrap().equipped.get("cape").is_none());
+    assert!(item(&view, &member).is_none() && !view.inventory.unwrap().equipped.contains_key("cape"));
 }
 
 #[tokio::test]
@@ -583,6 +584,7 @@ async fn the_community_catalog_is_asked_once_a_minute_with_its_etag_and_follows_
     let first = rig.fake.with(|w| w.add_reward("first-launch", "first_launch", FIRST_ART));
     let c = catalog(&rig.state).await;
     assert_eq!((c.state, c.enabled, c.discord_enabled), (Avail::Ok, true, true));
+    assert_eq!(c.invite_url.as_deref(), Some("https://discord.gg/flint"), "the catalog names Flint's Discord server");
     assert_eq!(c.rewards.iter().map(|r| r.cosmetic_id.clone()).collect::<Vec<_>>(), [member.clone(), booster.clone(), first.clone()]);
     let m = &c.rewards[0];
     assert_eq!((m.requirement.kind.as_str(), m.requirement.label.as_str(), m.permanence.as_str()), ("discord_member", "Member of the Flint Discord server", "conditional"));
@@ -635,8 +637,8 @@ async fn a_locked_rewards_art_can_be_looked_at_without_owning_it_and_only_if_it_
     assert!(reward_asset(&rig.state, &booster).await.is_err(), "not listed");
     assert!(reward_asset(&rig.state, &rig.ember).await.is_err(), "not a reward");
 
-    // Bytes that aren't the ones the Store hashed are refused.
-    std::fs::remove_dir_all(rig.state.paths.cache().join("store")).ok();
+    // Bytes that aren't the ones the Store hashed are refused (the shared cache emptied, so it is downloaded again).
+    std::fs::remove_dir_all(asset_cache::dir(&rig.state)).ok();
     rig.fake.with(|w| w.files.insert("/assets/discord-member.png".into(), b"\x89PNG\r\n\x1a\nswapped".to_vec()));
     assert_eq!(reward_asset(&rig.state, &member).await.unwrap_err(), HASH_MISMATCH);
 }
@@ -696,4 +698,16 @@ fn an_inventory_reads_with_and_without_the_new_fields_and_a_reward_is_never_read
         "values Flint doesn't know, or of the wrong type, read as none"
     );
     assert_eq!(inventory.owned.len(), 6, "never refusing the item or the inventory");
+}
+
+#[tokio::test]
+async fn the_game_hears_how_a_discord_cape_unlocks_never_that_it_is_in_the_store() {
+    let (rig, member, booster) = community_rig().await;
+    rig.sign_in(STEVE).await;
+    let shown = super::game::cosmetics(&rig.state, STEVE).await.unwrap();
+    let of = |id: &str| shown.shop.iter().find(|s| s.id == id).map(|s| (s.source, s.unlock.clone(), s.price_coins));
+    assert_eq!(of(&member), Some(("reward", Some("discord_member".into()), None)), "join the Flint Discord");
+    assert_eq!(of(&booster), Some(("reward", Some("discord_booster".into()), None)), "boost the Flint Discord");
+    let json = serde_json::to_value(&shown).unwrap();
+    assert!(json["shop"].as_array().unwrap().iter().any(|s| s["unlock"] == "discord_booster"), "{json}");
 }

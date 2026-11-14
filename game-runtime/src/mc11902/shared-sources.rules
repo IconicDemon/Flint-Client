@@ -1,0 +1,623 @@
+# How Minecraft 1.19.2 builds the sources, on top of the 1.21.1 overlay (overlay.properties): these rules apply to the shared
+# sources as 1.21.11's, 1.21.10's and 1.21.1's rules left them and to their own files; files in java/ replace those of the same path.
+# Rule forms: legacy/buildSrc/src/main/java/SharedSources.java. Every rule must still match.
+#
+# 1.19.2 predates what 1.21.1 already had and the shared sources draw with: GuiGraphics (1.20; compat/GuiGraphics stands in, drawing
+# with 1.19's PoseStack and GuiComponent calls), JOML (1.19.3; Flint carries it, compat/MatrixBridge reads Minecraft's own
+# matrices as JOML's), the built-in registries (1.19.3), data components (1.20.5), GUI sprites (1.20.2; compat/GuiSprites) and the
+# widget, tooltip and toast APIs of 1.19.3 to 1.20. It runs on Java 17 (compat/J17 has the Java 21 methods the sources use).
+
+# ---------- Java 17: Java 21's library methods (compat/J17) ----------
+s-in ** \bMath\.clamp\( => com.flintclient.client.compat.J17.clamp(
+s-in ** ([\w.]+(?:\(\))?)\.threadId\(\) => com.flintclient.client.compat.J17.threadId($1)
+
+# ---------- GuiGraphics (1.20): Flint's stand-in, made over the PoseStack 1.19.2 hands out ----------
+replace net.minecraft.client.gui.GuiGraphics com.flintclient.client.compat.GuiGraphics
+
+# ---------- names 1.19.3 to 1.21 brought ----------
+s-in ** (?:net\.minecraft\.resources\.)?ResourceLocation\.fromNamespaceAndPath\( => new net.minecraft.resources.ResourceLocation(
+s-in ** (?:net\.minecraft\.resources\.)?ResourceLocation\.withDefaultNamespace\( => new net.minecraft.resources.ResourceLocation(
+s-in ** (?:net\.minecraft\.resources\.)?ResourceLocation\.parse\( => new net.minecraft.resources.ResourceLocation(
+
+# ---------- classes 1.19.3 to 1.21 added: Flint's stand-ins (compat/) ----------
+word com.mojang.math.Axis com.flintclient.client.compat.Axis
+word net.minecraft.client.DeltaTracker com.flintclient.client.compat.DeltaTracker
+word net.minecraft.client.gui.navigation.ScreenRectangle com.flintclient.client.compat.ScreenRectangle
+word net.minecraft.client.gui.components.Tooltip com.flintclient.client.compat.Tooltip
+# Classes 1.19.3 to 1.21 moved.
+word net.minecraft.client.gui.screens.options.ChatOptionsScreen net.minecraft.client.gui.screens.ChatOptionsScreen
+word net.minecraft.client.gui.screens.options.LanguageSelectScreen net.minecraft.client.gui.screens.LanguageSelectScreen
+word net.minecraft.client.gui.screens.options.AccessibilityOptionsScreen net.minecraft.client.gui.screens.AccessibilityOptionsScreen
+word net.minecraft.client.gui.screens.options.SkinCustomizationScreen net.minecraft.client.gui.screens.SkinCustomizationScreen
+word net.minecraft.client.gui.screens.options.OptionsSubScreen net.minecraft.client.gui.screens.OptionsSubScreen
+word net.minecraft.client.gui.screens.options.controls.KeyBindsScreen net.minecraft.client.gui.screens.controls.KeyBindsScreen
+word net.minecraft.world.level.chunk.status.ChunkStatus net.minecraft.world.level.chunk.ChunkStatus
+word GenericMessageScreen GenericDirtMessageScreen
+
+# ---------- mixins 1.19.2 can't take, or has its own of (java/) ----------
+# GuiGraphics is Flint's own class on 1.19.2 (compat/GuiGraphics, which has the bridge's methods itself).
+skip mixin/GraphicsBridgeMixin.java
+skip mixin/bridge/GuiGraphicsInvoker.java
+# Data components (1.20.5): 1.19.2 keeps a container's items in its NBT.
+skip mixin/bridge/ContainerContentsBridgeMixin.java
+
+# ---------- screens and widgets: 1.19.2 hands them a PoseStack (compat/GuiGraphics is made over it) ----------
+# A screen's render, and a widget's (1.20's renderWidget is 1.19.2's renderButton, which is public).
+s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public (final )?void render\(GuiGraphics (\w+), int (\w+), int (\w+), float (\w+)\) \{ => public $1void render(com.mojang.blaze3d.vertex.PoseStack flint\$pose, int $3, int $4, float $5) {\n\t\tGuiGraphics $2 = GuiGraphics.of(flint\$pose);
+s-in ui/widget/*.java (?:protected|public) (final )?void renderWidget\(GuiGraphics (\w+), int (\w+), int (\w+), float (\w+)\) \{ => public $1void renderButton(com.mojang.blaze3d.vertex.PoseStack flint\$pose, int $3, int $4, float $5) {\n\t\tGuiGraphics $2 = GuiGraphics.of(flint\$pose);
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} \b(\w+)\.render\((graphics|guiGraphics), => $1.render($2.pose(),
+# A Flint screen's background, which 1.20.2 draws before render(): 1.19.2's renderBackground(PoseStack), which compat/ScreenFrame
+# calls for Flint's screens before they draw (with the frame's pointer and partial tick).
+s-in {platform/HostScreen.java,ui/screen/*.java,control/platform/WorldMapScreen.java} public (final )?void renderBackground\(GuiGraphics (\w+), int (\w+), int (\w+), float (\w+)\) \{ => public $1void renderBackground(com.mojang.blaze3d.vertex.PoseStack flint\$pose) {\n\t\tGuiGraphics $2 = GuiGraphics.of(flint\$pose);\n\t\tint $3 = com.flintclient.client.compat.ScreenFrame.mouseX();\n\t\tint $4 = com.flintclient.client.compat.ScreenFrame.mouseY();\n\t\tfloat $5 = com.flintclient.client.compat.ScreenFrame.partialTick();
+
+
+# ---------- entity and world rendering ----------
+# Player skins (1.20.2's record): Flint's stand-in (compat/PlayerSkin), which PlayerInfoMixin and AbstractClientPlayerMixin hand
+# out from 1.19.2's four skin getters (compat.render.SkinBridge, added to both classes by loom/fabric.mod.json).
+replace net.minecraft.client.resources.PlayerSkin com.flintclient.client.compat.PlayerSkin
+s-in ** \bDefaultPlayerSkin\.get\( => com.flintclient.client.compat.render.SkinBridge.byDefault(
+# 1.19.4's font display modes: 1.19.2's font takes a see-through flag (compat.render.DisplayMode stands in).
+replace Font.DisplayMode com.flintclient.client.compat.render.DisplayMode
+# 1.20's debug quads, Flint's on 1.19.2 (compat.render.DebugRenderTypes; debugFilledBox() too, which only compat/gizmos used).
+replace RenderType.debugQuads() com.flintclient.client.compat.render.DebugRenderTypes.debugQuads()
+# 1.19.4's item display contexts are 1.19.2's item transform types (the same constants).
+replace net.minecraft.world.item.ItemDisplayContext net.minecraft.client.renderer.block.model.ItemTransforms
+word ItemDisplayContext ItemTransforms.TransformType
+# Text displays (1.19.4): 1.19.2 has none, so no server hangs a text-display nametag on a player; Tier Tagger tags the
+# nametags 1.19.2 has (EntityRendererMixin).
+skip mixin/feature/TextDisplayTierMixin.java
+file control/platform/Mc263Tiers.java
+s import net\.minecraft\.world\.entity\.Display;\n =>
+s (?s)\t/\*\* A server's text-display nametag as last changed.*?\n\tprivate static final Map<Display\.TextDisplay, DisplayTag> DISPLAYS = new java\.util\.WeakHashMap<>\(\);\n =>
+s (?s)\n\t/\*\*\n\t \* A server's text-display nametag riding a player:.*\n\}\n?$ => }\n
+file platform/FontSets.java
+# 1.19.2 makes and measures a TrueType font its own way (1.20 brought the definitions, the em sizing and the fixed baseline):
+# compat/render/TrueTypeFonts makes Flint's fonts the size and place 1.20 gives them; a font it can't read throws, as a definition does.
+s import net\.minecraft\.client\.gui\.font\.providers\.TrueTypeGlyphProviderDefinition; => import net.minecraft.client.gui.font.providers.TrueTypeGlyphProviderBuilder;
+s (?s)TrueTypeGlyphProviderDefinition definition = new TrueTypeGlyphProviderDefinition\(\n\t+(new net\.minecraft\.resources\.ResourceLocation\(FlintClient\.MOD_ID, path\)), size, oversample, TrueTypeGlyphProviderDefinition\.Shift\.NONE, ""\);\n(\t+)return definition\.unpack\(\)\.left\(\)\.orElseThrow\(\)\.load\(resources\); => return com.flintclient.client.compat.render.TrueTypeFonts.load(resources, $1, size, oversample);
+
+
+# ---------- Flint's built-in resource pack (no Fabric API): 1.19.2 has no PackLocationInfo, PackSelectionConfig or
+# PathPackResources (1.19.3 to 1.20.5): compat/misc/BuiltInPack makes the pack and mixin/control/ClientPackSourceMixin offers it ----------
+skip control/platform/BuiltInPackSupplier.java
+file control/platform/BuiltInResources.java
+s import net\.minecraft\.server\.packs\.PackLocationInfo;\n => 
+s import net\.minecraft\.server\.packs\.PackSelectionConfig;\n => 
+s import net\.minecraft\.server\.packs\.PathPackResources;\n => 
+s import net\.minecraft\.server\.packs\.metadata\.MetadataSectionType;\n => 
+s import net\.minecraft\.server\.packs\.resources\.ResourceMetadata;\n => 
+s \tprivate static final PackSelectionConfig SELECTION = [^\n]*\n => 
+s // Called by Minecraft straight after the scan; a null pack is left out \(BuiltInPackSource\.listBundledPacks\)\. => // Called as the scan offers the pack (ClientPackSourceMixin); a null pack is left out.
+s (?s)\t\t\tPackLocationInfo location = new PackLocationInfo\([^\n]*\n\t\t\treturn Pack\.readMetaAndCreate\([^\n]*\n => \t\t\treturn com.flintclient.client.compat.misc.BuiltInPack.create(id, Component.literal(FlintClient.NAME), root);\n
+s (?s)\n\t/\*\* The jar's files, with the pack's metadata answered from code.*?\n\t\}\n\}\n?$ => }\n
+
+
+# ---------- network, chat safety, account switching (the net group: java/ has 1.19.2's own of the rest) ----------
+# 1.21's disconnection details: 1.19.2's disconnects carry only their reason (compat/net/DisconnectionDetails, which the
+# network mixins make from it).
+word net.minecraft.network.DisconnectionDetails com.flintclient.client.compat.net.DisconnectionDetails
+
+file mixin/ncr/NcrOptionsSubScreenMixin.java
+# 1.19.2's chat options are a SimpleOptionsSubScreen, which keeps the option list (privately).
+s @Mixin\(OptionsSubScreen\.class\) => @Mixin(net.minecraft.client.gui.screens.SimpleOptionsSubScreen.class)
+s \tprotected OptionsList list; => \tprivate OptionsList list;
+
+file control/platform/Mc263ChatSafety.java
+# 1.19.2 has no chat sessions (1.19.3): the server learns your key from the login hello and nowhere else, and a connection's
+# key state is decided as it begins (compat/net/LoginSigning), so signing allowed during a session starts with the next join and
+# what waited for a session to start is dropped.
+s (?s)ClientPacketListener connection = mc\.player\.connection;\n\t+Session session = \(Session\) connection;\n\t+if \(session\.flint\$chatSession\(\) == null\) \{\n.*?\}\), mc\);\n\t+\} => SIGNING_ACTIONS.clear();
+# 1.19.2's key manager is a class with no prepareKeyPair: its key is read off the render thread (joining its own first lookup).
+s real\.prepareKeyPair\(\)\.whenComplete => java.util.concurrent.CompletableFuture.supplyAsync(real::profilePublicKey, net.minecraft.Util.backgroundExecutor()).whenComplete
+# A join that already signs (Always, or allowed when the server turned the last try away for want of a key) is on a server
+# that wants signed chat.
+s \} else if \(mode\(lastServer\) == Mode\.ALWAYS\) \{ => } else if (mode(lastServer) == Mode.ALWAYS || allowSigning()) {
+# The trust level: 1.19.2 works it out from the sender's chain of signed messages (each check moves the chain on), so the hook
+# hands over the level Minecraft found instead of working it out again; 1.19.2's messages name their signer and signature so.
+s ChatTrustLevel trust\(PlayerChatMessage message, Component decorated, java\.time\.Instant received, boolean fromYou\) => ChatTrustLevel trust(PlayerChatMessage message, Component decorated, ChatTrustLevel vanilla, boolean fromYou)
+s message\.sender\(\), message\.hasSignature\(\)\) => message.signer().profileId(), !message.headerSignature().isEmpty())
+s if \(message\.hasSignature\(\) && current == Level\.SECURE\) => if (!message.headerSignature().isEmpty() && current == Level.SECURE)
+s ChatTrustLevel level = ChatTrustLevel\.evaluate\(message, decorated, received\); => ChatTrustLevel level = vanilla;
+# Always chosen during a session signs from the next join on 1.19.2, not "once you send any message".
+s signing \+= allowSigning\(\) \? "allowed" : "disabled_allowance_pending"; => signing += allowSigning() ? "allowed" : "disabled";
+# 1.19.2's server status keeps its version behind getters (and may have none).
+s if \(status\.version\(\)\.isPresent\(\)\) \{\n(\t+)int protocol = status\.version\(\)\.get\(\)\.protocol\(\); => if (status.getVersion() != null) {\n$1int protocol = status.getVersion().getProtocol();
+# Convert to system messages: 1.19.2's player chat packet carries the message and its chat type by registry id, which the world
+# you host resolves.
+s return new ClientboundSystemChatPacket\(chat\.chatType\(\)\.decorate\(content != null \? content : Component\.literal\(chat\.body\(\)\.content\(\)\)\), false\); => net.minecraft.server.MinecraftServer host = Minecraft.getInstance().getSingleplayerServer();\n\t\treturn host == null ? null : chat.chatType().resolve(host.registryAccess())\n\t\t\t.map(bound -> new ClientboundSystemChatPacket(bound.decorate(content != null ? content : chat.message().signedContent().decorated()), false))\n\t\t\t.orElse(null);
+
+file module/account/SessionSwitch.java
+# 1.19.2 looks the signed-in profile's properties up when they're first asked for (emptied, they're looked up again for the new
+# user); its user API service fetches its own properties as it's made; and it makes telemetry for each connection from the user
+# and the service, so there is none to replace. Every user has a key manager of its own (an offline one has no keys:
+# compat/net/NoKeys).
+s (?s)\t\tgame\.flint\$setProfileFuture\(.*?\}, Util\.(?:nonCriticalIoPool|ioPool)\(\)\)\);\n => \t\tgame.flint\$profileProperties().clear();\n
+s (?s)\t\tClientTelemetryManager telemetry = game\.flint\$telemetryManager\(\);\n.*?\t\t\}\n(\t\tgame\.flint\$setProfileKeyPairManager) => $1
+s import net\.minecraft\.client\.telemetry\.ClientTelemetryManager;\n =>
+s ProfileKeyPairManager\.EMPTY_KEY_MANAGER\n(\t+): ProfileKeyPairManager\.create\(api, user, minecraft\.gameDirectory\.toPath\(\)\) => com.flintclient.client.compat.net.NoKeys.MANAGER\n$1: new ProfileKeyPairManager(api, user.getGameProfile().getId(), minecraft.gameDirectory.toPath())
+
+# ---------- chat safety mixins 1.19.2 can't take ----------
+# The options' Telemetry Data button came in 1.19.3 (and 1.19.2 has no GridLayout): nothing to remove.
+skip mixin/ncr/NcrRowHelperMixin.java
+# The world you host drops players' keys at login (NcrChatSessionUpdateMixin, java/), and 1.19.2's server reads no signature
+# from a player without a key: chat and command signatures are ignored already, and stripping a keyed player's would get them
+# kicked for "unsigned chat".
+skip mixin/ncr/NcrServerboundChatPacketMixin.java
+skip mixin/ncr/NcrServerboundCommandSignedMixin.java
+
+# ConnectScreen.startConnecting has no Quick Play flag or transfer on 1.19.2 (Reconnect, the title screen's server slots).
+s-in {control/platform/Mc263Reconnect.java,ui/screen/FlintTitleScreen.java} (ConnectScreen\.startConnecting\([^;]*?), false, null\) => $1)
+
+# ---------- GUI mixins 1.19.2 has no use for (the gui group: java/ has 1.19.2's own of the rest) ----------
+# 1.19.2's F3 switch is options.renderDebug, not a field of the overlay (compat/DebugEntries reads it).
+skip mixin/bridge/DebugScreenOverlayAccessor.java
+# Flint draws every tooltip on 1.19.2 (compat/Tooltips, with Scrollable Tooltips and Glint's backgrounds in it).
+skip mixin/feature/GuiGraphicsTooltipMixin.java
+skip mixin/feature/GlintBackgroundMixin.java
+# Menu blur (1.20.5): 1.19.2's menus have none (menu_blur says so, compat/ModuleAvailability).
+skip mixin/feature/OptionsFeatureMixin.java
+
+# ---------- advancements: 1.20.2's tree over 1.19.2's list (compat/AdvancementTree), an advancement is its own holder ----------
+word net.minecraft.advancements.AdvancementHolder net.minecraft.advancements.Advancement
+word AdvancementHolder Advancement
+word net.minecraft.advancements.AdvancementNode com.flintclient.client.compat.AdvancementNode
+
+# ---------- the scroll wheel: 1.20.2 added a horizontal amount; 1.19.2 hands over the vertical one only ----------
+s-in {platform/HostScreen.java,ui/screen/*.java,control/platform/WorldMapScreen.java} public (final )?boolean mouseScrolled\(double (\w+), double (\w+), double (\w+), double (\w+)\) \{ => public $1boolean mouseScrolled(double $2, double $3, double $5) {\n\t\tdouble $4 = 0.0;
+s-in ui/screen/*.java super\.mouseScrolled\(((?:[^,()]|\([^()]*\))+), ((?:[^,()]|\([^()]*\))+), \w+, (\w+)\) => super.mouseScrolled($1, $2, $3)
+
+# ---------- registries: 1.19.2 keeps the built-in registries and their keys on Registry (1.19.3 moved them) ----------
+replace net.minecraft.core.registries.BuiltInRegistries net.minecraft.core.Registry
+word BuiltInRegistries Registry
+replace net.minecraft.core.registries.Registries net.minecraft.core.Registry
+s-in ** \bRegistries\.([A-Z_]+)\b => Registry.$1_REGISTRY
+
+# ---------- names 1.19.3 to 1.20 changed ----------
+# An entity's level is a field with a getter on 1.19.2 (1.20 made level() the getter); Flint's own static level() stays.
+s-in ** \b(?!(?:Mc263)?HudData\b)(\w+)\.level\(\) => $1.getLevel()
+s-in ** \.onGround\(\) => .isOnGround()
+# 1.19.4's BlockPos.containing: 1.19.2's constructor floors the same way.
+s-in ** (?:net\.minecraft\.core\.)?BlockPos\.containing\( => new net.minecraft.core.BlockPos(
+s-in ** \bUtil\.nonCriticalIoPool\(\) => Util.ioPool()
+# Effects: 1.19.2's instance names its MobEffect itself (1.20.5 made it a holder); an effect without a counter (its "**:**")
+# is the infinite one of 1.19.4.
+s-in ** \.getEffect\(\)\.value\(\) => .getEffect()
+s-in ** \.isInfiniteDuration\(\) => .isNoCounter()
+s-in ** \bHolder<MobEffect>(\s) => MobEffect$1
+s-in ** \(Holder<MobEffect>\) => (MobEffect)
+# 1.19.3's ResourceLocation.withPath (Flint's maps and leaves name a sprite's file from its id).
+s-in ** \b(\w+)\.withPath\((\w+) -> ([^;]*?)\);\n => new net.minecraft.resources.ResourceLocation($1.getNamespace(), java.util.Objects.requireNonNull(((java.util.function.UnaryOperator<String>) $2 -> $3).apply($1.getPath())));\n
+
+# ---------- widgets and screens 1.19.3 to 1.20.2 added (compat/) ----------
+s-in ** \bButton\.builder\( => com.flintclient.client.compat.ButtonBuilder.of(
+word net.minecraft.client.gui.screens.FaviconTexture com.flintclient.client.compat.FaviconTexture
+s-in ** (?:net\.minecraft\.client\.gui\.screens\.)?ConfirmLinkScreen\.confirmLinkNow\( => com.flintclient.client.compat.McCompat.confirmLink(
+# 1.20.2's server kinds: 1.19.2's ServerData only says whether a server is on your LAN.
+s-in ** new ServerData\(([^;]*?), ServerData\.Type\.(?:OTHER|REALM)\) => new ServerData($1, false)
+file ui/screen/FlintTitleScreen.java
+# 1.19.2 keeps a server's icon as base64 text (1.20 as bytes), read as an image from a stream.
+s data\.getIconBytes\(\) => com.flintclient.client.compat.McCompat.iconBytes(data)
+s NativeImage\.read\(bytes\) => NativeImage.read(new java.io.ByteArrayInputStream(bytes))
+
+# ---------- Flint's host screen on 1.19.2's screen life cycle ----------
+# 1.19.3 to 1.20 added added() (before the first init), setInitialFocus() (after init) and repositionElements() (a resize
+# keeps the screen; 1.19.2 builds it again): here shown() runs before the first init, the initial focus after each init,
+# and a resize updates the size and lays the kit out again without building it anew.
+file platform/HostScreen.java
+s (\t@Override\n\tprotected final void init\(\) \{\n)(\t\ttry \{\n\t\t\topened\(\);\n\t\t\} catch \(RuntimeException \| LinkageError e\) \{\n\t\t\tbroke\("opening", e\);\n\t\t\}\n)(\t\})\n => $1\t\tif (!flint\$shown) {\n\t\t\tflint\$shown = true;\n\t\t\tflint\$added();\n\t\t}\n$2\t\tflint\$setInitialFocus();\n$3\n\n\t/** Whether shown() has run for this showing (1.19.2 has no added()). */\n\tprivate boolean flint\$shown;\n\n\t@Override\n\tpublic final void resize(net.minecraft.client.Minecraft flint\$minecraft, int flint\$width, int flint\$height) {\n\t\twidth = flint\$width;\n\t\theight = flint\$height;\n\t\tflint\$repositionElements();\n\t}\n
+s \t@Override\n\tprotected final void repositionElements\(\) \{ => \tprivate void flint\$repositionElements() {
+s \t@Override\n\tprotected final void setInitialFocus\(\) \{ => \tprivate void flint\$setInitialFocus() {
+s \t@Override\n\tpublic final void added\(\) \{ => \tprivate void flint\$added() {
+s (\t@Override\n\tpublic final void removed\(\) \{\n) => $1\t\tflint\$shown = false;\n
+s \t@Override\n(\tprotected final boolean shouldNarrateNavigation\(\)) => $1
+
+
+# ---------- item data: 1.20.5's data components and 1.21's data-driven enchantments, which 1.19.2 keeps in an item's NBT ----------
+# compat/item has Flint's stand-ins, read from 1.19.2's item and NBT: DataComponents (the components the sources read), a stack's
+# get/has/getOrDefault/set (compat.item.ItemStackBridge, added to ItemStack by loom/fabric.mod.json and mixin.bridge
+# .ItemStackBridgeMixin), the enchantments (by registry holder, with Enchantments' 1.21 keys), potion contents, lore, a
+# container's and a bundle's items, and the food values (saturation as 1.20.5 stores it: nutrition × modifier × 2).
+word net.minecraft.core.component.DataComponents com.flintclient.client.compat.item.DataComponents
+word net.minecraft.world.item.enchantment.ItemEnchantments com.flintclient.client.compat.item.ItemEnchantments
+word net.minecraft.world.item.enchantment.Enchantments com.flintclient.client.compat.item.Enchantments
+word net.minecraft.world.item.alchemy.PotionContents com.flintclient.client.compat.item.PotionContents
+word net.minecraft.world.item.component.ItemLore com.flintclient.client.compat.item.ItemLore
+word net.minecraft.world.item.component.ItemContainerContents com.flintclient.client.compat.item.ItemContainerContents
+word net.minecraft.world.item.component.BundleContents com.flintclient.client.compat.item.BundleContents
+word-in control/platform/Mc263Food.java net.minecraft.world.food.FoodProperties com.flintclient.client.compat.item.FoodProperties
+# 1.19.2 compares two stacks' NBT where 1.20.5 compares their components (the same test), and keeps a rarity's colour as a field.
+word isSameItemSameComponents isSameItemSameTags
+replace getRarity().color() getRarity().color
+# An enchantment names itself at a level (1.21 asks Enchantment with its holder), and EnchantmentHelper.getEnchantments is
+# 1.21's getEnchantmentsForCrafting (a book's stored enchantments, any other item's own).
+s-in ** \bEnchantment\.getFullname\(([\w.]+(?:\(\))?),\s* => $1.value().getFullname(
+s-in ** \bEnchantmentHelper\.getEnchantmentsForCrafting\( => com.flintclient.client.compat.item.ItemEnchantments.forCrafting(
+# A dye's texture colour: 1.19.2 keeps it as three floats (ItemCompat makes 1.21's ARGB of them).
+s-in ** \b([\w.]+(?:\(\))?)\.getTextureDiffuseColor\(\) => com.flintclient.client.compat.item.ItemCompat.textureDiffuseColor($1)
+# 1.21.1's Equipable items (1.19.4 added the interface): 1.19.2's armor, horse armor, elytra and shields (ItemCompat).
+s-in ** \b([\w.]+(?:\(\))?) instanceof net\.minecraft\.world\.item\.Equipable\b => com.flintclient.client.compat.item.ItemCompat.equipable($1)
+# 1.19.2 has no sword, axe, pickaxe or shovel item tags (1.19.4 added them): its tools of each kind are of their item class.
+s-in ** \b([\w.]+(?:\(\))?)\.is\((?:net\.minecraft\.tags\.)?ItemTags\.SWORDS\) => ($1.getItem() instanceof net.minecraft.world.item.SwordItem)
+s-in ** \b([\w.]+(?:\(\))?)\.is\((?:net\.minecraft\.tags\.)?ItemTags\.AXES\) => ($1.getItem() instanceof net.minecraft.world.item.AxeItem)
+s-in ** \b([\w.]+(?:\(\))?)\.is\((?:net\.minecraft\.tags\.)?ItemTags\.PICKAXES\) => ($1.getItem() instanceof net.minecraft.world.item.PickaxeItem)
+s-in ** \b([\w.]+(?:\(\))?)\.is\((?:net\.minecraft\.tags\.)?ItemTags\.SHOVELS\) => ($1.getItem() instanceof net.minecraft.world.item.ShovelItem)
+# The mace and the wind charge came in 1.21: no 1.19.2 item is one (Armor's Mace slot, UHC Overlay's Mace scale and Attack
+# Indicator's Wind charge are shown unavailable, compat/ModuleAvailability).
+s-in ** \b\w+\.is\((?:net\.minecraft\.world\.item\.)?Items\.(?:MACE|WIND_CHARGE)\) => false
+file control/platform/Mc263LootBeams.java
+s import net\.minecraft\.world\.item\.MaceItem;\n =>
+s \n\t+\|\| item instanceof MaceItem\) => )
+file control/platform/Mc263Inventory.java
+# Enchantment summaries: a curse is one by its enchantment (1.21 by a tag), named by its description id, and listed where the
+# item's tooltip lists it: 1.19.2 has no tooltip-order tag, its tooltip follows the order the item keeps them in.
+s import net\.minecraft\.tags\.EnchantmentTags;\n =>
+s (\w+)\.is\(EnchantmentTags\.CURSE\) => $1.value().isCurse()
+s (\w+)\.value\(\)\.description\(\) => net.minecraft.network.chat.Component.translatable($1.value().getDescriptionId())
+s (?s)\t\tnet\.minecraft\.client\.multiplayer\.ClientLevel level = Minecraft\.getInstance\(\)\.level;\n\t\tif \(level != null\) \{\n.*?\n\t\t\}\n(\t\tfor \(Holder<Enchantment> enchantment : all\.keySet\(\)\) \{) => \t\t// 1.19.2's tooltip lists them in the order the item keeps them (it has no tooltip-order tag).\n$1
+file control/platform/Mc263Food.java
+# Saturation's tooltip icons: 1.19.2's tooltip flag doesn't say creative (1.20.5), and no 1.19.2 item hides its whole tooltip
+# (DataComponents.HIDE_TOOLTIP is never there), so the icons are left out of none.
+s !flag\.isCreative\(\) && stack\.has\(DataComponents\.HIDE_TOOLTIP\) => stack.has(DataComponents.HIDE_TOOLTIP)
+file control/platform/Mc263OriginalHud.java
+# A potion holder's registry name ("minecraft:long_swiftness", 1.20.5's Holder.getRegisteredName).
+s potion\.getRegisteredName\(\) => com.flintclient.client.compat.item.PotionContents.registeredName(potion)
+file control/platform/Mc263Animations.java
+# Maps have no MapId on 1.19.2 (1.20.5); the held-map code that used it is left out below 1.21.2 already.
+s import net\.minecraft\.world\.level\.saveddata\.maps\.MapId;\n =>
+file control/platform/Mc263ChatHeads.java
+# 1.20.5's player head profiles (unused here).
+s import net\.minecraft\.world\.item\.component\.ResolvableProfile;\n =>
+
+
+# ---------- item calls next to the item data (append after items.rules, unless another rule already covers them) ----------
+# 1.20.5 asks a crossbow's charge time with the user; 1.19.2's crossbow decides from the stack alone (Attack Indicator, Crosshair).
+s-in ** \bCrossbowItem\.getChargeDuration\((\w+), \w+\) => CrossbowItem.getChargeDuration($1)
+file control/platform/Mc263Bars.java
+# Armor Bar's points per piece: 1.19.2's modifier names its operation and amount with getters, and its armor attribute is the
+# attribute itself (ItemStackBridge.forEachModifier hands its registry holder).
+s attribute\.is\(Attributes\.ARMOR\) && modifier\.operation\(\) == AttributeModifier\.Operation\.ADD_VALUE => attribute.value() == Attributes.ARMOR && modifier.getOperation() == AttributeModifier.Operation.ADDITION
+s modifier\.amount\(\) => modifier.getAmount()
+file control/platform/Mc263OriginalHud.java
+# Potion Counter's effect switches: a 1.19.2 effect is named by the registry (it isn't a holder).
+s effect\.unwrapKey\(\)\.map\(key -> key\.location\(\)\.getPath\(\)\)\.orElse\(""\) => java.util.Optional.ofNullable(net.minecraft.core.Registry.MOB_EFFECT.getKey(effect)).map(net.minecraft.resources.ResourceLocation::getPath).orElse("")
+file control/platform/Mc263MoreMods.java
+# The piglin head came in 1.20: no 1.19.2 item is one.
+s \bstack\.is\(Items\.PIGLIN_HEAD\) => false
+# 1.19.2 has no enchantable/armor tag: Unbreaking's armor rule is for an ArmorItem (DigDurabilityEnchantment), which an
+# elytra isn't.
+s \bstack\.is\(net\.minecraft\.tags\.ItemTags\.ARMOR_ENCHANTABLE\) => (stack.getItem() instanceof net.minecraft.world.item.ArmorItem)
+
+# ---------- Java 17: Java 21's sequenced-collection methods on lists (compat/J17; a Deque has its own) ----------
+s-in {ui/kit/KitScreen.java,ui/kit/Dialog.java,ui/widget/NewsCard.java,ui/FlintTooltip.java,control/store/ControlSettings.java,control/feature/ChatStack.java,control/platform/Mc263ChatHeads.java,control/platform/Mc263ChatScreen.java,control/platform/EntityIcons.java,control/platform/Mc263OriginalHud.java} \b([\w.]+(?:\(\))?)\.(getFirst|getLast|removeFirst|removeLast)\(\) => com.flintclient.client.compat.J17.$2($1)
+s-in control/feature/ChatStack.java \b(\w+)\.addFirst\( => com.flintclient.client.compat.J17.addFirst($1, 
+s-in ** \bMath\.ceilDiv\( => com.flintclient.client.compat.J17.ceilDiv(
+
+# ---------- sounds: 1.19.2's sound events are made with a constructor and its SoundEvents are events, not holders ----------
+s-in ** \bSoundEvent\.createVariableRangeEvent\( => new SoundEvent(
+s-in ** \bSoundEvent\.createFixedRangeEvent\( => new SoundEvent(
+s-in ** \b(SoundEvents\.[A-Z_]+)\.value\(\) => $1
+
+# ---------- faces, chat, the debug screen (compat/McCompat) ----------
+s-in ** \b(?:net\.minecraft\.client\.gui\.components\.)?PlayerFaceRenderer\.draw\( => com.flintclient.client.compat.McCompat.face(
+s-in {control/platform/*.java,ui/**} \b((?:\w+(?:\(\))?\.)*\w+(?:\(\))?)\.sendCommand\( => com.flintclient.client.compat.McCompat.sendCommand($1, 
+s-in {control/platform/*.java,ui/**} \b((?:\w+(?:\(\))?\.)*\w+(?:\(\))?)\.sendChat\( => com.flintclient.client.compat.McCompat.sendChat($1, 
+s-in ** Minecraft\.getInstance\(\)(?:\.gui)?\.getDebugOverlay\(\)\.showDebugScreen\(\) => Minecraft.getInstance().options.renderDebug
+replace net.minecraft.network.chat.contents.PlainTextContents net.minecraft.network.chat.contents.LiteralContents
+word PlainTextContents LiteralContents
+word SystemToastId SystemToastIds
+s-in ** new SystemToast\.SystemToastIds\(\d+L\) => SystemToast.SystemToastIds.PERIODIC_NOTIFICATION
+replace net.minecraft.util.StringUtil.isAllowedChatCharacter net.minecraft.SharedConstants.isAllowedChatCharacter
+s-in ** \bStringUtil\.filterText\( => net.minecraft.SharedConstants.filterText(
+s-in ** \.getMenuBackgroundBlurriness\(\) => .hashCode() * 0 + com.flintclient.client.compat.McCompat.menuBlur()
+# 1.19.2's text boxes take focus with setFocus (AbstractWidget's setFocused is protected there).
+s-in {control/platform/Mc263ChatScreen.java,control/platform/Mc263Inventory.java,control/platform/WorldMapScreen.java} \b(box|input|search|name)\.setFocused\((true|false)\) => $1.setFocus($2)
+s-in control/platform/Mc263ChatScreen.java \b(box)\.render\((g), => $1.render($2.pose(),
+
+# ---------- Flint's buttons on 1.19.2's widgets ----------
+file ui/widget/FlintButton.java
+# 1.19.2's widgets narrate in updateNarration itself (1.19.3 split out updateWidgetNarration).
+s @Override\n\tprotected void updateWidgetNarration\(NarrationElementOutput output\) \{ => @Override\n\tpublic void updateNarration(NarrationElementOutput output) {
+# The focus as a control standing in for this one sets it (1.19.2's setFocused is protected).
+s (\tpublic void activate\(\) \{) => \t/** Sets the focus (MenuScaled's stand-in; 1.19.2's setFocused is protected). */\n\tpublic void flint\$setFocused(boolean focused) {\n\t\tsetFocused(focused);\n\t}\n\n$1
+file ui/widget/MenuScaled.java
+s inner\.setFocused\(isFocused\(\)\) => inner.flint\$setFocused(isFocused())
+file ui/widget/SpriteButton.java
+s , DEFAULT_NARRATION\) => )
+file ui/screen/FlintCreditsScreen.java
+# 1.19.2 shows Minecraft's credits on the end poem's screen (without the poem); the attribution screen came in 1.20.
+s import net\.minecraft\.client\.gui\.screens\.CreditsAndAttributionScreen;\n => 
+s new CreditsAndAttributionScreen\(this\) => new net.minecraft.client.gui.screens.WinScreen(false, () -> minecraft.gui.setScreen(this))
+file ui/screen/UtilitiesScreen.java
+s minecraft\.getResourcePackDirectory\(\)\) => minecraft.getResourcePackDirectory().toPath())
+# A Flint screen's background drawn inside another (the menu behind a blend): with the pointer and partial tick given.
+s-in {ui/screen/MenuBlend.java,ui/screen/MenuSizesScreen.java} \b(\w+)\.renderBackground\((graphics), ([^,()]+), ([^,()]+), (\w+)\) => com.flintclient.client.compat.ScreenFrame.background($1, $2, $3, $4, $5)
+
+# ---------- the HUD's and F3's readings, sounds, maps and packs on 1.19.2 (helper "data"; compat/data has the helpers) ----------
+
+file control/platform/Mc263HudData.java
+# The sidebar as 1.19.2's Gui draws it: display slots are numbers (1 the sidebar, 3 + a team colour's id; McCompat.teamSidebar
+# answers -1 for none), its scores come in its order, lowest first, with no number formats (1.20.3), names starting with # are
+# left out and the last 15 shown (counted from all the objective's scores, as 1.19.2 counts them); each line is the name, ": "
+# and the score, and a sidebar with no scores draws nothing.
+s import net\.minecraft\.network\.chat\.numbers\.NumberFormat;\n =>
+s import net\.minecraft\.network\.chat\.numbers\.StyledFormat;\n =>
+s import net\.minecraft\.world\.scores\.DisplaySlot;\n =>
+s import net\.minecraft\.world\.scores\.PlayerScoreEntry;\n => import net.minecraft.world.scores.Score;\n
+s (?s)\t/\*\* \{@code Hud\.SCORE_DISPLAY_ORDER\}.*?String\.CASE_INSENSITIVE_ORDER\);\n\n =>
+s DisplaySlot slot = (com\.flintclient\.client\.compat\.McCompat\.teamSidebar\(team\));\n(\t+)if \(slot != null\) \{ => int slot = $1;\n$2if (slot >= 0) {
+s DisplaySlot\.SIDEBAR => Scoreboard.DISPLAY_SLOT_SIDEBAR
+s (?s)\t\tList<PlayerScoreEntry> shown = new ArrayList<>\(\);\n.*?\t\treturn new int\[\] \{widest, lines\};\n => \t\tjava.util.Collection<Score> scores = scoreboard.getPlayerScores(objective);\n\t\tList<Score> shown = new ArrayList<>();\n\t\tfor (Score score : scores) {\n\t\t\tif (score.getOwner() != null && !score.getOwner().startsWith("#")) {\n\t\t\t\tshown.add(score);\n\t\t\t}\n\t\t}\n\t\tif (shown.size() > 15) {\n\t\t\tshown = shown.subList(Math.min(shown.size(), scores.size() - 15), shown.size());\n\t\t}\n\t\tint lines = shown.size();\n\t\tif (lines == 0) {\n\t\t\treturn null;\n\t\t}\n\t\tFont font = minecraft.font;\n\t\tint widest = font.width(objective.getDisplayName());\n\t\tint spacer = font.width(": ");\n\t\tfor (Score score : shown) {\n\t\t\tComponent name = PlayerTeam.formatNameForTeam(scoreboard.getPlayersTeam(score.getOwner()), Component.literal(score.getOwner()));\n\t\t\twidest = Math.max(widest, font.width(name) + spacer + font.width(Integer.toString(score.getScore())));\n\t\t}\n\t\treturn new int[] {widest, lines};\n
+# 1.19.2's worlds always run at 20 ticks a second (1.20.3 let servers change the tick rate).
+s \t\tClientLevel level = Minecraft\.getInstance\(\)\.level;\n\t\treturn level == null \? 20\.0F : level\.tickRateManager\(\)\.tickrate\(\); => \t\t// 1.19.2's worlds always run at 20 ticks a second (1.20.3 let servers change it).\n\t\treturn 20.0F;
+
+file control/platform/Mc263BetterF3.java
+# Custom F3 (unavailable on 1.19.x, ModuleAvailability; the file stays whole for what other modules call): 1.19.2's F3 charts
+# are switches in the options, the profiler pie and the FPS + TPS graphs, with no network charts (1.20.2), read and set
+# through compat/data/DebugCharts.
+s \(Charts\) (?:Minecraft\.getInstance\(\)|mc)\.getDebugOverlay\(\) => com.flintclient.client.compat.data.DebugCharts.INSTANCE
+s (?:Minecraft\.getInstance\(\)|mc)\.getDebugOverlay\(\)\.(showNetworkCharts|showProfilerChart|toggleProfilerChart|toggleFpsCharts)\(\) => com.flintclient.client.compat.data.DebugCharts.$1()
+# 1.19.2 keeps the frame rate to itself (it heads the fps text, compat/data/DataCompat.fps), the server's brand on the player
+# and the integrated server's smoothed tick time as its average tick time; its worlds always tick normally (1.20.3 added
+# freezing, stepping and sprinting), and a server chunk's future holds the chunk or why it failed.
+s import net\.minecraft\.world\.TickRateManager;\n =>
+s mc\.getFps\(\) => com.flintclient.client.compat.data.DataCompat.fps(mc)
+s connection\.serverBrand\(\) => mc.player.getServerBrand()
+s integrated\.getCurrentSmoothedTickTime\(\) => integrated.getAverageTickTime()
+s (?s)\t\t\t\tTickRateManager ticks = mc\.level\.tickRateManager\(\);\n.*?\t\t\t\tline\("tick_manager_status", true, lang\("text\.flintf3\.line\.tick_manager_status\." \+ status\)\); => \t\t\t\tline("tick_manager_status", true, lang("text.flintf3.line.tick_manager_status.normal"));
+s \.thenApply\(result -> result\.orElse\(null\)\) => .thenApply(result -> result.left().orElse(null))
+
+file control/platform/sound/SoundPhysicsParams.java
+# The sound types from the hanging sign on (the list's last fourteen) came in 1.19.3 to 1.20: no 1.19.2 block makes those
+# sounds, so the list stops before them (their reflectivity and occlusion settings have nothing to change there).
+s , SoundType\.HANGING_SIGN,\n(?s:.*?)SoundType\.DECORATED_POT_CRACKED\}; => };
+
+file control/platform/Mc263MapScanner.java
+# 1.19.2's map colours are MaterialColor (1.20 renamed it MapColor) and its short grass is Blocks.GRASS (1.20.3 renamed it);
+# it has no pitcher plant (1.20).
+s import net\.minecraft\.world\.level\.block\.PitcherCropBlock;\n =>
+s (\w) \|\| block instanceof PitcherCropBlock\b => $1
+s \bMapColor\b => MaterialColor
+s \bBlocks\.SHORT_GRASS\b => Blocks.GRASS
+
+file control/platform/UiSounds.java
+# 1.19.2's Sound is made from its name as text and names its own file, sounds/<path>.ogg (1.19.3 added SOUND_LISTER).
+s Sound\.SOUND_LISTER\.idToFile\((\w+)\) => new ResourceLocation($1.getNamespace(), "sounds/" + $1.getPath() + ".ogg")
+s new Sound\(id, => new Sound(id.toString(),
+
+file control/platform/Mc263SoundActivity.java
+# 1.19.2 hands its listeners no range (1.20.2): the one its engine measured earshot with, the sound's attenuation distance
+# (more for a sound louder than 1); and its engine puts the listener at the camera (SoundEngine.updateSource), not saying where.
+s public void onPlaySound\(SoundInstance sound, WeighedSoundEvents events, float range\) \{ => public void onPlaySound(SoundInstance sound, WeighedSoundEvents events) {
+s (\t+)(if \(caption == null\) \{\n\t+return;\n\t+\}\n) => $1$2$1float range = Math.max(sound.getVolume(), 1.0F) * sound.getSound().getAttenuationDistance();\n
+s Minecraft\.getInstance\(\)\.getSoundManager\(\)\.getListenerTransform\(\)\.position\(\) => com.flintclient.client.compat.McCompat.mainCamera().getPosition()
+
+file control/platform/ambient/AmbientCompat.java
+# ProblemReporter came in 1.20.5 (the 1.21.1 rules save the entity without one already).
+s import net\.minecraft\.util\.ProblemReporter;\n =>
+
+file control/platform/ambient/BiomeEnvironment.java
+# 1.19.2's biome says whether it has rain or snow at all, and the temperature decides which falls where (1.19.4 made that
+# getPrecipitationAt): rain falls where there is precipitation and it's warm enough to rain, as 1.19.2 draws it.
+s holder\.value\(\)\.getPrecipitationAt\(pos\) == Biome\.Precipitation\.RAIN => holder.value().getPrecipitation() != Biome.Precipitation.NONE && holder.value().warmEnoughToRain(pos)
+
+# Resource packs: 1.19.2's repository sets the whole selection (no addPack or removePack, 1.20) and its options have no
+# updateResourcePacks (1.20): compat/data/DataCompat does each as the newer method does, saving the list and reloading as
+# Done on 1.19.2's Resource Packs screen does. It has no feature packs (1.19.3), so there are none to leave out.
+s-in {control/platform/Mc263Packs.java,control/platform/Mc263LivePacks.java} \b(\w+)\.(addPack|removePack)\((\w) => com.flintclient.client.compat.data.DataCompat.$2($1, $3
+s-in {control/platform/Mc263Packs.java,control/platform/Mc263LivePacks.java} \b((?:Minecraft\.getInstance\(\)|mc)\.options)\.updateResourcePacks\((\w+)\) => com.flintclient.client.compat.data.DataCompat.updateResourcePacks($1, $2)
+file control/platform/Mc263Packs.java
+s \n\t+\|\| pack\.getPackSource\(\) == net\.minecraft\.server\.packs\.repository\.PackSource\.FEATURE\) => )
+file control/platform/Mc263HudExtras.java
+s (isFixedPosition\(\)) \|\| pack\.getPackSource\(\) == PackSource\.FEATURE\) => $1)
+
+file platform/AtlasImage.java
+# 1.19.2's NativeImage copies a block within one image only: compat/data/DataCompat copies it into another, a row at a time.
+s from\.texture\.getPixels\(\)\.copyRect\(texture\.getPixels\(\), fromU, fromV, u, v, w, h, false, false\); => com.flintclient.client.compat.data.DataCompat.copyRect(from.texture.getPixels(), texture.getPixels(), fromU, fromV, u, v, w, h);
+
+file platform/HudData.java
+# 1.19.2's language has no getOrDefault with a fallback (1.19.4): it answers a missing key with the key itself, so has() decides.
+s return Language\.getInstance\(\)\.getOrDefault\(key, fallback\); => Language language = Language.getInstance();\n\t\treturn language.has(key) ? language.getOrDefault(key) : fallback;
+
+file platform/HudEffects.java
+# MobEffectInstance.endsWithin came in 1.20: the duration compared, an effect without a counter (1.19.2's infinite one) never ending.
+s return e\(effect\)\.endsWithin\(ticks\); => MobEffectInstance instance = e(effect);\n\t\treturn !instance.isNoCounter() && instance.getDuration() <= ticks;
+
+# ---------- screens (the screens helper): Flint's screens and toasts on 1.19.2's screen, list, toast and skin APIs ----------
+
+# Flint's toasts: 1.19.2 hands a toast a PoseStack, and has no notification time setting (1.20 added it): a toast shows for
+# its own time.
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} public Visibility render\(GuiGraphics graphics, ToastComponent manager, long visibleMillis\) \{ => public Visibility render(com.mojang.blaze3d.vertex.PoseStack flint\$pose, ToastComponent manager, long visibleMillis) {\n\t\tGuiGraphics graphics = GuiGraphics.of(flint\$pose);
+s-in {control/platform/Mc263HintToast.java,control/platform/Mc263NoticeToast.java} SHOW_MILLIS \* manager\.getNotificationDisplayTimeMultiplier\(\) => SHOW_MILLIS
+
+file ui/screen/ChatSafetyScreens.java
+# 1.19.2's warning screen asks for its buttons with initButtons(text height) and has no layouts (1.19.3 brought them): the
+# footer row is compat/screens/ButtonRow, centred under the checkbox where 1.19.2 puts a warning's buttons.
+s import net\.minecraft\.client\.gui\.layouts\.Layout;\nimport net\.minecraft\.client\.gui\.layouts\.LinearLayout;\n =>
+s protected Layout addFooterButtons\(\) \{\n(\t+)LinearLayout row = LinearLayout\.horizontal\(\)\.spacing\(8\); => protected void initButtons(int flint\$textHeight) {\n$1com.flintclient.client.compat.screens.ButtonRow row = com.flintclient.client.compat.screens.ButtonRow.horizontal().spacing(8);
+s (\t+)return row; => $1row.arrange(width / 2, 100 + flint\$textHeight).forEach(this::addRenderableWidget);
+# 1.20's ConfirmLinkScreen.confirmLink (a button's action, the link trusted): asks before opening the page, then comes back.
+s ConfirmLinkScreen\.confirmLink\(this, WIKI, true\) => button -> com.flintclient.client.compat.McCompat.confirmLink(this, WIKI)
+
+file control/platform/TierSearchScreen.java
+# 1.19.2 has no StringWidget (1.19.4) or PlayerSkinWidget (1.20.2): compat/screens has both (the player's model in their skin,
+# turned by dragging, drawn as 1.20.2 draws it).
+s import net\.minecraft\.client\.gui\.components\.PlayerSkinWidget; => import com.flintclient.client.compat.screens.PlayerSkinWidget;
+s import net\.minecraft\.client\.gui\.components\.StringWidget; => import com.flintclient.client.compat.screens.StringWidget;
+# A player's profile by name, and their skin: 1.19.2 has its profile cache only while a world is open, and no skin lookup that
+# answers with a supplier (compat/screens/Skins).
+s net\.minecraft\.world\.level\.block\.entity\.SkullBlockEntity\.fetchGameProfile\(query\)\.join\(\) => com.flintclient.client.compat.screens.Skins.profileByName(mc, query)
+s mc\.getSkinManager\(\)\.lookupInsecure\(profile\) => com.flintclient.client.compat.screens.Skins.lookupInsecure(mc, profile)
+
+file ui/screen/DemoWorld.java
+# 1.19.2 starts the demo as its own title screen does: the world is there when it has a summary, an existing one loads with
+# loadLevel (back to the menu if it can't), and a new one is made with the built-in registries and the demo's world settings
+# (1.19.3 brought WorldOptions and the dimension presets).
+s import net\.minecraft\.world\.level\.levelgen\.WorldOptions;\n => import net.minecraft.core.RegistryAccess;\n
+s access\.hasWorldData\(\) => access.getSummary() != null
+s minecraft\.createWorldOpenFlows\(\)\.openWorld\(LEVEL_ID, \(\) -> minecraft\.gui\.setScreen\(menu\)\); => minecraft.createWorldOpenFlows().loadLevel(menu, LEVEL_ID);
+s (\t+)minecraft\.createWorldOpenFlows\(\)\n\t+\.createFreshLevel\(LEVEL_ID, MinecraftServer\.DEMO_SETTINGS, WorldOptions\.DEMO_OPTIONS, WorldPresets::createNormalWorldDimensions, menu\); => $1RegistryAccess registries = RegistryAccess.builtinCopy().freeze();\n$1minecraft.createWorldOpenFlows().createFreshLevel(LEVEL_ID, MinecraftServer.DEMO_SETTINGS, registries, WorldPresets.demoSettings(registries));
+
+file module/account/AccountSkin.java
+# 1.19.2 has no Minecraft.getGameProfile() and no skin record: compat/screens/Skins fetches the signed-in profile's properties
+# (Minecraft keeps them once fetched) and loads a profile's skin as 1.20.2's skin manager does.
+s minecraft::getGameProfile => () -> com.flintclient.client.compat.screens.Skins.ownProfile(minecraft)
+s minecraft\.getSkinManager\(\)\.getOrLoad\(profile\) => com.flintclient.client.compat.screens.Skins.getOrLoad(minecraft, profile)
+
+file control/keys/KeyBindsSearchScreen.java
+# 1.19.2's lists take their top and bottom (1.20.3 their height) and draw dirt over what is above and below them (here the
+# search row and Done): this one draws only inside itself, as 1.20.3's does (a scissor), with 1.20.5's scrollbar beside the
+# rows (1.19.2's sits at the middle + 124, over these wide rows, and takes the clicks right of it).
+s super\(minecraft, width, height, top, rowHeight\);\n\t\t\} => super(minecraft, width, top + height, top, top + height, rowHeight);\n\t\t\tsetRenderTopAndBottom(false);\n\t\t}\n\n\t\t@Override\n\t\tpublic void render(com.mojang.blaze3d.vertex.PoseStack flint\$pose, int mouseX, int mouseY, float partialTick) {\n\t\t\tGuiGraphics graphics = GuiGraphics.of(flint\$pose);\n\t\t\tgraphics.enableScissor(x0, y0, x1, y1);\n\t\t\tsuper.render(flint\$pose, mouseX, mouseY, partialTick);\n\t\t\tgraphics.disableScissor();\n\t\t}\n\n\t\t@Override\n\t\tprotected int getScrollbarPosition() {\n\t\t\treturn x0 + width / 2 - getRowWidth() / 2 + getRowWidth() + 10;\n\t\t}
+# A list entry draws with 1.19.2's PoseStack.
+s public void render\(GuiGraphics graphics, int index, int top, int left, int lineWidth, int lineHeight, int mouseX, int mouseY, boolean hovered, float partialTick\) \{ => public void render(com.mojang.blaze3d.vertex.PoseStack flint\$pose, int index, int top, int left, int lineWidth, int lineHeight, int mouseX, int mouseY, boolean hovered, float partialTick) {\n\t\t\t\tGuiGraphics graphics = GuiGraphics.of(flint\$pose);
+
+file ui/screen/FlintTitleScreen.java
+# 1.19.2's screens have no added() (1.19.4 brought it, run before the first init after Gui.setScreen): here the first init
+# after the menu is shown runs it (removed() ends the showing; a resize builds the menu anew without showing it again).
+s \t@Override\n\tpublic void added\(\) \{ => \t/** Whether added() has run for this showing (1.19.2 has no added()). */\n\tprivate boolean flint\$shown;\n\n\tprivate void added() {
+s (\t@Override\n\tprotected void init\(\) \{\n) => $1\t\tif (!flint\$shown) {\n\t\t\tflint\$shown = true;\n\t\t\tadded();\n\t\t}\n
+s (\t@Override\n\tpublic void removed\(\) \{\n) => $1\t\tflint\$shown = false;\n
+
+file ui/screen/MultiplayerAccess.java
+# 1.19.2 bans no names (a later Minecraft added name bans): its title screen gives the multiplayer ban, or none.
+s \t\tif \(minecraft\.isNameBanned\(\)\) \{\n\t\t\treturn Component\.translatable\("title\.multiplayer\.disabled\.banned\.name"\);\n\t\t\}\n =>
+
+file platform/Services.java
+# 1.19.2 has no panorama speed (1.19.4 added it): nothing signals reduced motion, so Flint's transitions play.
+s (\t\t)Minecraft minecraft = Minecraft\.getInstance\(\);\n\t\treturn minecraft\.options != null && minecraft\.options\.panoramaSpeed\(\)\.get\(\) <= 0\.0; => $1return false;
+
+file module/servers/ServerShortcuts.java
+# 1.19.2's pinger doesn't say when a ping has finished (1.20 calls back after the pong): compat/screens/ServerPings watches for
+# the measured ping on the ticks the menu runs.
+s activePinger\.pingServer\(data, \(\) -> \{\n\t+\}, \(\) -> onReply\.accept\(result\(data\)\)\); => com.flintclient.client.compat.screens.ServerPings.ping(activePinger, data, () -> onReply.accept(result(data)));
+s (\t+)pinger\.tick\(\);\n => $1pinger.tick();\n$1com.flintclient.client.compat.screens.ServerPings.tick();\n
+
+file control/rshift/AdvancementsListScreen.java
+# 1.19.2's progress text is plain text ("2/5"; 1.20 made it a component).
+s Component text = progress == null \? null : progress\.getProgressText\(\); => String text = progress == null ? null : progress.getProgressText();
+s text == null \? "" : text\.getString\(\) => text == null ? "" : text
+
+file control/platform/Mc263GameOptions.java
+# 1.19.2's pause menu leaves at once: it has no report drafts to offer first (1.19.3 added them).
+s mc\.getReportingContext\(\)\.draftReportHandled\(mc, back, \(\) -> com\.flintclient\.client\.compat\.McCompat\.leaveWorld\(mc\),\n\t+true\) => com.flintclient.client.compat.McCompat.leaveWorld(mc)
+s \(a report draft is offered first, as there\) => (1.19.2's offers no report draft first)
+
+# ---------- vertices: 1.19.2's poses hold its own matrices, and a vertex ends with endVertex (compat/render/Verts) ----------
+s-in {control/platform/Mc263Skins.java,control/platform/Mc263Capes.java,control/platform/Mc263CapeElytra.java} \bMatrix4f (\w+) = (\w+)\.pose\(\); => Matrix4f $1 = com.flintclient.client.compat.render.Verts.joml($2);
+s-in {control/platform/Mc263Skins.java,control/platform/Mc263Capes.java,control/platform/Mc263CapeElytra.java} \bpose\.transformNormal\( => com.flintclient.client.compat.render.Verts.transformNormal(pose,
+s-in {control/platform/Mc263Skins.java,control/platform/Mc263Capes.java,control/platform/Mc263CapeElytra.java} \b(buffer|b)\.addVertex\(POS\.x\(\), => com.flintclient.client.compat.render.Verts.vertex($1, POS.x(),
+s-in control/platform/Mc263Skins.java \bpose\.last\(\)\.pose\(\)\.getTranslation\( => com.flintclient.client.compat.render.Verts.joml(pose.last()).getTranslation(
+s-in control/platform/Mc263Visuals.java buffer\.addVertex\(pose, (\w+), (\w+), (\w+)\)\.setColor\(color\); => buffer.vertex(pose.pose(), $1, $2, $3).color(color).endVertex();
+s-in control/platform/Mc263LootBeams.java vc\.addVertex\(p, x, y, z\)\.setColor\(r, g, b, a\)\.setUv\(u, v\)\.setOverlay\(OverlayTexture\.NO_OVERLAY\)\.setLight\(FULL_BRIGHT\)\.setNormal\(p, 0, 1, 0\); => vc.vertex(p.pose(), x, y, z).color(r, g, b, a).uv(u, v).overlayCoords(OverlayTexture.NO_OVERLAY).uv2(FULL_BRIGHT).normal(p.normal(), 0, 1, 0).endVertex();
+
+file compat/MapQuads.java
+s Matrix4f pose = g\.pose\(\)\.last\(\)\.pose\(\); => com.mojang.math.Matrix4f pose = g.pose().last().pose();
+s BufferBuilder buffer = Tesselator\.getInstance\(\)\.begin\(VertexFormat\.Mode\.TRIANGLE_FAN, DefaultVertexFormat\.POSITION_TEX\); => BufferBuilder buffer = Tesselator.getInstance().getBuilder();\n\t\tbuffer.begin(VertexFormat.Mode.TRIANGLE_FAN, DefaultVertexFormat.POSITION_TEX);
+s buffer\.addVertex\(pose, xy\[2 \* i\], xy\[2 \* i \+ 1\], 0\)\.setUv\(uv\[2 \* i\], uv\[2 \* i \+ 1\]\); => buffer.vertex(pose, xy[2 * i], xy[2 * i + 1], 0).uv(uv[2 * i], uv[2 * i + 1]).endVertex();
+s BufferUploader\.drawWithShader\(buffer\.buildOrThrow\(\)\); => BufferUploader.drawWithShader(buffer.end());
+
+file control/platform/Mc263HealthIndicators.java
+# The hearts over players: 1.19.2 keeps them in icons.png (no GUI atlas; compat/GuiSprites has their places).
+s new net\.minecraft\.resources\.ResourceLocation\("textures/atlas/gui\.png"\) => new net.minecraft.resources.ResourceLocation("textures/gui/icons.png")
+s import net\.minecraft\.client\.renderer\.texture\.TextureAtlasSprite;\n =>
+s \t+TextureAtlas atlas = \(TextureAtlas\) Minecraft\.getInstance\(\)\.getTextureManager\(\)\.getTexture\(GUI_ATLAS\);\n =>
+s atlas\.getSprite\((\w+)\) => com.flintclient.client.compat.GuiSprites.region($1)
+s \bTextureAtlasSprite\b => com.flintclient.client.compat.GuiSprites.Region
+s !\(state instanceof Health health\) => !(((Object) state) instanceof Health health)
+s poseStack\.mulPose\(new Matrix4f\(\)\.rotation\(camera\.orientation\)\); => com.flintclient.client.compat.McCompat.rotate(poseStack, camera.orientation);
+s Matrix4f model = entry\.pose\(\); => com.mojang.math.Matrix4f model = entry.pose();
+s private static void drawHeart\(Matrix4f model, => private static void drawHeart(com.mojang.math.Matrix4f model,
+s private static void vertex\(Matrix4f model, => private static void vertex(com.mojang.math.Matrix4f model,
+s vertices\.addVertex\(model, x, y, z\)\.setColor\(255, 255, 255, 255\)\.setUv\(u, v\)\.setOverlay\(0\)\.setLight\(15728880\)\.setNormal\(0\.0F, 0\.0F, 1\.0F\); => vertices.vertex(model, x, y, z).color(255, 255, 255, 255).uv(u, v).overlayCoords(0).uv2(15728880).normal(0.0F, 0.0F, 1.0F).endVertex();
+
+file control/platform/MobFillLayer.java
+# 1.19.2's models take their tint as four floats.
+s OverlayTexture\.NO_OVERLAY, fill\) => OverlayTexture.NO_OVERLAY, (fill >> 16 & 0xFF) / 255.0F, (fill >> 8 & 0xFF) / 255.0F, (fill & 0xFF) / 255.0F, (fill >>> 24) / 255.0F)
+
+file control/platform/Mc263LookMods.java
+# 1.19.2 draws items and armour with one glint texture (1.20.5 split them): it takes the item glint's look (Glint's armour rows say so).
+s net\.minecraft\.client\.renderer\.entity\.ItemRenderer\.ENCHANTED_GLINT_ITEM => net.minecraft.client.renderer.entity.ItemRenderer.ENCHANT_GLINT_LOCATION
+s \t+apply\(1, net\.minecraft\.client\.renderer\.entity\.ItemRenderer\.ENCHANTED_GLINT_ENTITY, [^\n]*\n =>
+
+# Tooltip pictures (Saturation, shulker previews): 1.19.2 hands them a PoseStack, the item renderer and the depth.
+s-in {control/platform/Mc263Food.java,control/platform/Mc263Containers.java} public void renderImage\(Font font, int (\w+), int (\w+), GuiGraphics graphics\) \{ => public void renderImage(Font font, int $1, int $2, com.mojang.blaze3d.vertex.PoseStack flint\$pose, net.minecraft.client.renderer.entity.ItemRenderer flint\$items, int flint\$z) {\n\t\t\tGuiGraphics graphics = GuiGraphics.of(flint\$pose);
+
+file control/platform/Mc263Hitbox.java
+# Reach: 1.19.2 has no interaction-range attribute (survival 3, creative 6 for entities, as its GameRenderer picks them).
+s box\.distanceToSqr\( => com.flintclient.client.compat.McCompat.distanceToSqr(box,
+s player\.entityInteractionRange\(\) \* player\.entityInteractionRange\(\) => com.flintclient.client.compat.McCompat.entityReach(player) * com.flintclient.client.compat.McCompat.entityReach(player)
+s vehicle\.getPassengerRidingPosition\(entity\) => vehicle.position().add(0.0, vehicle.getPassengersRidingOffset() + entity.getMyRidingOffset(), 0.0)
+
+file control/platform/Mc263Features.java
+s target\.getBoundingBox\(\)\.distanceToSqr\( => com.flintclient.client.compat.McCompat.distanceToSqr(target.getBoundingBox(),
+
+file control/platform/Mc263HudExtras.java
+s InventoryScreen\.renderEntityInInventoryFollowsMouse\(graphics, => com.flintclient.client.compat.McCompat.entityInInventory(graphics,
+
+file control/platform/Mc263Animations.java
+s horse\.walkAnimation\.position\(\) => horse.animationPosition
+s player\.getInBlockState\(\) => player.getFeetBlockState()
+
+file control/platform/Mc263ArmorHud.java
+s player\.makeSound\(BREAKING\); => player.playSound(BREAKING, 1.0F, 1.0F);
+
+file control/platform/Mc263Chat.java
+s style\.getHoverEvent\(\)\.getValue\(HoverEvent\.Action\.SHOW_ENTITY\) instanceof HoverEvent\.EntityTooltipInfo show => ((Object) style.getHoverEvent().getValue(HoverEvent.Action.SHOW_ENTITY)) instanceof HoverEvent.EntityTooltipInfo show
+
+file control/platform/Mc263ChatHeads.java
+s Component\.translatableWithFallback\(contents\.getKey\(\), contents\.getFallback\(\), changed\) => Component.translatable(contents.getKey(), changed)
+
+file control/platform/Mc263Presence.java
+s connection\.getListedOnlinePlayers\(\) => connection.getOnlinePlayers()
+
+file control/platform/Mc263Nametags.java
+# A nametag's place: 1.19.2 puts it over the entity's box (no attachment points, 1.20.5).
+s import net\.minecraft\.world\.entity\.EntityAttachment;\n =>
+s entity\.getAttachments\(\)\.getNullable\(EntityAttachment\.NAME_TAG, 0, net\.minecraft\.util\.Mth\.lerp\(partialTick, entity\.yRotO, entity\.getYRot\(\)\)\) => new net.minecraft.world.phys.Vec3(0.0, entity.getBbHeight(), 0.0)
+s bound\.chatType\(\)\.is\((ChatType\.\w+)\) => com.flintclient.client.compat.McCompat.chatTypeIs(bound, $1)
+
+# ---------- Gson 2.8.9 (1.19.2's): no JsonObject.isEmpty (2.10.1) ----------
+file control/store/ShareCodes.java
+s if \(!inner\.isEmpty\(\)\) \{ => if (inner.size() != 0) {
+
+# A widget moved in one call (1.19.3's setPosition): compat/WidgetBridge.place (1.19.2's own setPosition on some buttons
+# would clash with an added method of that name).
+s-in {control/platform/Mc263Reconnect.java,control/platform/TierSearchScreen.java} \b(shown|skin)\.setPosition\( => com.flintclient.client.compat.WidgetBridge.place($1, 
+
+# ---------- fair play and Item Customizer (fp-104) on 1.19.2 ----------
+file control/platform/Mc263ServerRules.java
+# 1.19.2 keeps the server's brand on the player (1.20.2 moved it to the connection).
+s connection == null \? null : connection\.serverBrand\(\)\) => mc.player == null ? null : mc.player.getServerBrand())
+file control/platform/Mc263ViewModel.java
+# 1.19.2 has no tool or armour item tags (1.19.3 and 1.20.5 added them): hoes and armour are known by their item classes.
+s stack\.is\(ItemTags\.HOES\) => (stack.getItem() instanceof net.minecraft.world.item.HoeItem)
+s stack\.is\(ItemTags\.HEAD_ARMOR\) \|\| stack\.is\(ItemTags\.CHEST_ARMOR\) \|\| stack\.is\(ItemTags\.LEG_ARMOR\) \|\| stack\.is\(ItemTags\.FOOT_ARMOR\) => stack.getItem() instanceof net.minecraft.world.item.ArmorItem
+file control/platform/Mc263HudExtras.java
+s Registry\.BLOCK\.getOptional\(id\.withPath\(path\)\) => Registry.BLOCK.getOptional(new net.minecraft.resources.ResourceLocation(id.getNamespace(), path))
+
+# ---------- fp-104's main menu (Discover, the showcase, the Discord card, other mods' buttons) ----------
+file platform/MenuHost.java
+# Discover's Join: 1.19.2's ServerData only says whether a server is on your LAN, and its connect screen has no Quick Play flag or transfer.
+s net\.minecraft\.client\.multiplayer\.ServerData\.Type\.OTHER\) => false)
+s (ConnectScreen\.startConnecting\([^;]*?), false, null\) => $1)
+
+# ---------- the hot loader (hotload/HotLoader) on 1.19.x ----------
+# As on 1.21.x (whose overlay has these rules too: s* here, so they do nothing once the 1.21.11 overlay's have run): Fabric API's
+# key registry is the key binding one, Minecraft's fields have intermediary names at run time (the key list is set through
+# mixin/bridge/OptionsKeysAccessor), a key is found by its name in the list and pressed by its saved name.
+file hotload/HotLoader.java
+s* net\.fabricmc\.fabric\.impl\.client\.keymapping\.KeyMappingRegistryImpl => net.fabricmc.fabric.impl.client.keybinding.KeyBindingRegistryImpl
+s* field\(net\.minecraft\.client\.Options\.class, "keyMappings"\)\.set\(mc\.options, next\) => ((com.flintclient.client.mixin.bridge.OptionsKeysAccessor) mc.options).flint\$keyMappings(next)
+s* KeyMapping key = KeyMapping\.get\(name\); => KeyMapping key = Arrays.stream(Minecraft.getInstance().options.keyMappings).filter(k -> k.getName().equals(name)).findFirst().orElse(null);
+s* \(com\.mojang\.blaze3d\.platform\.InputConstants\.Key\) field\(KeyMapping\.class, "key"\)\.get\(key\) => com.mojang.blaze3d.platform.InputConstants.getKey(key.saveString())
+s* \} catch \(ReflectiveOperationException e\) \{\n(\t+)return "failed " => } catch (RuntimeException e) {\n$1return "failed "
+# The hook (thirdparty/mixin/HotLoadKeyMappingMixin) is this overlay's own file; it applies when Fabric API's key binding module is there.
+file thirdparty/ThirdPartyMixinPlugin.java
+s* "fabric-key-mapping-api-v1" => "fabric-key-binding-api-v1"
+
+# ---------- Sodium on 1.19.x ----------
+# Sodium 0.4.4 (1.19.2's) overwrites SingleQuadParticle.render (MixinBillboardParticle), which Mixin won't inject into: the
+# game crashed at start with it. Particle Changer's opacity hook (mixin/feature/ParticleOpacityMixin) is left out while Sodium
+# is loaded (its particles are drawn by Sodium's own writer then).
+file FlintMixinPlugin.java
+s public boolean shouldApplyMixin\(String targetClassName, String mixinClassName\) \{\n(\t+)return true; => public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {\n$1return !mixinClassName.endsWith(".ParticleOpacityMixin") || !net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("sodium");

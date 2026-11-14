@@ -54,6 +54,28 @@ class LayoutTest {
 	}
 
 	@Test
+	void revisionIsAddedUpAgainOnlyAfterAChangeButNeverMissesOne() {
+		Layout layout = new Layout("a", "A");
+		Layout other = new Layout("b", "B");
+		long start = layout.revision();
+		assertEquals(start, layout.revision(), "nothing changed: the same sum");
+		// Another layout's change makes this one add up again, and its sum stays the same.
+		other.module(ModuleId.FPS).setEnabled(true);
+		assertEquals(start, layout.revision());
+		// A setting, a position, the on switch: each shows at the very next call.
+		ModuleState fps = layout.module(ModuleId.FPS);
+		fps.setEnabled(true);
+		long afterOn = layout.revision();
+		assertTrue(afterOn > start);
+		fps.setEnabled(false);
+		assertTrue(layout.revision() > afterOn);
+		long afterOff = layout.revision();
+		fps.reset();
+		layout.module(ModuleId.COORDINATES).setEnabled(true);
+		assertTrue(layout.revision() > afterOff);
+	}
+
+	@Test
 	void aCopyIsDeepAndEqual() {
 		Layout layout = new Layout("a", "A");
 		layout.module(ModuleId.FPS).setEnabled(true);

@@ -24,9 +24,12 @@ public final class Mods {
 		return ControlState.layout().modules().get(index);
 	}
 
-	/** On, and built (a module that isn't built never acts, whatever a file says). */
+	/**
+	 * On, and built (a module that isn't built never acts, whatever a file says), and allowed on this server
+	 * ({@link ServerRules}: Freelook is off on Hypixel, whatever it is set to).
+	 */
 	public static boolean on(int index) {
 		ModuleState state = state(index);
-		return state.enabled() && state.descriptor().status().usable();
+		return state.enabled() && state.descriptor().status().usable() && !ServerRules.blocked(index);
 	}
 }

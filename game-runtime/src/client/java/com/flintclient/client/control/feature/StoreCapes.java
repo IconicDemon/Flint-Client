@@ -1,23 +1,18 @@
 package com.flintclient.client.control.feature;
 
 import com.flintclient.client.FlintLog;
+import com.flintclient.client.control.store.AssetCache;
 import com.flintclient.client.control.store.CapeAnimation;
 import com.flintclient.client.control.store.StoreCosmeticsClient;
 import com.flintclient.client.control.store.StoreCosmeticsClient.Asset;
 import com.flintclient.client.control.store.StoreCosmeticsClient.Lookup;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -53,8 +47,9 @@ import org.jspecify.annotations.Nullable;
  * asked again. A player the answer leaves out wears nothing: an unequipped or revoked cape goes at the next refresh.</li>
  * <li>A failed lookup (offline, 429, 5xx, a malformed answer) keeps what was known and waits (Retry-After when given, else
  * doubling from {@link #RETRY_NANOS} to {@link #MAX_RETRY_NANOS}); an answer older than {@link #STALE_NANOS} is dropped.</li>
- * <li>Assets: loaded on one low-priority thread from the disk cache (by SHA-256, rehashed on every read) or downloaded from an
- * address {@code StoreEndpoint} allows, checked against the Store's SHA-256 and size, decoded by {@link CapePng} within the
+ * <li>Assets: loaded on one low-priority thread from Flint's shared disk cache ({@link AssetCache}: by SHA-256, rehashed on
+ * every read, shared with the launcher and every profile) or downloaded from an address {@code StoreEndpoint} allows (Flint's
+ * CDN first when the Store names it, else or when that fails the Store's storage), checked against the Store's SHA-256 and size, decoded by {@link CapePng} within the
  * cape limits, then uploaded on the game's thread ({@link #upload}). At most {@link #MAX_TEXTURES} textures and
  * {@link #MAX_TEXELS} texels; a texture nobody in view wears is released after {@link #RELEASE_NANOS}.</li>
  * <li>A player whose cape changes keeps the one shown until the new one is up (its texture uploaded), then switches in one
@@ -70,7 +65,9 @@ import org.jspecify.annotations.Nullable;
  * first, and a cape that still doesn't fit keeps its poster until there is room). One texture per animation, shared by
  * everyone wearing it: the poster's own when the frames are its size. {@link #animate} writes a frame into it only when the
  * wall clock moved to another frame, and only for capes drawn in the last second. A strip that fails its checks leaves the
- * poster, retried like a texture.</li>
+ * poster, retried like a texture. Other players' capes play the Store's card preview of the animation when it has one
+ * ({@link CapeAnimation#preview}: the same frames and timing, smaller, about a quarter of the bytes); your own cape plays the
+ * full strips, as the Cosmetics window does.</li>
  * </ul>
  *
  * <p>{@link #update}, {@link #upload} and {@link #animate} run on the game's thread (Minecraft's render thread); {@link #texture}
@@ -118,10 +115,6 @@ public final class StoreCapes<T> {
 	/** An animation not drawn for this long isn't advanced (its texture keeps the frame it had). */
 	static final long DRAWN_MILLIS = 1000;
 	static final int MAX_PLAYERS = 400;
-	/** Files kept in the disk cache (the oldest go first). */
-	static final int MAX_CACHE_FILES = 256;
-	/** Bytes kept in the disk cache: animation strips are up to 8 MiB each (the oldest files go first). */
-	static final long MAX_CACHE_BYTES = 256L * 1024 * 1024;
 	private static final long NEVER = Long.MIN_VALUE / 4;
 
 	/** The engine's textures: uploaded, written and released on the game's thread. */
@@ -156,6 +149,8 @@ public final class StoreCapes<T> {
 		@Nullable Loaded<T> showing;
 		/** Your own pick in the Cosmetics window, shown over the Store's answer until the Store settles it. */
 		@Nullable Choice<T> choice;
+		/** You (the player this game is): an animated cape plays its full strips; anyone else's its preview when there is one. */
+		boolean self;
 	}
 
 	/** A pick from the Cosmetics window ({@link CapeChoices}). */
@@ -231,10 +226,10 @@ public final class StoreCapes<T> {
 		volatile long drawnAt = Long.MIN_VALUE / 4;
 		@Nullable Shown<T> shownAs;
 
-		Loaded(Asset asset, long maxCapeFrameBytes) {
+		Loaded(Asset asset, boolean full, long maxCapeFrameBytes) {
 			this.asset = asset;
-			this.animation = asset.animation();
-			this.key = key(asset);
+			this.animation = played(asset, full);
+			this.key = key(asset, full);
 			this.keptScale = animation == null ? 0 : CapeFrames.keptScale(animation, maxCapeFrameBytes);
 		}
 
@@ -279,7 +274,7 @@ public final class StoreCapes<T> {
 	}
 
 	private final StoreCosmeticsClient client;
-	private final @Nullable Path cacheDir;
+	private final @Nullable AssetCache cache;
 	private final Textures<T> textures;
 	private final Executor loader;
 	private final long maxFrameBytes;
@@ -318,18 +313,28 @@ public final class StoreCapes<T> {
 	private volatile long frameMillis;
 
 	/**
-	 * {@code cacheDir}: where verified textures are kept between launches (null: none); {@code loader}: where assets are read,
-	 * downloaded and decoded ({@link #loaderThread()} in the game).
+	 * {@code cache}: where verified files are kept between launches ({@link AssetCache#forGame} in the game; null: none);
+	 * {@code loader}: where assets are read, downloaded and decoded ({@link #loaderThread()} in the game).
 	 */
-	public StoreCapes(StoreCosmeticsClient client, @Nullable Path cacheDir, Textures<T> textures, Executor loader) {
-		this(client, cacheDir, textures, loader, MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
+	public StoreCapes(StoreCosmeticsClient client, @Nullable AssetCache cache, Textures<T> textures, Executor loader) {
+		this(client, cache, textures, loader, MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
+	}
+
+	/** With a cache in {@code cacheDir} (null: none), in {@link AssetCache}'s layout (tests). */
+	StoreCapes(StoreCosmeticsClient client, @Nullable Path cacheDir, Textures<T> textures, Executor loader) {
+		this(client, cacheDir == null ? null : new AssetCache(cacheDir), textures, loader, MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
 	}
 
 	/** With other frame budgets: all animations together, and one (tests). */
 	StoreCapes(StoreCosmeticsClient client, @Nullable Path cacheDir, Textures<T> textures, Executor loader, long maxFrameBytes,
 		long maxCapeFrameBytes) {
+		this(client, cacheDir == null ? null : new AssetCache(cacheDir), textures, loader, maxFrameBytes, maxCapeFrameBytes);
+	}
+
+	private StoreCapes(StoreCosmeticsClient client, @Nullable AssetCache cache, Textures<T> textures, Executor loader, long maxFrameBytes,
+		long maxCapeFrameBytes) {
 		this.client = client;
-		this.cacheDir = cacheDir;
+		this.cache = cache;
 		this.textures = textures;
 		this.loader = loader;
 		this.maxFrameBytes = maxFrameBytes;
@@ -350,6 +355,26 @@ public final class StoreCapes<T> {
 		return client;
 	}
 
+	/**
+	 * Flint's shared cache of verified cosmetic files this game uses (null: none): anything else that loads Store files (the
+	 * Cosmetics window, 3D cosmetics) reads and keeps them there, by SHA-256, so nothing is downloaded twice.
+	 */
+	public @Nullable AssetCache cache() {
+		return cache;
+	}
+
+	/** Told of every lookup the Store answered, on the game's thread: the 3D cosmetics read their slots from the same answer. */
+	public interface Answers {
+		void answered(List<UUID> asked, Lookup lookup);
+	}
+
+	private @Nullable Answers answersListener;
+
+	/** {@code listener} hears every answered lookup from now on (null: nobody). Game thread. */
+	public void listen(@Nullable Answers listener) {
+		answersListener = listener;
+	}
+
 	/** The game's own, once the engine's side made it: the Cosmetics window plays animated capes through its disk cache. */
 	private static volatile @Nullable StoreCapes<?> shared;
 
@@ -363,11 +388,22 @@ public final class StoreCapes<T> {
 	}
 
 	/**
+	 * Any Store file by its SHA-256 (a 3D cosmetic's geometry, texture or animation): the shared cache's copy, else downloaded
+	 * from Flint's CDN ({@code cdn}, when given and allowed) and, when that fails, from {@code url}, checked and kept in the
+	 * cache. At most {@code maxBytes}. Blocking: a worker thread.
+	 */
+	public byte[] file(java.net.@Nullable URI cdn, java.net.URI url, String sha256, int maxBytes, String what) throws Exception {
+		byte[] bytes = fetch(sha256, maxBytes, () -> client.download(cdn, url, maxBytes, sha256), what);
+		store(sha256, bytes);
+		return bytes;
+	}
+
+	/**
 	 * Strip {@code s}'s bytes, checked against its SHA-256: the disk cache's copy, else downloaded from where the endpoint
 	 * allows and kept there (so the cape worn and its tile in the Cosmetics window load it once). Blocking: a worker thread.
 	 */
 	public byte[] strip(CapeAnimation.Strip s) throws Exception {
-		byte[] bytes = fetch(s.sha256(), CapeAnimation.MAX_STRIP_BYTES, () -> client.download(s));
+		byte[] bytes = fetch(s.sha256(), CapeAnimation.MAX_STRIP_BYTES, () -> client.download(s), "strip");
 		store(s.sha256(), bytes);
 		return bytes;
 	}
@@ -483,6 +519,14 @@ public final class StoreCapes<T> {
 	 * (you, then the nearest).
 	 */
 	public void update(long now, boolean on, List<UUID> players) {
+		update(now, on, players, players.isEmpty() ? null : players.get(0));
+	}
+
+	/**
+	 * {@link #update(long, boolean, List)} with {@code self}, the player this game is (null: not known): your animated cape plays
+	 * its full strips, everyone else's the Store's smaller preview when it has one.
+	 */
+	public void update(long now, boolean on, List<UUID> players, @Nullable UUID self) {
 		this.now = now;
 		take(now);
 		if (!on) {
@@ -515,12 +559,19 @@ public final class StoreCapes<T> {
 			order.add(id);
 		}
 		prune(now);
+		for (Map.Entry<UUID, Entry<T>> me : entries.entrySet()) {
+			boolean you = me.getKey().equals(self);
+			if (me.getValue().self != you) {
+				me.getValue().self = you;
+				visibleDirty = true;
+			}
+		}
 		expireChoices(now);
 		request(now);
 		for (UUID id : order) {
 			Entry<T> e = entries.get(id);
 			if (e.cape != null) {
-				want(e.cape, now);
+				want(e.cape, e.self, now);
 			}
 			// What they are drawn with (and your pick) stays loaded while the cape they change to loads.
 			if (e.showing != null) {
@@ -532,8 +583,9 @@ public final class StoreCapes<T> {
 		}
 		// Frames once every cape worn in view is marked used: only the others may make room.
 		for (UUID id : order) {
-			Asset cape = entries.get(id).cape;
-			Loaded<T> l = cape == null || cape.animation() == null ? null : assets.get(key(cape));
+			Entry<T> e = entries.get(id);
+			Asset cape = e.cape;
+			Loaded<T> l = cape == null || cape.animation() == null ? null : assets.get(key(cape, e.self));
 			if (l != null) {
 				wantFrames(l, now);
 			}
@@ -644,11 +696,14 @@ public final class StoreCapes<T> {
 				animated++;
 			}
 		}
+		AssetCache.Stats files = cache == null ? null : cache.stats();
 		return "Store capes: " + client.endpoint().host() + ", " + entries.size() + " players known, " + wearing + " wearing, "
 			+ visible.size() + " shown, " + uploaded + " textures, " + animated + " animated (" + playing.size() + " playing, "
 			+ frameBytes() / (1024 * 1024) + " MiB of frames, " + frameWrites + " frame writes"
 			+ (frameWrites == 0 ? "" : String.format(java.util.Locale.ROOT, " of %.1f µs on average", frameWriteNanos / 1000.0 / frameWrites))
 			+ "), " + requests + " lookups"
+			+ (files == null ? "" : ", " + files.downloads() + " downloads (" + files.downloadedBytes() / 1024 + " KiB), " + files.hits()
+				+ " read from the cache (" + files.hitBytes() / 1024 + " KiB)")
 			+ (failing ? ", waiting for the Store" : "");
 	}
 
@@ -748,6 +803,10 @@ public final class StoreCapes<T> {
 				}
 				failing = false;
 				answeredOnce = true;
+				Answers listener = answersListener;
+				if (listener != null) {
+					listener.answered(a.asked(), l);
+				}
 			} else {
 				long given = l.retryAfterSeconds() > 0 ? Math.min(TimeUnit.SECONDS.toNanos(l.retryAfterSeconds()), MAX_RETRY_AFTER_NANOS) : 0;
 				long wait = Math.max(retry, given);
@@ -818,14 +877,28 @@ public final class StoreCapes<T> {
 
 	// ---------- assets ----------
 
-	/** The texture an asset is loaded as: its poster's hash, and its animation's key for an animated cape. */
+	/** The texture an asset is loaded as for you: its poster's hash, and its animation's key for an animated cape. */
 	static String key(Asset asset) {
-		CapeAnimation animation = asset.animation();
+		return key(asset, true);
+	}
+
+	/**
+	 * The texture an asset is loaded as ({@code full}: for you, else for another player): its poster's hash, and the key of the
+	 * animation it plays ({@link #played}) for an animated cape.
+	 */
+	static String key(Asset asset, boolean full) {
+		CapeAnimation animation = played(asset, full);
 		return animation == null ? asset.sha256() : asset.sha256() + "." + animation.key();
 	}
 
-	private void want(Asset asset, long now) {
-		String key = key(asset);
+	/** The animation an asset plays: the full one for you ({@code full}), else its preview when there is one; null: static. */
+	static @Nullable CapeAnimation played(Asset asset, boolean full) {
+		CapeAnimation animation = asset.animation();
+		return animation == null || full ? animation : animation.forOthers();
+	}
+
+	private void want(Asset asset, boolean full, long now) {
+		String key = key(asset, full);
 		Loaded<T> l = assets.get(key);
 		if (l != null && l.local && l.state == FAILED) {
 			// A pick's texture that couldn't be uploaded: the Store's own asset (with its address) is loaded instead.
@@ -837,7 +910,7 @@ public final class StoreCapes<T> {
 				// Over the budget: no Store cape for this one until others are released.
 				return;
 			}
-			l = new Loaded<>(asset, maxCapeFrameBytes);
+			l = new Loaded<>(asset, full, maxCapeFrameBytes);
 			assets.put(key, l);
 			start(l);
 		} else if (l.state == FAILED && now - l.retryAt >= 0) {
@@ -929,7 +1002,8 @@ public final class StoreCapes<T> {
 		AtomicBoolean token = new AtomicBoolean();
 		l.loading = token;
 		l.frames = FRAMES_LOADING;
-		StripsLoad load = new StripsLoad(l.key, animation, l.keptScale, textures.frameLayout(), token);
+		StripsLoad load = new StripsLoad(l.key, animation, l.keptScale, textures.frameLayout(), token,
+			animation != l.asset.animation() ? "preview strip" : "strip");
 		try {
 			loader.execute(load);
 		} catch (RejectedExecutionException e) {
@@ -1092,7 +1166,7 @@ public final class StoreCapes<T> {
 		if (none) {
 			return null;
 		}
-		Loaded<T> target = c != null ? c.loaded : assets.get(key(e.cape));
+		Loaded<T> target = c != null ? c.loaded : assets.get(key(e.cape, e.self));
 		if (up(target)) {
 			return target;
 		}
@@ -1118,7 +1192,7 @@ public final class StoreCapes<T> {
 	private void takeChoices(long now) {
 		for (CapeChoices.Note note; (note = CapeChoices.take()) != null;) {
 			if (note instanceof CapeChoices.Seen seen) {
-				if (cacheDir != null) {
+				if (cache != null) {
 					try {
 						loader.execute(() -> store(seen.sha256(), seen.png()));
 					} catch (RejectedExecutionException e) {
@@ -1199,7 +1273,7 @@ public final class StoreCapes<T> {
 			if (assets.size() >= MAX_TEXTURES || texels() + (long) image.width() * image.height() > MAX_TEXELS) {
 				return null;
 			}
-			l = new Loaded<>(new Asset("local", 0, LOCAL, sha256, image.width(), image.height(), null), maxCapeFrameBytes);
+			l = new Loaded<>(new Asset("local", 0, LOCAL, sha256, image.width(), image.height(), null), true, maxCapeFrameBytes);
 			l.local = true;
 			assets.put(l.key, l);
 		}
@@ -1219,7 +1293,7 @@ public final class StoreCapes<T> {
 	/** Reads (cache) or downloads {@code asset}, checks its hash and size, and decodes it. Loader thread. */
 	private Result load(String key, Asset asset) {
 		try {
-			byte[] bytes = fetch(asset.sha256(), StoreCosmeticsClient.MAX_ASSET_BYTES, () -> client.download(asset));
+			byte[] bytes = fetch(asset.sha256(), StoreCosmeticsClient.MAX_ASSET_BYTES, () -> client.download(asset), "cape");
 			CapePng.Image image = CapePng.decode(bytes, StoreCosmeticsClient.MAX_CAPE_WIDTH, StoreCosmeticsClient.MAX_CAPE_HEIGHT);
 			if (image.width() != asset.width() || image.height() != asset.height()) {
 				return new Result(key, null, true, "it is " + image.width() + "x" + image.height() + ", not the size the Store gave");
@@ -1264,20 +1338,18 @@ public final class StoreCapes<T> {
 	 * The file of hash {@code sha256}: the disk cache's copy while it still hashes to it (one that doesn't is deleted), else
 	 * downloaded and checked. Loader thread.
 	 */
-	private byte[] fetch(String sha256, int maxBytes, Supplier<CompletableFuture<byte[]>> download)
-		throws IOException, ExecutionException, TimeoutException, InterruptedException, Mismatch {
-		Path file = cacheDir == null ? null : cacheDir.resolve(sha256 + ".png");
-		if (file != null && Files.isRegularFile(file) && Files.size(file) <= maxBytes) {
-			byte[] onDisk = Files.readAllBytes(file);
-			if (sha256(onDisk).equals(sha256)) {
-				return onDisk;
-			}
-			// Changed on disk: never used; downloaded again.
-			Files.deleteIfExists(file);
+	private byte[] fetch(String sha256, int maxBytes, Supplier<CompletableFuture<byte[]>> download, String what)
+		throws ExecutionException, TimeoutException, InterruptedException, Mismatch {
+		byte[] cached = cache == null ? null : cache.read(sha256, maxBytes);
+		if (cached != null) {
+			return cached;
 		}
 		byte[] bytes = download.get().get(30, TimeUnit.SECONDS);
 		if (!sha256(bytes).equals(sha256)) {
 			throw new Mismatch("its SHA-256 doesn't match the Store's");
+		}
+		if (cache != null) {
+			cache.downloaded(sha256, bytes.length, what);
 		}
 		return bytes;
 	}
@@ -1293,10 +1365,12 @@ public final class StoreCapes<T> {
 		private final int keptScale;
 		private final CapeFrames.Layout layout;
 		private final AtomicBoolean cancelled;
+		private final String what;
 		private final int[][] pixels;
 		private int strip;
 
-		StripsLoad(String key, CapeAnimation animation, int keptScale, CapeFrames.Layout layout, AtomicBoolean cancelled) {
+		StripsLoad(String key, CapeAnimation animation, int keptScale, CapeFrames.Layout layout, AtomicBoolean cancelled, String what) {
+			this.what = what;
 			this.key = key;
 			this.animation = animation;
 			this.keptScale = keptScale;
@@ -1312,7 +1386,7 @@ public final class StoreCapes<T> {
 			}
 			try {
 				CapeAnimation.Strip s = animation.strips().get(strip);
-				byte[] bytes = fetch(s.sha256(), CapeAnimation.MAX_STRIP_BYTES, () -> client.download(s));
+				byte[] bytes = fetch(s.sha256(), CapeAnimation.MAX_STRIP_BYTES, () -> client.download(s), what);
 				int height = s.frames() * animation.frameHeight();
 				CapePng.Image image = CapePng.decode(bytes, animation.frameWidth(), height);
 				if (image.width() != animation.frameWidth() || image.height() != height) {
@@ -1337,77 +1411,22 @@ public final class StoreCapes<T> {
 		}
 	}
 
-	/** Writes a verified file to the cache unless it is there (best effort, atomically: a half-written file is never read). */
+	/** Keeps a verified file in the cache unless it is there (best effort, atomically: a half-written file is never read). */
 	private void store(String sha256, byte[] bytes) {
-		if (cacheDir == null) {
-			return;
-		}
-		Path file = cacheDir.resolve(sha256 + ".png");
-		try {
-			if (Files.isRegularFile(file) && Files.size(file) == bytes.length) {
-				// Read from the cache (and checked) a moment ago.
-				return;
-			}
-			Files.createDirectories(file.getParent());
-			Path temp = Files.createTempFile(file.getParent(), "cape", ".tmp");
-			try {
-				Files.write(temp, bytes);
-				Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-			} finally {
-				Files.deleteIfExists(temp);
-			}
-		} catch (IOException | RuntimeException e) {
-			// The texture is used anyway; it is downloaded again next time.
+		if (cache != null) {
+			cache.put(sha256, bytes);
 		}
 	}
 
-	/**
-	 * Keeps the cache to {@link #MAX_CACHE_FILES} files and {@link #MAX_CACHE_BYTES} (the least recently written go) and removes
-	 * leftovers. Loader thread.
-	 */
+	/** Keeps the cache within its size (the least recently used go) and removes leftovers. Loader thread. */
 	private void pruneCache() {
-		if (cacheDir == null || !Files.isDirectory(cacheDir)) {
-			return;
-		}
-		try (Stream<Path> files = Files.list(cacheDir)) {
-			List<Path> textures = new ArrayList<>();
-			for (Path f : (Iterable<Path>) files::iterator) {
-				String name = f.getFileName().toString();
-				if (name.endsWith(".tmp")) {
-					Files.deleteIfExists(f);
-				} else if (name.matches("[0-9a-f]{64}\\.png")) {
-					textures.add(f);
-				}
-			}
-			Map<Path, Long> time = new HashMap<>();
-			Map<Path, Long> size = new HashMap<>();
-			long total = 0;
-			for (Path f : textures) {
-				time.put(f, Files.getLastModifiedTime(f).toMillis());
-				size.put(f, Files.size(f));
-				total += size.get(f);
-			}
-			textures.sort(Comparator.comparingLong(time::get));
-			int left = textures.size();
-			for (Path f : textures) {
-				if (left <= MAX_CACHE_FILES && total <= MAX_CACHE_BYTES) {
-					break;
-				}
-				Files.deleteIfExists(f);
-				left--;
-				total -= size.get(f);
-			}
-		} catch (IOException | RuntimeException e) {
-			// A cache that can't be tidied still works.
+		if (cache != null) {
+			cache.prune();
 		}
 	}
 
 	static String sha256(byte[] bytes) {
-		try {
-			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException(e);
-		}
+		return AssetCache.sha256(bytes);
 	}
 
 	/** The players {@link #update} keeps entries for (tests). */

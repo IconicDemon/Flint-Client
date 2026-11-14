@@ -53,7 +53,8 @@ public interface GraphicsBridge {
 	default void blurBeforeThisStratum() {
 		Minecraft mc = Minecraft.getInstance();
 		self().flush();
-		mc.gameRenderer.processBlurEffect(mc.getTimer().getGameTimeDeltaPartialTick(false));
+		// Kept to the Right Shift window's panel while it asks (control/fx/PanelBlur); else Minecraft's own whole-screen blur.
+		com.flintclient.client.control.fx.PanelBlur.blur(mc, mc.getTimer().getGameTimeDeltaPartialTick(false));
 		mc.getMainRenderTarget().bindWrite(false);
 	}
 

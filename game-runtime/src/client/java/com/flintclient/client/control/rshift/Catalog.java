@@ -115,7 +115,9 @@ public final class Catalog {
 	/** A row that is a shortcut to a mod ({@code link/<module id>}): its switch and a way to its page. */
 	public static final String LINK = "link";
 	/** What a button row ({@code action/<id>}) can do. */
-	public static final List<String> ACTIONS = List.of("screenshots", "resourcepacks");
+	public static final List<String> ACTIONS = List.of("screenshots", "resourcepacks", "theme");
+	/** The Theme row ({@code action/theme}): the theme picker, first in General › Menu (added here, so a regenerated catalog keeps it). */
+	public static final String THEME = "theme";
 
 	public record Section(String title, List<Row> rows) {
 		public Section {
@@ -165,6 +167,23 @@ public final class Catalog {
 		}
 	}
 
+	/** {@code sections} of page {@code key}, with the Theme row first in General › Menu (once). */
+	static List<Section> withTheme(String key, List<Section> sections) {
+		if (!key.equals("general") || sections.isEmpty()) {
+			return sections;
+		}
+		Section menu = sections.get(0);
+		if (menu.rows().stream().anyMatch(r -> THEME.equals(r.action()))) {
+			return sections;
+		}
+		List<Row> rows = new ArrayList<>();
+		rows.add(new Row("Theme", "theme", null, null, true, false, null, THEME));
+		rows.addAll(menu.rows());
+		List<Section> out = new ArrayList<>(sections);
+		out.set(0, new Section(menu.title(), rows));
+		return out;
+	}
+
 	/** Volatile: the Right Shift menu's warm-up reads it on a worker. */
 	private static volatile @Nullable Catalog loaded;
 
@@ -196,6 +215,12 @@ public final class Catalog {
 	public static void engine(Engine e) {
 		engine = e;
 		loaded = null;
+	}
+
+	/** Whether this line honours {@code row} (every line but 1.8.9 honours them all): a panel of its own asks before it shows one. */
+	public static boolean shows(Row row) {
+		Engine e = engine;
+		return e == null || e.shows(row);
 	}
 
 	/** Whether this line runs {@code module} (every line but 1.8.9 runs them all). */
@@ -264,7 +289,7 @@ public final class Catalog {
 
 	/**
 	 * Flint's client settings a catalog row can name as {@code global/<id>}. Not listed (their values are kept, nothing shows
-	 * them): Interface size (the menu's UI scaling is the one size setting), High-contrast outlines and Follow Minecraft's
+	 * them): Interface size and the older UI scaling slider (Menu size is the one size setting), High-contrast outlines and Follow Minecraft's
 	 * reduced motion (they changed only Flint's older screens), and Gameplay motion blur with its strength (the Motion Blur
 	 * mod is the one switch for that effect; the row stays while an old setting has it on, so it can be turned off).
 	 */
@@ -272,7 +297,8 @@ public final class Catalog {
 		ControlSettings.TRANSITION_BLUR, ControlSettings.GAMEPLAY_BLUR, ControlSettings.SHOW_WITH_DEBUG_SCREEN,
 		GameOptions.MENU_KEY, GameOptions.HUD_EDITOR_KEY, GameOptions.NO_HOTBAR_LOOPING, GameOptions.MINIMAL_BOBBING, GameOptions.CLOCK_24H, GameOptions.LEAVE_KEY,
 		GameOptions.LEAVE_CONFIRM, GameOptions.MOD_KEYS, GameOptions.INACTIVE_FPS, GameOptions.LIMIT_UNFOCUSED, GameOptions.LIMIT_IDLE,
-		GameOptions.IDLE_MINUTES, GameOptions.IDLE_SECONDS, GameOptions.HUD_SCALE_STEP, GameOptions.MENU_SCALE,
+		GameOptions.IDLE_MINUTES, GameOptions.IDLE_SECONDS, GameOptions.SMOOTH_SHARING, GameOptions.BORDERLESS_FULLSCREEN, GameOptions.HUD_SCALE_STEP, GameOptions.MENU_SIZE, GameOptions.MENU_TRANSPARENCY,
+		GameOptions.MENU_BLUR,
 		GameOptions.MENU_SOUND, GameOptions.FLINT_BADGE, GameOptions.SHARE_PRESENCE, GameOptions.STORE_CAPES, GameOptions.CAPE_ELYTRA,
 		GameOptions.VANILLA_MAIN_MENU);
 
@@ -289,8 +315,8 @@ public final class Catalog {
 		for (JsonElement e : root.getAsJsonArray("pages")) {
 			JsonObject o = e.getAsJsonObject();
 			String unavailable = o.has("unavailable") ? o.get("unavailable").getAsString() : null;
-			pages.add(new Page(o.get("key").getAsString(), o.get("name").getAsString(), sections(o.getAsJsonArray("sections"), unavailable),
-				unavailable));
+			pages.add(new Page(o.get("key").getAsString(), o.get("name").getAsString(), withTheme(o.get("key").getAsString(),
+				sections(o.getAsJsonArray("sections"), unavailable)), unavailable));
 		}
 		List<Mod> mods = new ArrayList<>();
 		Set<String> last = new java.util.LinkedHashSet<>();
@@ -660,10 +686,16 @@ public final class Catalog {
 	private static final Set<String> SMALL_WORDS = Set.of("a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "per", "the", "to", "vs",
 		"with");
 
-	/** {@code module}'s settings no row names, in its own sections, titled "More in Flint · <section>". */
+	/**
+	 * {@code module}'s settings no row names, in its own sections, titled "More in Flint · <section>". A module whose page is its
+	 * own panel ({@link ModuleDescriptor#ownPage}, Item Customizer) shows the rest itself: only its Mod section comes as rows.
+	 */
 	private static List<Section> leftovers(ModuleDescriptor module, Set<SettingDescriptor<?>> named) {
 		List<Section> rest = new ArrayList<>();
 		for (SettingSection section : module.sections()) {
+			if (module.ownPage() && !section.title().equals("Mod")) {
+				continue;
+			}
 			List<Row> rows = new ArrayList<>();
 			for (SettingDescriptor<?> setting : section.settings()) {
 				if (!named.contains(setting)) {
@@ -679,17 +711,22 @@ public final class Catalog {
 
 	/** The catalog's word for how a Flint setting is edited. */
 	static String kindOf(SettingDescriptor<?> setting) {
-		return switch (setting) {
-			case com.flintclient.client.control.model.BoolSetting b -> "toggle";
-			case com.flintclient.client.control.model.IntSetting i -> "slider";
-			case com.flintclient.client.control.model.FloatSetting f -> "slider";
-			case com.flintclient.client.control.model.RgbSetting r -> "color";
-			case com.flintclient.client.control.model.ColorSetting c -> "color";
-			case com.flintclient.client.control.model.ChoiceSetting<?> c -> "choice";
-			case com.flintclient.client.control.model.OptionSetting o -> "choice";
-			case com.flintclient.client.control.model.KeySetting k -> "key";
-			case com.flintclient.client.control.model.TextSetting t -> "text";
-			default -> "list";
-		};
+		// (instanceof, not a switch with patterns: the shared sources build for Java 17 too, Minecraft 1.19.x)
+		if (setting instanceof com.flintclient.client.control.model.BoolSetting) {
+			return "toggle";
+		}
+		if (setting instanceof com.flintclient.client.control.model.IntSetting || setting instanceof com.flintclient.client.control.model.FloatSetting) {
+			return "slider";
+		}
+		if (setting instanceof com.flintclient.client.control.model.RgbSetting || setting instanceof com.flintclient.client.control.model.ColorSetting) {
+			return "color";
+		}
+		if (setting instanceof com.flintclient.client.control.model.ChoiceSetting<?> || setting instanceof com.flintclient.client.control.model.OptionSetting) {
+			return "choice";
+		}
+		if (setting instanceof com.flintclient.client.control.model.KeySetting) {
+			return "key";
+		}
+		return setting instanceof com.flintclient.client.control.model.TextSetting ? "text" : "list";
 	}
 }

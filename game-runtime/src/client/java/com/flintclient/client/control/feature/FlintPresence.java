@@ -139,6 +139,7 @@ public final class FlintPresence {
 			account = playing;
 			// The previous account's mark never shows on this one: the default until Flint says this account's.
 			FlintPlayers.setOwn(FlintPlayers.Tag.DEFAULT);
+			FlintPlayers.forgetChoice();
 			refused = false;
 			offline = false;
 			announceRetry = RETRY_NANOS;

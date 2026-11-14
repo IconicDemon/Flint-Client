@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorText, type LibraryHit, type LibraryKind, type LibraryProject, type LibraryVersion, type Profile } from "../../lib/api";
+import { filePage, projectPage, sourceOf, SOURCE_NAME } from "../../lib/contentSource";
 import { ago, bytes, compact, shortDate } from "../../lib/format";
 import { useT, type MessageKey } from "../../lib/i18n";
 import { Markdown } from "../../lib/markdown";
@@ -59,14 +60,29 @@ export function ProjectDrawer({
   const [section, setSection] = useState<Section>("overview");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [allVersions, setAllVersions] = useState(false);
+  /** CurseForge lists files without changelogs: each is asked for when opened (by version id; null while loading). */
+  const [changelogs, setChangelogs] = useState<Record<string, string | null>>({});
   const panel = useRef<HTMLDivElement>(null);
   const filterVersion = kind !== "modpack" && !allVersions ? profile?.gameVersion ?? null : null;
+  const source = sourceOf(hit?.projectId);
+
+  const toggleChangelog = (v: LibraryVersion) => {
+    const next = expanded === v.id ? null : v.id;
+    setExpanded(next);
+    if (!next || !hit || source !== "curseforge" || v.changelog || v.id in changelogs) return;
+    setChangelogs((c) => ({ ...c, [v.id]: null }));
+    void api
+      .curseforgeChangelog(hit.projectId, v.id)
+      .then((text) => setChangelogs((c) => ({ ...c, [v.id]: text })))
+      .catch(() => setChangelogs((c) => ({ ...c, [v.id]: "" })));
+  };
 
   useEffect(() => {
     setProject(null);
     setError(null);
     setSection("overview");
     setAllVersions(false);
+    setChangelogs({});
     if (!hit) return;
     let live = true;
     void api
@@ -101,9 +117,15 @@ export function ProjectDrawer({
   }, [hit, onClose]);
 
   if (!hit || !kind) return null;
-  const compatible = versions?.filter((v) => (kind === "modpack" ? v.loaders.includes("fabric") : true)) ?? null;
+  // A CurseForge pack file may name no loader at all: its manifest decides (Flint refuses one that isn't Fabric).
+  const fabricPack = (v: LibraryVersion) => v.loaders.includes("fabric") || (source === "curseforge" && !v.loaders.some((l) => ["forge", "neoforge", "quilt"].includes(l)));
+  const compatible = versions?.filter((v) => (kind === "modpack" ? fabricPack(v) : true)) ?? null;
   const best = compatible?.find((v) => v.versionType === "release") ?? compatible?.[0] ?? null;
   const unavailable = kind !== "modpack" && !!profile && compatible !== null && compatible.length === 0 && !allVersions;
+  const site = project?.websiteUrl ?? hit.websiteUrl ?? null;
+  /** A CurseForge file its author lets players get on CurseForge only: Flint links to it there. */
+  const keptOnSite = (v: LibraryVersion | null) => !!v && v.downloadable === false;
+  const openOnSite = (v: LibraryVersion | null) => void api.openExternal(filePage(site, v?.id) ?? projectPage(hit, kind));
   const target = (v?: LibraryVersion | null): InstallTarget => ({
     kind,
     projectId: hit.projectId,
@@ -113,7 +135,7 @@ export function ProjectDrawer({
     versionNumber: v?.versionNumber ?? null,
   });
   const gallery = project?.gallery ?? [];
-  const url = `https://modrinth.com/${hit.projectType === "datapack" || kind === "datapack" ? "datapack" : hit.projectType}/${hit.slug}`;
+  const url = projectPage({ ...hit, websiteUrl: site }, kind);
 
   return (
     <div className="drawer-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -124,8 +146,9 @@ export function ProjectDrawer({
             <span className="eyebrow">{KIND_LABEL[kind]}</span>
             <h2>{hit.title}</h2>
             <span className="faint">
-              {t("library.card.by", { author: project?.author ?? hit.author })} · {t("library.drawer.downloads", { downloads: compact(project?.downloads ?? hit.downloads) })} ·{" "}
-              {t("library.drawer.followers", { followers: compact(project?.followers ?? hit.follows) })}
+              {t("library.card.by", { author: project?.author ?? hit.author })} · {t("library.drawer.downloads", { downloads: compact(project?.downloads ?? hit.downloads) })}
+              {/* CurseForge has no followers. */}
+              {source === "modrinth" && ` · ${t("library.drawer.followers", { followers: compact(project?.followers ?? hit.follows ?? 0) })}`}
             </span>
           </div>
           <IconButton icon="x" label={t("common.close")} onClick={onClose} />
@@ -151,13 +174,20 @@ export function ProjectDrawer({
                 version: profile?.gameVersion ?? "",
               })}
             </span>
+          ) : keptOnSite(best) ? (
+            <>
+              <Button variant="primary" iconRight="external" onClick={() => openOnSite(best)}>
+                {t("library.curseforge.download")}
+              </Button>
+              <span className="drawer-kept faint">{t("library.curseforge.keptOnSite")}</span>
+            </>
           ) : (
             <Button variant="primary" icon="download" disabled={versions === null || (kind !== "modpack" && !profile)} onClick={() => onInstall(target(best))}>
               {kind === "modpack" ? t("library.drawer.installPack") : profile ? t("library.drawer.installTo", { profile: profile.name }) : t("library.drawer.chooseProfile")}
             </Button>
           )}
           <Button size="sm" variant="ghost" iconRight="external" onClick={() => void api.openExternal(url)}>
-            Modrinth
+            {SOURCE_NAME[source]}
           </Button>
         </div>
         <p className="drawer-note faint">{placementNote(kind)}</p>
@@ -223,22 +253,41 @@ export function ProjectDrawer({
                             <strong>{v.versionNumber}</strong>
                             <Badge tone={v.versionType === "release" ? "success" : "warning"}>{v.versionType}</Badge>
                           </span>
-                          {fits && !installed && (kind === "modpack" || profile) && (
-                            <Button size="sm" variant="ghost" icon="download" onClick={() => onInstall(target(v))}>
-                              {t("library.card.install")}
+                          {fits && !installed && (kind === "modpack" || profile) && keptOnSite(v) ? (
+                            <Button size="sm" variant="ghost" iconRight="external" onClick={() => openOnSite(v)}>
+                              {SOURCE_NAME.curseforge}
                             </Button>
+                          ) : (
+                            fits &&
+                            !installed &&
+                            (kind === "modpack" || profile) && (
+                              <Button size="sm" variant="ghost" icon="download" onClick={() => onInstall(target(v))}>
+                                {t("library.card.install")}
+                              </Button>
+                            )
                           )}
                         </div>
                         <span className="faint">
-                          {v.gameVersions.slice(-4).join(", ")} · {v.loaders.join(", ")} · {shortDate(v.datePublished)}
+                          {v.gameVersions.slice(-4).join(", ")}
+                          {/* CurseForge packs name no loader: Flint's own placeholder loaders aren't shown. */}
+                          {source === "modrinth" || ["fabric", "forge", "neoforge", "quilt"].some((l) => v.loaders.includes(l)) ? ` · ${v.loaders.join(", ")}` : ""} · {shortDate(v.datePublished)}
                           {file ? ` · ${bytes(file.size)}` : ""}
                         </span>
-                        {v.changelog && (
+                        {(v.changelog || source === "curseforge") && (
                           <>
-                            <button type="button" className="version-changelog-toggle" aria-expanded={expanded === v.id} onClick={() => setExpanded(expanded === v.id ? null : v.id)}>
+                            <button type="button" className="version-changelog-toggle" aria-expanded={expanded === v.id} onClick={() => toggleChangelog(v)}>
                               {t(expanded === v.id ? "library.drawer.hideChangelog" : "library.drawer.changelog")}
                             </button>
-                            {expanded === v.id && <Markdown source={v.changelog} className="is-small" />}
+                            {expanded === v.id &&
+                              (v.changelog ? (
+                                <Markdown source={v.changelog} className="is-small" />
+                              ) : changelogs[v.id] == null ? (
+                                <Spinner size={14} />
+                              ) : changelogs[v.id] ? (
+                                <Markdown source={changelogs[v.id]!} className="is-small" />
+                              ) : (
+                                <p className="faint">{t("updates.changelog.none")}</p>
+                              ))}
                           </>
                         )}
                       </li>
@@ -259,10 +308,15 @@ export function ProjectDrawer({
                   project.license?.name || project.license?.id || t("library.details.notSpecified")
                 )}
               </dd>
-              <dt>{t("library.details.client")}</dt>
-              <dd>{SIDE[project.clientSide] ? t(SIDE[project.clientSide]) : project.clientSide}</dd>
-              <dt>{t("library.details.server")}</dt>
-              <dd>{SIDE[project.serverSide] ? t(SIDE[project.serverSide]) : project.serverSide}</dd>
+              {/* CurseForge doesn't say where a project runs. */}
+              {source === "modrinth" && (
+                <>
+                  <dt>{t("library.details.client")}</dt>
+                  <dd>{SIDE[project.clientSide] ? t(SIDE[project.clientSide]) : project.clientSide}</dd>
+                  <dt>{t("library.details.server")}</dt>
+                  <dd>{SIDE[project.serverSide] ? t(SIDE[project.serverSide]) : project.serverSide}</dd>
+                </>
+              )}
               <dt>{t("library.details.loaders")}</dt>
               <dd>{project.loaders.join(", ") || "—"}</dd>
               <dt>{t("library.details.minecraft")}</dt>

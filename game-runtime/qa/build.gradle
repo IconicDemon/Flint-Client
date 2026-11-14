@@ -1,6 +1,6 @@
 plugins {
-	// 26.x is unobfuscated (fabric-loom); 1.21.x needs Loom's remap variant with Mojang's names (the QA mod isn't shipped, so one
-	// build switches between them).
+	// 26.x is unobfuscated (fabric-loom); 1.21.x and 1.19.x need Loom's remap variant with Mojang's names (the QA mod isn't
+	// shipped, so one build switches between them).
 	id "net.fabricmc.fabric-loom" version "${loom_version}" apply false
 	id "net.fabricmc.fabric-loom-remap" version "${loom_version}" apply false
 }
@@ -16,24 +16,58 @@ version = project.mod_version
 group = project.maven_group
 
 // The Minecraft version the tour runs in: 26.3 by default, another with -Pminecraft_version=26.2 (as the runtime's own build).
-// The few version-specific pieces (keys: 26.3 is SDL, 26.2 GLFW) live in src/mc263 or src/mc262; other versions build in
-// build/mc-<version> and name their jar flint-qa-1.0.0+<version>.jar.
+// The few version-specific pieces (keys: 26.3 is SDL, 26.2 GLFW) live in src/mc263 or src/mc262 (1.19.2: src/mc11902, which
+// 1.19's src/mc11900 builds on); other versions build in build/mc-<version> and name their jar flint-qa-1.0.0+<version>.jar.
 def mcVersion = project.minecraft_version
 def mainLine = mcVersion == "26.3"
 def mcLine = mcVersion.startsWith("26.1") ? "26.1" : mcVersion
-// As the runtime's legacy build names them: a patch release's number in two digits (1.21.1: mc12101).
+// As the runtime's legacy build names them: a release's patch number in two digits (1.21.1: mc12101, 1.19: mc11900).
 def lineParts = mcLine.tokenize(".")
-def mcOverlay = lineParts.size() > 2 ? "mc" + lineParts[0] + lineParts[1] + lineParts[2].padLeft(2, "0") : "mc" + mcLine.replace(".", "")
+def mcOverlay = obfuscated ? "mc" + lineParts[0] + lineParts[1] + (lineParts.size() > 2 ? lineParts[2].padLeft(2, "0") : "00")
+	: "mc" + mcLine.replace(".", "")
 if (!mainLine) {
 	layout.buildDirectory = file("build/mc-${mcLine}")
 }
-sourceSets.main.java.srcDir("src/${mcOverlay}/java")
-sourceSets.main.resources.srcDir("src/${mcOverlay}/resources")
-// A file the overlay has replaces src/main's of the same path (QaSkin on 1.21.10, say).
-def overlayDir = file("src/${mcOverlay}/java")
-def mainDir = file("src/main/java")
+// The overlays this line is made of, nearest first: an overlay may build on another one (src/mc11900/overlay.properties:
+// base=mc11902), so 1.19 is 1.19.2's overlay plus what 1.19 does differently. An overlay's java: the Java its Minecraft runs
+// on (the official launcher's runtime for it), which the jar targets: the nearest overlay's (1.19.x: 17), else 21 for the
+// obfuscated lines and 25 for 26.x.
+def overlays = []
+def javaLevel = null
+for (def name = mcOverlay; name != null;) {
+	if (name in overlays) {
+		throw new GradleException("overlay ${name} builds on itself")
+	}
+	overlays << name
+	def props = new Properties()
+	def propsFile = file("src/${name}/overlay.properties")
+	if (propsFile.isFile()) {
+		propsFile.withInputStream { props.load(it) }
+	}
+	if (javaLevel == null && props.getProperty("java") != null) {
+		javaLevel = props.getProperty("java").trim().toInteger()
+	}
+	name = props.getProperty("base")
+}
+javaLevel = javaLevel ?: (obfuscated ? 21 : 25)
+def overlayJava = overlays.collect { file("src/${it}/java") }
+def overlayResources = overlays.collect { file("src/${it}/resources") }
+overlays.each {
+	sourceSets.main.java.srcDir("src/${it}/java")
+	sourceSets.main.resources.srcDir("src/${it}/resources")
+}
+// A file an overlay has replaces src/main's, and a base overlay's, of the same path (QaSkin on 1.21.10, say).
+def mainJava = file("src/main/java")
+def mainResources = file("src/main/resources")
 sourceSets.main.java.exclude { element ->
-	element.file.toPath().startsWith(mainDir.toPath()) && new File(overlayDir, element.relativePath.pathString).isFile()
+	def path = element.file.toPath()
+	int own = overlayJava.findIndexOf { path.startsWith(it.toPath()) }
+	(own >= 0 || path.startsWith(mainJava.toPath())) && (own < 0 ? overlayJava : overlayJava.take(own)).any { new File(it, element.relativePath.pathString).isFile() }
+}
+sourceSets.main.resources.exclude { element ->
+	def path = element.file.toPath()
+	int own = overlayResources.findIndexOf { path.startsWith(it.toPath()) }
+	(own >= 0 || path.startsWith(mainResources.toPath())) && (own < 0 ? overlayResources : overlayResources.take(own)).any { new File(it, element.relativePath.pathString).isFile() }
 }
 
 // Dev-only QA tour mod (never shipped). Minecraft 26.x is unobfuscated: no mappings line, no Fabric API.
@@ -55,12 +89,16 @@ if (obfuscated) {
 }
 
 if (obfuscated) {
-	// 1.21.x runs under intermediary names, but the tour names Minecraft's classes and members as Mojang does (expect-screen
-	// ChatScreen, option fov, a handler's private method): every class, and the members of the classes it reaches by
-	// reflection, from Loom's mappings into flintqa-names.tsv (QaNames reads it).
+	// 1.21.x and 1.19.x run under intermediary names, but the tour names Minecraft's classes and members as Mojang does
+	// (expect-screen ChatScreen, option fov, a handler's private method): every class, and the members of the classes it
+	// reaches by reflection, from Loom's mappings into flintqa-names.tsv (QaNames reads it). Entity and Player: QaElytra's
+	// shared flag and skin-parts data; Minecraft: also 1.19.x's frame count and user API service.
 	def reflected = ["net/minecraft/client/Options", "net/minecraft/client/OptionInstance", "net/minecraft/client/MouseHandler",
 		"net/minecraft/client/KeyboardHandler", "net/minecraft/client/Minecraft", "net/minecraft/client/gui/components/ChatComponent",
-		"net/minecraft/client/gui/screens/multiplayer/JoinMultiplayerScreen", "net/minecraft/world/food/FoodData"] as Set
+		"net/minecraft/client/gui/screens/multiplayer/JoinMultiplayerScreen", "net/minecraft/world/food/FoodData",
+		// QaElytra and QaCapesMod: a remote player's skin parts (Avatar since 1.21.9, Player before).
+		// QaElytra: an entity's shared flags (Entity), on every line.
+		"net/minecraft/world/entity/Entity", "net/minecraft/world/entity/Avatar", "net/minecraft/world/entity/player/Player"] as Set
 	def namesDir = layout.buildDirectory.dir("generated/qa-names")
 	def qaNames = tasks.register("qaNames") {
 		def tiny = net.fabricmc.loom.LoomGradleExtension.get(project).mappingConfiguration.tinyMappings.toFile()
@@ -95,19 +133,21 @@ processResources {
 	def modVersion = project.version
 	// As the runtime: the newest line also loads on later Minecraft releases (forward-compatibility tours).
 	def minecraftRange = obfuscated ? mcVersion : mcVersion == "26.3" ? ">=26.3" : "~" + mcLine
+	def java = javaLevel
 	inputs.property "version", modVersion
 	inputs.property "minecraftRange", minecraftRange
+	inputs.property "javaLevel", java
 
 	filesMatching("fabric.mod.json") {
 		expand "version": modVersion, "minecraftRange": minecraftRange
 		if (obfuscated) {
-			filter { it.replace('"java": ">=25"', '"java": ">=21"') }
+			filter { it.replace('"java": ">=25"', '"java": ">=' + java + '"') }
 		}
 	}
 	if (obfuscated) {
-		// 1.21.x runs on Java 21, and Mixin refuses a higher compatibility level.
+		// 1.21.x runs on Java 21 and 1.19.x on Java 17, and Mixin refuses a higher compatibility level.
 		filesMatching("*.mixins.json") {
-			filter { it.replace('"JAVA_25"', '"JAVA_21"') }
+			filter { it.replace('"JAVA_25"', '"JAVA_' + java + '"').replace('"JAVA_21"', '"JAVA_' + java + '"') }
 		}
 	}
 }
@@ -119,7 +159,7 @@ if (!mainLine) {
 }
 
 tasks.withType(JavaCompile).configureEach {
-	options.release = obfuscated ? 21 : 25
+	options.release = javaLevel
 }
 
 java {

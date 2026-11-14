@@ -11,12 +11,15 @@ import com.flintclient.client.control.rshift.SocialParts.Field;
 import com.flintclient.client.control.rshift.SocialParts.Lines;
 import com.flintclient.client.module.social.FriendsClient;
 import com.flintclient.client.module.social.FriendsClient.Reach;
+import com.flintclient.client.module.social.MenuFeeds;
+import com.flintclient.client.module.social.MenuLink;
 import com.flintclient.client.module.social.SocialLink;
 import com.flintclient.client.module.social.SocialLink.Friend;
 import com.flintclient.client.module.social.SocialLink.Friends;
 import com.flintclient.client.module.social.SocialLink.Player;
 import com.flintclient.client.module.social.SocialLink.Request;
 import com.flintclient.client.platform.Clock;
+import com.flintclient.client.platform.MenuHost;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.Palette;
 import com.flintclient.client.ui.kit.Kit;
@@ -49,13 +52,13 @@ final class FriendsPage extends Node {
 	final FriendsClient client;
 	private final @Nullable SocialLink link = SocialLink.get();
 	private final Consumer<String> openLink;
-	/** Opened from Messages: once the list is there, the friend with the most unread messages is opened. */
-	private boolean pickUnread;
 
 	private final Label title = new Label(Type.HEADER_TITLE, "FRIENDS");
 	private final Label offline = new Label(Type.CAPTION, "OFFLINE · RETRYING");
 	private final StatusChip[] statuses = new StatusChip[SocialLink.MY_STATUSES.size()];
 	private final Parts.Square gear;
+	/** Minecraft's own friends list (26.2 and later), named so it isn't mistaken for Flint Friends. */
+	private final Parts.@Nullable Square minecraftFriends;
 	private final Field add;
 	private final Tab friendsTab;
 	private final Tab requestsTab;
@@ -70,6 +73,11 @@ final class FriendsPage extends Node {
 	private @Nullable String selected;
 	private @Nullable String pendingStatus;
 	private @Nullable Boolean pendingAllow;
+	private @Nullable String pendingLastSeen;
+	private @Nullable String pendingGifts;
+	/** The linked Discord account and its rewards, from the Flint app (the settings' Linked accounts). */
+	final MenuFeeds feeds = MenuFeeds.get();
+	private boolean linking;
 	private int shownRevision = -1;
 	private String shownList = "";
 	private String query = "";
@@ -89,10 +97,14 @@ final class FriendsPage extends Node {
 	private float bodyY;
 	private float bodyH;
 
-	FriendsPage(FriendsClient client, boolean chats, Consumer<String> openLink) {
+	FriendsPage(FriendsClient client, Consumer<String> openLink, @Nullable Runnable openMinecraftFriends) {
 		this.client = client;
-		this.pickUnread = chats;
 		this.openLink = openLink;
+		minecraftFriends = openMinecraftFriends == null ? null
+			: add(new Parts.Square(Glyph.USER_GROUP, "Minecraft Friends", openMinecraftFriends));
+		if (minecraftFriends != null) {
+			minecraftFriends.tooltip("Minecraft Friends\nYour friends list in Minecraft itself (from your Microsoft account)");
+		}
 		for (int i = 0; i < statuses.length; i++) {
 			statuses[i] = add(new StatusChip(SocialLink.MY_STATUSES.get(i)));
 		}
@@ -121,6 +133,11 @@ final class FriendsPage extends Node {
 	void step() {
 		client.watch(selected);
 		client.tick();
+		if (showSettings) {
+			feeds.want(MenuFeeds.Feed.COMMUNITY, playing(), System.currentTimeMillis());
+		}
+		feeds.tick();
+		settings.follow();
 		if (link != null && !query.equals(searchedFor) && Clock.millis() - queryChangedAt >= SEARCH_DELAY_MILLIS) {
 			search(query);
 		}
@@ -229,6 +246,57 @@ final class FriendsPage extends Node {
 		client.run(() -> link.settings(who, null, allow), me -> pendingAllow = null, code -> {
 			pendingAllow = null;
 			say(SocialParts.errorText(code), true);
+		});
+	}
+
+	/** Who sees when the player was last on ({@code SocialLink.LAST_SEEN}); only offered when the Friends service has it. */
+	private void setLastSeen(String value) {
+		String who = playing();
+		if (link == null || who == null) {
+			return;
+		}
+		pendingLastSeen = value;
+		client.run(() -> link.settings(who, null, null, value, null), me -> pendingLastSeen = null, code -> {
+			pendingLastSeen = null;
+			say(SocialParts.errorText(code), true);
+		});
+	}
+
+	/** Who may send the player gifts ({@code SocialLink.GIFTS}); only offered when the Friends service has it. */
+	private void setGifts(String value) {
+		String who = playing();
+		if (link == null || who == null) {
+			return;
+		}
+		pendingGifts = value;
+		client.run(() -> link.settings(who, null, null, null, value), me -> pendingGifts = null, code -> {
+			pendingGifts = null;
+			say(SocialParts.errorText(code), true);
+		});
+	}
+
+	/**
+	 * Link: the Flint app starts linking Discord to this Minecraft account (its Store session), and this game opens Discord's own
+	 * page in the browser (the game is in front); the settings then watch for the link to show.
+	 */
+	private void linkDiscord() {
+		String who = playing();
+		if (who == null || linking) {
+			return;
+		}
+		linking = true;
+		feeds.run(l -> l.discordLink(who), start -> {
+			linking = false;
+			if (start.off() || start.url() == null) {
+				say("Linking Discord isn't available right now.", true);
+				return;
+			}
+			MenuHost.openTrusted(start.url());
+			feeds.linking(System.currentTimeMillis());
+			say("Finish linking in your browser. This page updates by itself.", false);
+		}, why -> {
+			linking = false;
+			say("unreachable".equals(why) ? SocialParts.errorText("unreachable") : why, true);
 		});
 	}
 
@@ -407,6 +475,10 @@ final class FriendsPage extends Node {
 		float chip = d(40);
 		float gx = right - chip;
 		gear.setBounds(gx, top + (d(HEAD) - chip) / 2, chip, chip);
+		if (minecraftFriends != null) {
+			gx -= chip + d(8);
+			minecraftFriends.setBounds(gx, top + (d(HEAD) - chip) / 2, chip, chip);
+		}
 		Canvas m = measure();
 		float cx = gx - d(16);
 		for (int i = statuses.length - 1; i >= 0; i--) {
@@ -455,7 +527,6 @@ final class FriendsPage extends Node {
 	@Override
 	protected void paint(Canvas c) {
 		Friends f = friends();
-		pickUnreadOnce(f);
 		if (selected != null && (f == null || f.friend(selected) == null) && f != null) {
 			selected = null;
 			chat.show(null);
@@ -516,32 +587,6 @@ final class FriendsPage extends Node {
 			note.paint(c, bx + d(32), by + d(12), textW, MenuStyle.TEXT);
 		} finally {
 			c.setOpacity(before);
-		}
-	}
-
-	private void pickUnreadOnce(@Nullable Friends f) {
-		if (!pickUnread || f == null) {
-			return;
-		}
-		pickUnread = false;
-		Friend best = null;
-		for (Friend friend : f.friends()) {
-			if (friend.unread() > 0 && (best == null || friend.unread() > best.unread())) {
-				best = friend;
-			}
-		}
-		// Nothing unread: the chat most likely wanted, a pinned friend (online first), else one who is online.
-		for (int pass = 0; best == null && pass < 3; pass++) {
-			for (Friend friend : f.friends()) {
-				boolean fits = pass == 0 ? friend.pinned() && friend.online() : pass == 1 ? friend.pinned() : friend.online();
-				if (fits) {
-					best = friend;
-					break;
-				}
-			}
-		}
-		if (best != null) {
-			open(best.uuid());
 		}
 	}
 
@@ -668,7 +713,7 @@ final class FriendsPage extends Node {
 			if (friend.unread() > 0) {
 				float cw = Math.max(d(26), count.width(c) + d(14));
 				MenuStyle.box(c, right - cw, y + h / 2 - d(11), cw, d(22), d(11), MenuStyle.ACCENT);
-				MenuStyle.centered(c, count, right - cw / 2, y + h / 2, 0xFFFFFFFF, cw);
+				MenuStyle.centered(c, count, right - cw / 2, y + h / 2, MenuStyle.ON_ACCENT, cw);
 				right -= cw + d(10);
 			}
 			if (friend.pinned()) {
@@ -889,7 +934,7 @@ final class FriendsPage extends Node {
 				float cw = bw - d(8);
 				float bx = left + lw + d(8);
 				MenuStyle.box(c, bx, y + h / 2 - d(10), cw, d(20), d(10), on >= 0.5F ? 0xFFFFFFFF : MenuStyle.ACCENT);
-				MenuStyle.centered(c, badge, bx + cw / 2, y + h / 2, on >= 0.5F ? MenuStyle.ACCENT : 0xFFFFFFFF, cw);
+				MenuStyle.centered(c, badge, bx + cw / 2, y + h / 2, on >= 0.5F ? MenuStyle.ACCENT : MenuStyle.ON_ACCENT, cw);
 			}
 			MenuStyle.focusRing(c, x, y, w, h, rad, focus);
 		}
@@ -897,24 +942,54 @@ final class FriendsPage extends Node {
 
 	// ---------- settings ----------
 
-	/** Friends' settings: taking requests (the app's own setting), and the notices in game (this game's). */
+	/**
+	 * Friends' settings: taking requests, who sees when you were last on and who may send you gifts (the Friends service's own,
+	 * the last two only once the service has them), the notices in game (this game's), and the Discord account linked to this
+	 * Minecraft account (the Flint Store's; Link starts linking in the Flint app and opens Discord's page here).
+	 */
 	private final class SettingsPanel extends Node {
 		private final Label heading = new Label(Type.SECTION_TITLE, "FRIENDS SETTINGS");
 		private final Label allowLabel = new Label(Type.ROW_LABEL, "Allow friend requests");
-		private final Lines allowNote = new Lines(Type.ROW_NOTE, "Anyone on Flint can ask to be your friend. The same setting as in the Flint app.");
+		private final Lines allowNote = new Lines(Type.ROW_NOTE, "Anyone on Flint can ask to be your friend.");
+		private final Label lastSeenLabel = new Label(Type.ROW_LABEL, "Last seen");
+		private final Lines lastSeenNote = new Lines(Type.ROW_NOTE, "Who can see when you were last on.");
+		private final Label giftsLabel = new Label(Type.ROW_LABEL, "Gifts");
+		private final Lines giftsNote = new Lines(Type.ROW_NOTE, "Who can send you Store gifts.");
 		private final Label noticeLabel = new Label(Type.ROW_LABEL, "Notifications in game");
-		private final Lines noticeNote = new Lines(Type.ROW_NOTE, "A small note in game when a friend messages you, asks to be friends or comes online.");
+		private final Lines noticeNote = new Lines(Type.ROW_NOTE, "A note in game for messages, requests and friends coming online.");
+		private final Label linkedHeading = new Label(Type.SECTION_TITLE, "LINKED ACCOUNTS");
+		private final Label discordLabel = new Label(Type.ROW_LABEL, "Discord");
+		private final Lines discordNote = new Lines(Type.ROW_NOTE, "");
+		private final Label linkedChip = new Label(Type.CHIP, "Linked");
 		private final PageControls.Switch allow;
+		private final PageControls.Segmented lastSeen;
+		private final PageControls.Segmented gifts;
 		private final PageControls.Switch notices;
+		private final Button link;
+		/** Where each row starts, worked out by {@link #layout} (-1: the row isn't shown). */
+		private float allowY;
+		private float lastSeenY = -1;
+		private float giftsY = -1;
+		private float noticeY;
+		private float linkedY = -1;
+		private String shape = "";
 
 		SettingsPanel() {
 			allow = add(new PageControls.Switch(this::allowing, () -> setAllowRequests(!allowing())));
 			allow.name("Allow friend requests");
+			lastSeen = add(new PageControls.Segmented(new String[] {"Friends", "Nobody"},
+				() -> SocialLink.LAST_SEEN.indexOf(lastSeenValue()), i -> setLastSeen(SocialLink.LAST_SEEN.get(i))));
+			lastSeen.name("Last seen");
+			gifts = add(new PageControls.Segmented(new String[] {"Everyone", "Friends", "Nobody"},
+				() -> SocialLink.GIFTS.indexOf(giftsValue()), i -> setGifts(SocialLink.GIFTS.get(i))));
+			gifts.name("Gifts");
 			notices = add(new PageControls.Switch(SettingsPanel::noticesOn, () -> {
 				ControlState.settings().setGame(GameOptions.FRIEND_NOTICES, !noticesOn());
 				ControlState.saveAll();
 			}));
 			notices.name("Notifications in game");
+			link = add(new Button("Link", Glyph.LINK, PageControls.Look.ACCENT, FriendsPage.this::linkDiscord));
+			link.name("Link Discord");
 		}
 
 		private boolean allowing() {
@@ -925,6 +1000,23 @@ final class FriendsPage extends Node {
 			return f == null || f.me() == null || f.me().allowRequests();
 		}
 
+		/** The Friends service's value, or null when it doesn't have this setting (an older service: not offered). */
+		private @Nullable String lastSeenValue() {
+			if (pendingLastSeen != null) {
+				return pendingLastSeen;
+			}
+			Friends f = friends();
+			return f == null || f.me() == null ? null : f.me().lastSeen();
+		}
+
+		private @Nullable String giftsValue() {
+			if (pendingGifts != null) {
+				return pendingGifts;
+			}
+			Friends f = friends();
+			return f == null || f.me() == null ? null : f.me().gifts();
+		}
+
 		private static boolean noticesOn() {
 			try {
 				return ControlState.settings().gameBool(GameOptions.FRIEND_NOTICES);
@@ -933,8 +1025,28 @@ final class FriendsPage extends Node {
 			}
 		}
 
-		/** Where the second row starts: under the first row's note, however many lines it takes. */
-		private float secondY;
+		/** The Discord row, when the Flint Store has Discord linking for this account (an older app or Store: no row). */
+		private MenuLink.@Nullable Community community() {
+			MenuLink.Community c = feeds.community(playing());
+			return c != null && !"off".equals(c.state()) && (c.canLink() || c.linked()) ? c : null;
+		}
+
+		/** What the rows depend on, so the panel is laid out again when one comes or goes. */
+		void follow() {
+			MenuLink.Community c = community();
+			String now = (lastSeenValue() != null) + "|" + (giftsValue() != null) + "|" + (c == null ? "-" : c.linked() + "," + c.member() + "," + c.canLink())
+				+ "|" + linking;
+			if (!now.equals(shape)) {
+				shape = now;
+				if (c != null) {
+					MenuLink.Discord d = c.discord();
+					discordNote.set(c.linked() && d != null
+						? "Linked as " + d.shownName() + (c.member() ? " · in Flint's Discord server" : c.pending() ? " · finishing joining Flint's server" : " · not in Flint's server yet")
+						: linking ? "Waiting for Discord… finish in your browser." : "Link it to unlock the rewards for members of Flint's server.");
+				}
+				invalidate();
+			}
+		}
 
 		private float textWidth() {
 			return w - d(28) - MenuStyle.r(PageControls.Switch.W) - d(20) - d(28);
@@ -942,12 +1054,52 @@ final class FriendsPage extends Node {
 
 		@Override
 		protected void layout() {
+			Canvas m = measure();
 			float sw = MenuStyle.r(PageControls.Switch.W);
 			float sh = MenuStyle.r(PageControls.Switch.H);
-			float firstY = y + d(72);
-			secondY = firstY + d(26) + allowNote.height(measure(), textWidth()) + d(24);
-			allow.setBounds(x + w - d(28) - sw, firstY + d(12) - sh / 2, sw, sh);
-			notices.setBounds(x + w - d(28) - sw, secondY + d(12) - sh / 2, sw, sh);
+			float right = x + w - d(28);
+			float y0 = y + d(72);
+			allowY = y0;
+			allow.setBounds(right - sw, allowY + d(12) - sh / 2, sw, sh);
+			float yy = allowY + d(26) + allowNote.height(m, textWidth()) + d(24);
+			float segH = MenuStyle.r(PageControls.Segmented.H);
+			boolean seen = lastSeenValue() != null;
+			lastSeen.setVisible(seen);
+			if (seen) {
+				lastSeenY = yy;
+				float segW = lastSeen.prefWidth();
+				lastSeen.setBounds(right - segW, lastSeenY + d(12) - segH / 2, segW, segH);
+				yy = lastSeenY + d(26) + lastSeenNote.height(m, textWidth()) + d(24);
+			} else {
+				lastSeenY = -1;
+			}
+			boolean gifting = giftsValue() != null;
+			gifts.setVisible(gifting);
+			if (gifting) {
+				giftsY = yy;
+				float segW = gifts.prefWidth();
+				gifts.setBounds(right - segW, giftsY + d(12) - segH / 2, segW, segH);
+				yy = giftsY + d(26) + giftsNote.height(m, Math.max(d(80), w - d(56) - segW - d(20))) + d(24);
+			} else {
+				giftsY = -1;
+			}
+			noticeY = yy;
+			notices.setBounds(right - sw, noticeY + d(12) - sh / 2, sw, sh);
+			yy = noticeY + d(26) + noticeNote.height(m, textWidth()) + d(30);
+			MenuLink.Community c = community();
+			boolean discord = c != null;
+			if (discord) {
+				linkedY = yy;
+				boolean canLink = !c.linked() && c.canLink();
+				link.setVisible(canLink);
+				link.setText(linking ? "Waiting…" : "Link");
+				link.setEnabled(!linking);
+				float bw = Math.max(d(110), link.prefWidth());
+				link.setBounds(right - bw, linkedY + d(46) + d(13) - d(Button.H) / 2, bw, d(Button.H));
+			} else {
+				linkedY = -1;
+				link.setVisible(false);
+			}
 		}
 
 		@Override
@@ -955,12 +1107,41 @@ final class FriendsPage extends Node {
 			MenuStyle.framed(c, x, y, w, h, MenuStyle.radius(), MenuStyle.SECTION_CARD, MenuStyle.SECTION_EDGE);
 			float left = x + d(28);
 			float textW = textWidth();
-			float firstY = y + d(72);
 			MenuStyle.text(c, heading, left, y + d(40), MenuStyle.TEXT);
-			MenuStyle.text(c, allowLabel, left, firstY + d(12), MenuStyle.TEXT);
-			allowNote.paint(c, left, firstY + d(26), textW, MenuStyle.NEUTRAL);
-			MenuStyle.text(c, noticeLabel, left, secondY + d(12), MenuStyle.TEXT);
-			noticeNote.paint(c, left, secondY + d(26), textW, MenuStyle.NEUTRAL);
+			MenuStyle.text(c, allowLabel, left, allowY + d(12), MenuStyle.TEXT);
+			allowNote.paint(c, left, allowY + d(26), textW, MenuStyle.NEUTRAL);
+			if (lastSeenY >= 0) {
+				MenuStyle.text(c, lastSeenLabel, left, lastSeenY + d(12), MenuStyle.TEXT);
+				lastSeenNote.paint(c, left, lastSeenY + d(26), textW, MenuStyle.NEUTRAL);
+			}
+			if (giftsY >= 0) {
+				MenuStyle.text(c, giftsLabel, left, giftsY + d(12), MenuStyle.TEXT);
+				giftsNote.paint(c, left, giftsY + d(26), Math.max(d(80), gifts.x() - d(20) - left), MenuStyle.NEUTRAL);
+			}
+			MenuStyle.text(c, noticeLabel, left, noticeY + d(12), MenuStyle.TEXT);
+			noticeNote.paint(c, left, noticeY + d(26), textW, MenuStyle.NEUTRAL);
+			if (linkedY >= 0) {
+				float line = Math.max(1, c.scale() / 4.0F) / c.scale();
+				MenuStyle.box(c, left, linkedY - d(14), w - d(56), line, 0, MenuStyle.ROW_RULE);
+				MenuStyle.text(c, linkedHeading, left, linkedY + d(14), MenuStyle.TEXT);
+				float rowY = linkedY + d(46);
+				MenuLink.Community com = community();
+				boolean linked = com != null && com.linked();
+				// Discord's own blurple, for its mark only.
+				float disc = d(26);
+				MenuStyle.box(c, left, rowY + d(13) - disc / 2, disc, disc, disc / 2, linked ? 0xFF5865F2 : MenuStyle.CHIP);
+				Glyph.USERS.draw(c, left + disc / 2, rowY + d(13), d(13), linked ? 0xFFFFFFFF : MenuStyle.NEUTRAL);
+				float tx = left + disc + d(12);
+				MenuStyle.text(c, discordLabel, tx, rowY + d(6), MenuStyle.TEXT);
+				float noteW = (link.visible() ? link.x() - d(16) : x + w - d(28) - d(90)) - tx;
+				discordNote.paint(c, tx, rowY + d(18), Math.max(d(80), noteW), linked ? MenuStyle.SENTENCE_TEXT : MenuStyle.NEUTRAL);
+				if (linked) {
+					float cw = linkedChip.width(c) + d(20);
+					float cx = x + w - d(28) - cw;
+					MenuStyle.box(c, cx, rowY + d(13) - d(14), cw, d(28), d(14), Palette.withAlpha(SocialParts.ONLINE, 0.16F));
+					MenuStyle.text(c, linkedChip, cx + d(10), rowY + d(13) + d(0.75F), SocialParts.ONLINE);
+				}
+			}
 		}
 	}
 

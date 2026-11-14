@@ -73,6 +73,59 @@ class LauncherLinkSocialTest {
 		assertEquals(ALEX, sent.get("chat").getAsString());
 		link.friends(STEVE, null);
 		assertFalse(requests.get(1).has("chat"));
+		assertFalse(requests.get(1).has("since"), "asked at once");
+	}
+
+	@Test
+	void aHeldPollSendsTheRevisionAndCanBeCutShort() throws Exception {
+		java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+		SocialLink link = serve(r -> {
+			if (r.has("since")) {
+				// Flint holds it: nothing changes until the test lets go.
+				try {
+					release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+			return "{\"ok\":true,\"phase\":\"ready\",\"revision\":42}";
+		});
+		SocialLink.Held now = link.friends(STEVE, ALEX, -1, 20_000, null);
+		assertEquals(42, now.revision());
+		assertEquals("ready", now.friends().phase());
+		LauncherLink.Call call = new LauncherLink.Call();
+		java.util.concurrent.atomic.AtomicReference<Exception> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+		Thread waiting = new Thread(() -> {
+			try {
+				link.friends(STEVE, ALEX, 42, 20_000, call);
+			} catch (Exception e) {
+				thrown.set(e);
+			}
+		});
+		waiting.start();
+		long until = System.currentTimeMillis() + 5000;
+		while (requests.size() < 2 && System.currentTimeMillis() < until) {
+			Thread.sleep(5);
+		}
+		JsonObject held = requests.get(1);
+		assertEquals(42, held.get("since").getAsLong());
+		assertEquals(20_000, held.get("waitMs").getAsInt());
+		long cut = System.currentTimeMillis();
+		call.cancel();
+		waiting.join(5000);
+		assertTrue(System.currentTimeMillis() - cut < 2000, "cut short at once");
+		assertEquals(LauncherLink.Call.CANCELLED, thrown.get().getMessage());
+		assertFalse(((LauncherLink.LinkException) thrown.get()).unreachable(), "cut short isn't Flint gone");
+		release.countDown();
+		// A Flint from before 1.0.4 gives no revision: -1, polled as before.
+		assertEquals(-1, SocialLink.revision(JsonParser.parseString("{\"ok\":true}").getAsJsonObject()));
+		assertEquals(-1, SocialLink.revision(JsonParser.parseString("{\"revision\":\"x\"}").getAsJsonObject()));
+		// A call cut short before it starts never connects.
+		LauncherLink.Call early = new LauncherLink.Call();
+		early.cancel();
+		int asked = requests.size();
+		assertThrows(LauncherLink.LinkException.class, () -> link.friends(STEVE, null, 42, 20_000, early));
+		assertEquals(asked, requests.size());
 	}
 
 	@Test

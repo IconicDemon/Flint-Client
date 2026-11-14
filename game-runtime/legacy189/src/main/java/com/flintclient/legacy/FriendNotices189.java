@@ -32,10 +32,10 @@ import net.minecraft.client.Minecraft;
 public final class FriendNotices189 {
 	private static final long SHOW_MILLIS = 4000;
 	private static final long SLIDE_MILLIS = 250;
-	private static final int MAX_SHOWN = 3;
+	private static final int MAX_SHOWN = 2;
 	private static final int MAX_WAITING = 8;
 	/** Sizes in GUI units, as the newer lines' toast. */
-	private static final float HEIGHT = 20;
+	private static final float HEIGHT = com.flintclient.client.render.NoticeStyle.HEIGHT;
 	private static final float MARK = 10;
 	private static final float PAD = 7;
 	private static final float GAP = 6;
@@ -60,8 +60,12 @@ public final class FriendNotices189 {
 		final TextLine text;
 		final long since;
 
+		final TextLine secondary;
+
 		Card(String text, long since) {
-			this.text = new TextLine(FlintFonts.SMALL, text);
+			int dot = text.indexOf(" · ");
+			this.text = new TextLine(FlintFonts.SMALL, dot > 0 ? text.substring(0, dot) : text);
+			this.secondary = dot > 0 ? new TextLine(FlintFonts.SMALL, text.substring(dot + 1)) : null;
 			this.since = since;
 		}
 	}
@@ -100,7 +104,8 @@ public final class FriendNotices189 {
 	}
 
 	/** Queues a card saying {@code text} (one line, no formatting codes). Render thread. */
-	static void show(String text) {
+	/** Every Flint notice on 1.8.9 (Friends, files, a mod turned off after an error) goes through here: one style, two at most. */
+	public static void show(String text) {
 		// Minecraft's font reads a section sign as a formatting code.
 		String plain = text.replace(String.valueOf((char) 0xA7), "").strip();
 		if (plain.isEmpty()) {
@@ -117,9 +122,19 @@ public final class FriendNotices189 {
 		return count;
 	}
 
+	/** Whether no card is on screen; goes by {@link #MAX_SHOWN}, so it can't index past the slots. */
+	private static boolean noneShown() {
+		for (Card card : SHOWN) {
+			if (card != null) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	/** After the frame is drawn ({@code mixin/GameRendererMixin}): the cards, over everything. */
 	public static void draw(Minecraft mc) {
-		if (!GUARD.on() || WAITING.isEmpty() && SHOWN[0] == null && SHOWN[1] == null && SHOWN[2] == null) {
+		if (!GUARD.on() || WAITING.isEmpty() && noneShown()) {
 			return;
 		}
 		try {
@@ -149,35 +164,37 @@ public final class FriendNotices189 {
 	}
 
 	private static void paint(Minecraft mc, long now) {
-		MenuTheme.Look look = Shared.settings().menuTheme().look();
-		int border = 0xFF000000 | look.surface4;
-		int fill = 0xF2000000 | look.surface1;
-		int ink = Palette.lerp(0xFF000000 | look.surface1, 0xFF000000 | look.ink, 0.85F);
 		Canvas c = Canvas.begin(Frame.get());
 		// Minecraft's font at the game's own interface scale, as Minecraft's own text.
 		int fontMode = PixelFace.begin(c.guiScale());
 		try {
 			int h = c.px(HEIGHT);
-			int markH = c.px(MARK);
-			int markW = MaskAtlas.markWidth(markH);
-			int pad = c.px(PAD);
-			int maxText = c.px(MAX_TEXT);
-			int borderPx = Math.max(1, c.px(0.4F));
+			int margin = c.px(MARGIN);
+			int chrome = com.flintclient.client.render.NoticeStyle.chromeWidth(c, h);
+			int gap = c.px(3);
 			for (int i = 0; i < MAX_SHOWN; i++) {
 				Card card = SHOWN[i];
 				if (card == null) {
 					continue;
 				}
-				int textW = c.width(card.text, maxText);
-				int w = pad + markW + c.px(GAP) + textW + pad;
+				// Flint's one notification style (NoticeStyle): a slim translucent pill that eases in, fades out and never leaves
+				// the screen (at most its width less a margin either side; a long name is cut short).
+				int wanted = chrome + c.width(card.text) + (card.secondary != null ? gap + c.width(card.secondary) : 0);
+				int w = com.flintclient.client.render.NoticeStyle.fitWidth(wanted, mc.width, margin);
 				int y = c.px(MARGIN + below) + i * (h + c.px(SPACING));
-				// Slides in from the right edge, and back out at its end.
 				long age = now - card.since;
-				float in = ease(Math.min(1.0F, age / (float) SLIDE_MILLIS)) * ease(Math.min(1.0F, (SHOW_MILLIS - age) / (float) SLIDE_MILLIS));
-				int x = mc.width - c.px(MARGIN) - w + Math.round((1 - in) * (w + c.px(MARGIN)));
-				c.panel(x, y, w, h, c.px(5), borderPx, border, fill);
-				c.mark(x + pad, y + (h - markH) / 2, markH, 1.0F);
-				c.text(card.text, x + pad + markW + c.px(GAP), c.baselineFor(card.text, y + h / 2), ink, maxText);
+				float alpha = com.flintclient.client.render.NoticeStyle.alpha(age, SHOW_MILLIS);
+				float in = ease(Math.min(1.0F, age / (float) SLIDE_MILLIS));
+				int x = mc.width - margin - w + Math.round((1 - in) * c.px(12));
+				int tx = com.flintclient.client.render.NoticeStyle.pill(c, x, y, w, h, alpha);
+				int room = x + w - c.px(com.flintclient.client.render.NoticeStyle.PAD) - tx;
+				int cy = y + h / 2;
+				int mainW = Math.min(c.width(card.text), room);
+				c.text(card.text, tx, c.baselineFor(card.text, cy), com.flintclient.client.render.NoticeStyle.fade(com.flintclient.client.render.NoticeStyle.TEXT, alpha), room);
+				if (card.secondary != null && room - mainW - gap > c.px(8)) {
+					c.text(card.secondary, tx + mainW + gap, c.baselineFor(card.secondary, cy),
+						com.flintclient.client.render.NoticeStyle.fade(com.flintclient.client.render.NoticeStyle.SECONDARY, alpha), room - mainW - gap);
+				}
 			}
 		} finally {
 			PixelFace.end(fontMode);

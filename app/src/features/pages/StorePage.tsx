@@ -4,6 +4,7 @@ import meritStar2x from "../../assets/brand/merit-star-46.png";
 import meritStar3x from "../../assets/brand/merit-star-69.png";
 import wallpaper from "../../assets/wallpapers/26_3.jpg";
 import { api, errorText, type Account } from "../../lib/api";
+import { storeLink } from "../../lib/storeLinks";
 import { capeNoticeKey, type CapeConflict } from "../../lib/capeConflict";
 import { NO_CAPE, type ShownCape } from "../../lib/capeSource";
 import { joinRewards } from "../../lib/community";
@@ -11,7 +12,7 @@ import { useDisplayedCape } from "../../lib/displayedCape";
 import { createEquipQueue, type EquipQueue, type Pick } from "../../lib/equipQueue";
 import { useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
-import { useStoreSelect } from "../../lib/store";
+import { useStore, useStoreSelect } from "../../lib/store";
 import { meritShown, storePhase, withEquipped, wornIn, type MeritShown } from "../../lib/storePage";
 import {
   formatStoreMerit,
@@ -22,7 +23,6 @@ import {
   updatedText,
   viewFor,
   type StoreInfo,
-  type StoreItem,
   type StoreSlot,
   type StoreView,
 } from "../../lib/storeSync";
@@ -34,10 +34,10 @@ import type { Navigate } from "../shell/Shell";
 import { CapeConflictDialog } from "../store/CapeConflictDialog";
 import { StoreActivityPanel, type Activity, type ActivityTab } from "../store/StoreActivity";
 import { StoreApproveDialog } from "../store/StoreApprove";
-import { StoreInventoryCard, type Wearing } from "../store/StoreInventory";
-import { StorePreview } from "../store/StorePreview";
 import { useItemCape } from "../store/storeCape";
 import { useCommunity } from "../store/useCommunity";
+import type { Wearing } from "../store/wearing";
+import { Wardrobe } from "../wardrobe/Wardrobe";
 
 /**
  * The Flint Store for the active Minecraft account, laid out as a wardrobe: one header (the page's name, the Merit
@@ -181,7 +181,7 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
   /** The answer shown, for the equip queue and the version check (state is a render behind). */
   const shownView = useRef<StoreView | null>(null);
   const [wearError, setWearError] = useState<{ slot: StoreSlot; text: string } | null>(null);
-  const [pointed, setPointed] = useState<StoreItem | null>(null);
+  const refreshSkin = useStore().refreshSkin;
   const [activity, setActivity] = useState<ActivityState>(NO_ACTIVITY);
   const [activityRun, setActivityRun] = useState(0);
   const [panel, setPanel] = useState<ActivityTab | null>(null);
@@ -323,7 +323,11 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
     queue.current?.pick(slot, cosmeticId);
   };
 
-  const openStore = () => void api.openExternal(storeUrl).catch((e) => toast({ tone: "danger", title: t("store.openFailed"), body: errorText(e) }));
+  // A kind opens the Store's catalog for it (/cosmetics/?kind=wings), the page a shared link previews; none, the Store's home.
+  const openStore = (kind?: string) =>
+    void api
+      .openExternal(storeLink(storeUrl, kind))
+      .catch((e) => toast({ tone: "danger", title: t("store.openFailed"), body: errorText(e) }));
 
   const inventory = view?.inventory ? (pending ? withEquipped(view.inventory, pending.slot, pending.cosmeticId) : view.inventory) : null;
   // Community Rewards: the Store's public list joined with this account's standing (nothing at all from a Store without it).
@@ -344,8 +348,6 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
     if (wornFlint) return wornCape ?? displayed;
     return minecraftCape ? { source: "minecraft", url: minecraftCape } : NO_CAPE;
   }, [displayed, wornFlint, wornCape, minecraftCape]);
-  // Pointing at what the account wears is no preview.
-  const pointedCape = useItemCape(uuid, pointed && pointed.cosmeticId !== wornFlint?.cosmeticId ? pointed : null, motionOk);
   const merit = meritShown(view, activity.data ? { balance: activity.data.wallet.balance, at: activity.at ?? 0 } : null);
 
   if (phase === "loading") return <StoreSkeleton test={test} />;
@@ -395,7 +397,7 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
               {t("store.signIn.button")}
             </Button>
           )}
-          <Button variant="ghost" size={locked ? "md" : "lg"} iconRight="external" onClick={openStore}>
+          <Button variant="ghost" size={locked ? "md" : "lg"} iconRight="external" onClick={() => openStore()}>
             {t("store.summary.openStore")}
           </Button>
         </StoreHero>
@@ -416,7 +418,7 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
       <Button variant="secondary" icon="history" onClick={() => setPanel("orders")}>
         {t("store.activity.orders")}
       </Button>
-      <Button variant="primary" iconRight="external" onClick={openStore}>
+      <Button variant="primary" iconRight="external" onClick={() => openStore()}>
         {t("store.summary.openStore")}
       </Button>
       <MoreMenu items={menu} busy={busy === "refresh" || busy === "sign-out"} />
@@ -452,10 +454,16 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
       </>
     );
 
-  const stageCape = pointedCape ?? worn;
-  // A listed reward pointed at (locked: not in the inventory) names itself on the stage too.
-  const stageItem =
-    stageCape.source === "flint" ? (inventory?.owned.find((o) => o.cosmeticId === stageCape.cosmeticId) ?? (pointed?.cosmeticId === stageCape.cosmeticId ? pointed : null)) : null;
+  /** The emote wheel: the Store decides; a refusal is said in a toast and the Store's wheel stays shown. */
+  const setEmotes = async (wheel: (string | null)[]) => {
+    try {
+      show(await api.storeSetEmotes(uuid, wheel));
+    } catch (e) {
+      toast({ tone: "danger", title: t("wardrobe.emotes.failed"), body: errorText(e) });
+      void reload(false);
+    }
+  };
+
   return (
     <>
       {header}
@@ -477,56 +485,40 @@ function StoreAccount({ account, info, test, navigate }: { account: Account; inf
         </Callout>
       )}
 
-      <div className="store-main">
-        <section className="store-stage" aria-label={t("store.preview.title")}>
-          <StorePreview
-            skin={skin?.dataUrl ?? null}
-            model={skin?.model ?? account.skinModel ?? "classic"}
-            cape={stageCape}
-            motion={motionOk}
-            label={stageItem ? t("store.preview.labelCape", { name: account.username, cape: stageItem.name }) : t("store.preview.label", { name: account.username })}
-            tag={
-              pointedCape && stageItem ? (
-                <>
-                  <span>{t("store.preview.previewing")}</span>
-                  <strong>{stageItem.name}</strong>
-                </>
-              ) : null
-            }
-          />
+      {inventory ? (
+        <Wardrobe
+          account={account}
+          skin={{ dataUrl: skin?.dataUrl ?? null, model: skin?.model ?? account.skinModel ?? "classic" }}
+          inventory={inventory}
+          pending={pending}
+          error={wearError}
+          readOnly={offline}
+          motion={motionOk}
+          wornCape={worn}
+          onWear={(slot, id) => void wear(slot, id)}
+          onSetEmotes={setEmotes}
+          onOpenStore={openStore}
+          onSkinApplied={async () => {
+            await refreshSkin(uuid).catch(() => null);
+          }}
+          community={
+            cards.length
+              ? {
+                  cards,
+                  rewards: community.rewards,
+                  recheck: community.recheck,
+                  onRecheck: () => void community.checkAgain(),
+                  onConnect: () => navigate("settings", "connections"),
+                  onInvite: openInvite,
+                }
+              : null
+          }
+        />
+      ) : (
+        <section className="store-items is-empty">
+          <EmptyState icon="bag" title={t("store.items.title")} body={t("store.items.notHeard")} />
         </section>
-
-        {inventory ? (
-          <StoreInventoryCard
-            uuid={uuid}
-            inventory={inventory}
-            pending={pending}
-            error={wearError}
-            readOnly={offline}
-            hasMinecraftCape={!!skin?.capeUrl}
-            motion={motionOk}
-            onWear={(slot, id) => void wear(slot, id)}
-            onPreview={setPointed}
-            onOpenStore={openStore}
-            community={
-              cards.length
-                ? {
-                    cards,
-                    rewards: community.rewards,
-                    recheck: community.recheck,
-                    onRecheck: () => void community.checkAgain(),
-                    onConnect: () => navigate("settings", "connections"),
-                    onInvite: openInvite,
-                  }
-                : null
-            }
-          />
-        ) : (
-          <section className="store-items is-empty">
-            <EmptyState icon="bag" title={t("store.items.title")} body={t("store.items.notHeard")} />
-          </section>
-        )}
-      </div>
+      )}
       {overlays}
     </>
   );

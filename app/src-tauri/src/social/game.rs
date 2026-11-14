@@ -5,8 +5,12 @@
 //! - **Only for the account the game plays as**, and only when that is Flint's active account ([`gate`]): a game playing as
 //!   another account gets `account`; a launcher signed out, or on its test identity, answers "signed out".
 //! - **Trimmed for the game** ([`view`]): no conversations except the one the game has open (its latest
-//!   [`GAME_MESSAGES`]), lists capped, nothing the app keeps for itself (`focus`, `account`). A game polling with a chat
-//!   open wakes the background sync (it still never syncs faster than an open chat's 4 s).
+//!   [`GAME_MESSAGES`]), lists capped, nothing the app keeps for itself (`focus`, `account`). A game's open chat counts as an
+//!   open chat for the sync's pacing (and wakes it when it opens).
+//! - **At once** ([`app_view`]): every answer carries the state's `revision`; a game that sends it back as `since` with a
+//!   `waitMs` is answered as soon as the state differs (a pushed message, a request, a sync), or after the wait (at most
+//!   [`MAX_WAIT`]), so it hears of a change within milliseconds instead of at its next poll. A game from before this asks
+//!   without `since` and is answered at once, as before.
 //! - **Actions** ([`GameAction`], [`act`]): the app page's own, through the same `Social` methods, which check every
 //!   argument (names, ids, UUIDs, message length) before anything is sent. Failures answer `Fail::code()`, the codes the
 //!   app's page translates; the game translates the same ones.
@@ -20,6 +24,8 @@ pub const GAME_REQUESTS: usize = 100;
 pub const GAME_MESSAGES: usize = 50;
 /// A page of older messages.
 pub const GAME_HISTORY: u32 = 30;
+/// The longest a game's `friends` waits for a change.
+pub const MAX_WAIT: Duration = Duration::from_secs(25);
 
 /// A friend as a game shows them.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -66,6 +72,9 @@ pub struct GameFriends {
     pub synced_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat: Option<GameChat>,
+    /// Friends typing to the player now.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub typing: Vec<String>,
 }
 
 impl GameFriends {
@@ -83,6 +92,7 @@ impl GameFriends {
             error: None,
             synced_at: None,
             chat: None,
+            typing: Vec::new(),
         }
     }
 
@@ -158,6 +168,7 @@ pub fn view(snapshot: &Snapshot, playing: &str, chat: Option<&str>) -> GameFrien
         error: snapshot.error.clone(),
         synced_at: snapshot.synced_at,
         chat,
+        typing: snapshot.typing.clone(),
     }
 }
 
@@ -209,16 +220,26 @@ pub enum GameAction {
         status: Option<String>,
         #[serde(default, rename = "allowRequests")]
         allow_requests: Option<bool>,
+        /// `friends` or `nobody`: only for a server whose `me` has `lastSeen`.
+        #[serde(default, rename = "lastSeen")]
+        last_seen: Option<String>,
+        /// `everyone`, `friends` or `nobody`: only for a server whose `me` has `gifts`.
+        #[serde(default)]
+        gifts: Option<String>,
     },
     Search {
         query: String,
+    },
+    /// The player is typing to `to` (sent only while live, at most every 3 s).
+    Typing {
+        to: String,
     },
 }
 
 impl GameAction {
     /// Whether it changes what the app's Friends page shows (the page is told at once).
     pub fn changes_view(&self) -> bool {
-        !matches!(self, GameAction::Search { .. } | GameAction::History { before: Some(_), .. })
+        !matches!(self, GameAction::Search { .. } | GameAction::History { before: Some(_), .. } | GameAction::Typing { .. })
     }
 }
 
@@ -260,16 +281,22 @@ pub async fn act(social: &Social, mc: &dyn Minecraft, action: GameAction) -> Res
             social.read(mc, &with, up_to).await?;
             json!({})
         }
-        GameAction::Settings { status, allow_requests } => json!({ "me": social.settings(mc, status.as_deref(), allow_requests).await? }),
+        GameAction::Settings { status, allow_requests, last_seen, gifts } => {
+            json!({ "me": social.settings(mc, status.as_deref(), allow_requests, last_seen.as_deref(), gifts.as_deref()).await? })
+        }
         GameAction::Search { query } => json!({ "players": social.search(mc, &query).await? }),
+        GameAction::Typing { to } => json!({ "sent": social.typing(&to) }),
     })
 }
 
 impl Social {
-    /// [`Social::snapshot`] with only `chat`'s conversation (a game polls every 4 s; the others aren't copied for it).
+    /// [`Social::snapshot`] with only `chat`'s conversation (a game asks often; the others aren't copied for it).
     pub fn game_snapshot(&self, chat: Option<&str>) -> Snapshot {
         let chat = chat.and_then(canonical);
         let inner = self.inner.lock().unwrap();
+        let now = Instant::now();
+        let mut typing: Vec<String> = inner.typing.iter().filter(|(_, until)| **until > now).map(|(uuid, _)| uuid.clone()).collect();
+        typing.sort();
         Snapshot {
             configured: self.configured(),
             phase: if self.configured() { inner.phase } else { Phase::Unavailable },
@@ -287,7 +314,22 @@ impl Social {
             synced_at: inner.synced_at,
             focus: None,
             stale: inner.stale,
+            live: self.live_up(),
+            typing,
         }
+    }
+
+    /// The account the state is for now.
+    pub fn account(&self) -> Option<String> {
+        self.inner.lock().unwrap().account.as_ref().map(|a| a.uuid.clone())
+    }
+
+    /// The game's answer for `playing` with its open chat, as of now, with the revision it is (read first: a change
+    /// between the two makes the game ask again, never miss one).
+    pub fn game_answer(&self, playing: &str, chat: Option<&str>) -> (GameFriends, u64) {
+        let revision = self.revision();
+        let snapshot = self.game_snapshot(chat);
+        (view(&snapshot, playing, chat), revision)
     }
 }
 
@@ -298,24 +340,34 @@ fn app_gate(state: &AppState, playing: &str) -> Gate {
     gate(active.as_ref().map(|a| (a.uuid.as_str(), a.qa)), playing)
 }
 
-/// The `friends` answer for a game playing as `playing` (32 lowercase hex), with its open chat.
-pub fn app_view(app: &AppHandle, playing: &str, chat: Option<&str>) -> CmdResult<Value> {
+/// The `friends` answer for a game playing as `playing` (32 lowercase hex), with its open chat. With `wait` (the revision
+/// the game has, and how long it may wait), answered once the state differs from that revision, or after the wait.
+pub async fn app_view(app: &AppHandle, playing: &str, chat: Option<&str>, wait: Option<(u64, Duration)>) -> CmdResult<Value> {
     let state = app.state::<AppState>();
     let social = &state.social;
-    let view = match app_gate(&state, playing) {
-        Gate::OtherAccount => return Err("account".into()),
-        Gate::SignedOut { test_identity } => GameFriends::signed_out(social.configured(), test_identity),
-        Gate::Ready => {
-            let snapshot = social.game_snapshot(chat);
-            let shown = view(&snapshot, playing, chat);
-            if chat.is_some() || snapshot.account.as_deref() != Some(playing) {
-                // An open chat in the game polls as fast as one in the app; a switch is followed at once.
-                social.wake.notify_one();
-            }
-            shown
+    let gate = app_gate(&state, playing);
+    if gate == Gate::OtherAccount {
+        return Err("account".into());
+    }
+    if gate == Gate::Ready {
+        let switched = social.account().as_deref() != Some(playing);
+        // An open chat in the game counts as one in the app; a switch is followed at once.
+        if social.game_chat(chat) || switched {
+            social.wake.notify_one();
         }
+    }
+    if let Some((since, wait)) = wait {
+        social.changed_since(since, wait.min(MAX_WAIT)).await;
+    }
+    // Looked at again: the account may have changed while it waited.
+    let (view, revision) = match app_gate(&state, playing) {
+        Gate::OtherAccount => return Err("account".into()),
+        Gate::SignedOut { test_identity } => (GameFriends::signed_out(social.configured(), test_identity), social.revision()),
+        Gate::Ready => social.game_answer(playing, chat),
     };
-    serde_json::to_value(view).map_err(|_| "internal error".to_owned())
+    let mut answer = serde_json::to_value(view).map_err(|_| "internal error".to_owned())?;
+    answer["revision"] = json!(revision);
+    Ok(answer)
 }
 
 /// Runs a game's action for `playing`, as the app's page runs it; the page is told what changed.

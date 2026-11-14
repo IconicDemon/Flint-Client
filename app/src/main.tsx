@@ -21,6 +21,7 @@ import "./styles/onboarding.css";
 import "./styles/import.css";
 import "./styles/friends.css";
 import "./styles/store.css";
+import "./styles/wardrobe.css";
 import "./styles/partners.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);

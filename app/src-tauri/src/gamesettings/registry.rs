@@ -1,8 +1,8 @@
 //! The Minecraft settings Flint shows and copies, and how each is stored in options.txt.
 //!
 //! Every entry was checked against Minecraft 26.3's `Options` (key, range, default, how it is written) and,
-//! where an older version has it, is constructed the same way in the 1.21.1, 1.21.10, 1.21.11, 26.1 and 26.2
-//! bytecode: availability in a family comes from the generated tables (`tables.rs`), never from this file,
+//! where an older version has it, is constructed the same way in the 1.19, 1.19.2, 1.21.1, 1.21.10, 1.21.11, 26.1 and
+//! 26.2 bytecode: availability in a family comes from the generated tables (`tables.rs`), never from this file,
 //! and a key whose definition differs in a family is treated as missing there. Settings that are machine-specific or that Flint can't change safely
 //! (`resourcePacks`, `soundDevice`, `fullscreenResolution`, `lastServer`, window overrides, tutorial and
 //! onboarding flags, `version`, ...) are not listed: they are always preserved, never shown and never synced.
@@ -645,7 +645,7 @@ impl Setting {
             return missing();
         }
         if family.changed_definitions.contains(&self.key.as_str()) {
-            return Err(format!("Works differently in Minecraft {}, which Flint hasn't checked yet", family.id));
+            return Err(format!("Works differently in Minecraft {}, so Flint leaves it alone there", family.id));
         }
         Ok(())
     }
@@ -922,13 +922,29 @@ mod tests {
         }
     }
 
+    /// Listed options the generator found defined differently in a family, left out of that family's sync
+    /// (`Setting::available_in`) instead of handled per family. In 1.19.x smooth lighting has three levels (an id, not
+    /// on/off), auto-jump is on by default, the GUI scale only takes a size that fits the window as the game starts (a
+    /// larger one goes back to Auto, which the next sync would carry everywhere), and the main hand and clouds are read
+    /// and written by codecs of `Options`' own.
+    const LEFT_OUT: &[(&str, &[&str])] = &[
+        ("1.19.2", &["ao", "autoJump", "guiScale", "mainHand", "renderClouds"]),
+        ("1.19", &["ao", "autoJump", "guiScale", "mainHand", "renderClouds"]),
+    ];
+
     #[test]
-    fn no_listed_option_is_defined_differently_in_any_verified_family() {
+    fn no_listed_option_is_defined_differently_in_any_verified_family_unless_left_out() {
         // The generator compares how each option is constructed (range, default, codec) in every family; a
-        // listed option that changed would need its own per-family handling before it could be synced.
+        // listed option that changed would need its own per-family handling before it could be synced, so it stays
+        // out of that family's sync, as LEFT_OUT says.
         for f in FAMILIES.iter() {
+            let left_out = LEFT_OUT.iter().find(|(id, _)| *id == f.id).map_or(&[][..], |(_, keys)| *keys);
             for s in catalogue(Some(f)) {
-                assert!(!f.changed_definitions.contains(&s.key.as_str()), "{} is defined differently in {}", s.key, f.id);
+                let key = s.key.as_str();
+                assert_eq!(f.changed_definitions.contains(&key), left_out.contains(&key), "{key} is defined differently in {}", f.id);
+                if left_out.contains(&key) {
+                    assert!(s.available_in(f).unwrap_err().starts_with("Works differently"), "{key} in {}", f.id);
+                }
             }
         }
     }

@@ -69,8 +69,8 @@ test("the inventory shows one slot, searched and sorted, ties broken by name", (
 
 test("slots: every one counted, the chosen one kept, else the first with items", () => {
   const inv = inventory([item("h1", "head", "Crown"), item("b1", "back", "Wings"), item("b2", "back", "Pack")]);
-  assert.deepEqual(slotCounts(inv), { cape: 0, back: 2, head: 1, aura: 0 });
-  assert.deepEqual(slotCounts(null), { cape: 0, back: 0, head: 0, aura: 0 });
+  assert.deepEqual(slotCounts(inv), { cape: 0, back: 2, head: 1, aura: 0, pet: 0, shield: 0, hands: 0 }, "the older back and head kinds count in their slots");
+  assert.deepEqual(slotCounts(null), { cape: 0, back: 0, head: 0, aura: 0, pet: 0, shield: 0, hands: 0 });
   assert.equal(pickSlot(inv, null), "back", "capes come first, but there are none");
   assert.equal(pickSlot(inv, "aura"), "aura", "an empty slot the player chose stays chosen");
   assert.equal(pickSlot(inventory([]), null), "cape");

@@ -87,7 +87,8 @@ public final class Backdrop {
 		float[] crop = cover(w, h, CROP);
 		c.frame().graphics().blit(RenderPipelines.GUI_TEXTURED, ARTWORK, 0, 0, crop[0], crop[1], w, h,
 			Math.round(crop[2]), Math.round(crop[3]), ARTWORK_W, ARTWORK_H, c.tint(0xFFFFFFFF));
-		c.fill(0, 0, w, h, Palette.withAlpha(Palette.BACKGROUND_TOP, veil));
+		// A light theme washes the artwork in its cream, enough for its dark text to read over it.
+		c.fill(0, 0, w, h, Palette.withAlpha(Palette.BACKGROUND_TOP, Palette.light() ? Math.min(0.85F, veil + 0.55F) : veil));
 	}
 
 	/** Frees the artwork's texture (a world was joined); drawing brings it back. Render thread. */

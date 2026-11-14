@@ -1,6 +1,7 @@
 use crate::core::*;
 use crate::data::{find_profile, Profile, SUPPORTED_VERSIONS};
 use crate::jobs::{self, download_verified, Expected, Fetch};
+use crate::curseforge;
 use crate::modrinth::*;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -11,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
+pub mod ingame;
 pub mod livepacks;
 pub mod updates;
 
@@ -38,6 +40,17 @@ const PERFORMANCE_MOD_IDS: [(&str, &[&str]); 6] = [
     ("entityculling", &["entityculling"]),
     ("dynamic-fps", &["dynamic_fps"]),
 ];
+/// Performance-set mods left out on a Minecraft version whose builds Modrinth lists for it but which crash the game there at
+/// start (their own mixins find nothing to change), checked in the game. ImmediatelyFast's builds for 1.19 to 1.19.2 change
+/// the font manager's `Font(Function, boolean)` call, which 1.19.1 added: on 1.19 (1.19.0) Minecraft crashed at start with
+/// them even without Flint ("Critical injection failure ... overrideFontStorage", QA 11-12). The rest of the set still goes in.
+const PERFORMANCE_SKIPS: [(&str, &str); 1] = [("immediatelyfast", "1.19")];
+
+/// Whether the performance set leaves `slug` out on Minecraft `game_version` (PERFORMANCE_SKIPS).
+fn performance_skipped(slug: &str, game_version: &str) -> bool {
+    PERFORMANCE_SKIPS.iter().any(|(s, v)| *s == slug && *v == game_version)
+}
+
 const IRIS: &str = "YL57xq9U";
 const DISABLED: &str = ".disabled";
 /// Where an install moves a same-named jar that Flint didn't put there, inside `mods`. Fabric only
@@ -66,6 +79,9 @@ pub struct ContentEntry {
     pub file_name: String,
     #[serde(default)]
     pub sha512: String,
+    /// CurseForge's published SHA-1 for content from CurseForge (`project_id` `cf:<modId>`), which publishes no SHA-512.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sha1: String,
     #[serde(default)]
     pub size: u64,
     #[serde(default)]
@@ -131,8 +147,8 @@ pub fn installed_slugs(state: &AppState, profile_id: &str) -> Vec<String> {
 pub fn target_profile(state: &AppState, profile_id: Option<&str>, game_version: Option<&str>) -> CmdResult<Profile> {
     match (profile_id, game_version) {
         (Some(id), _) => find_profile(state, id),
-        // A new profile for Modrinth content: 1.8.9 takes none of Modrinth's mods (see `takes_mods`).
-        (None, Some(version)) if SUPPORTED_VERSIONS.contains(&version) && version != "1.8.9" => Ok(Profile {
+        // A new profile for Modrinth content (1.8.9 takes Ornithe builds: see `takes_mods`).
+        (None, Some(version)) if SUPPORTED_VERSIONS.contains(&version) => Ok(Profile {
             game_version: version.to_owned(),
             loader: "fabric".into(),
             ..Profile::default()
@@ -141,20 +157,41 @@ pub fn target_profile(state: &AppState, profile_id: Option<&str>, game_version: 
     }
 }
 
-/// Whether Modrinth's Fabric mods and shader packs can go in this profile. Modrinth's Fabric builds for 1.8.9 are made
-/// for Legacy Fabric, whose intermediary names aren't the Ornithe ones Flint's 1.8.9 Fabric runs on, so none of them would
-/// load: a 1.8.9 Fabric profile takes resource packs (and Flint's own runtime) only.
+/// Whether mods can go in this profile: any Fabric profile. On 1.8.9 (Fabric from Ornithe) only Ornithe builds fit: Flint
+/// asks Modrinth for its `ornithe` builds there (`modrinth::loaders_on`), as its `fabric` ones for 1.8.9 are Legacy Fabric
+/// builds, and every downloaded jar is checked before it goes in (`ornithe::check_jar`).
 pub fn takes_mods(profile: &Profile) -> bool {
-    profile.loader == "fabric" && profile.game_version != "1.8.9"
+    profile.loader == "fabric"
 }
 
-/// Why a profile takes no mods or shader packs.
-fn no_mods_reason(profile: &Profile) -> &'static str {
-    if profile.loader == "fabric" {
-        "Modrinth's mods for Minecraft 1.8.9 are built for Legacy Fabric, which this profile's Fabric can't load."
-    } else {
-        "This profile runs vanilla Minecraft, which can't load mods or shaders."
+/// Whether shader packs can go in this profile: a Fabric profile on a version Iris is made for (Iris has no 1.8.9 build).
+pub fn takes_shaders(profile: &Profile) -> bool {
+    takes_mods(profile) && !crate::ornithe::on_ornithe(&profile.game_version)
+}
+
+/// Whether `kind` content can go in this profile (resource packs and data packs always can).
+pub fn takes(profile: &Profile, kind: &str) -> bool {
+    match kind {
+        "mod" => takes_mods(profile),
+        "shader" => takes_shaders(profile),
+        _ => true,
     }
+}
+
+/// Why `kind` content can't go in this profile (see `takes`).
+pub(crate) fn refusal(profile: &Profile, kind: &str) -> &'static str {
+    if profile.loader != "fabric" {
+        "This profile runs vanilla Minecraft, which can't load mods or shaders."
+    } else if kind == "shader" {
+        "Shader packs need Iris, which isn't made for Minecraft 1.8.9."
+    } else {
+        "This profile can't take this content."
+    }
+}
+
+/// Why a profile takes no mods or shader packs (a vanilla profile).
+fn no_mods_reason(profile: &Profile) -> &'static str {
+    refusal(profile, "mod")
 }
 
 fn ensure_not_running(state: &AppState, id: &str) -> CmdResult<()> {
@@ -201,7 +238,7 @@ fn file_fits(kind: &str, name: &str) -> bool {
 fn project_kind(project: &Value) -> String {
     let loaders = project["loaders"].as_array().cloned().unwrap_or_default();
     match project["project_type"].as_str() {
-        Some("mod") if !loaders.iter().any(|l| l == "fabric") && loaders.iter().any(|l| l == "datapack") => "datapack".into(),
+        Some("mod") if !loaders.iter().any(|l| l == "fabric" || l == crate::ornithe::LOADER) && loaders.iter().any(|l| l == "datapack") => "datapack".into(),
         Some(t) => t.to_owned(),
         None => "mod".into(),
     }
@@ -219,7 +256,11 @@ struct Pending {
     required: bool,
 }
 
+/// A project from Modrinth, or from CurseForge for a `cf:` id (in Modrinth's shape: `curseforge.rs`).
 async fn project(state: &AppState, id: &str) -> CmdResult<Value> {
+    if let Some(mod_id) = curseforge::parse_ref(id) {
+        return curseforge::project(state, mod_id).await;
+    }
     if !valid_id(id) {
         return Err("Invalid project".into());
     }
@@ -227,10 +268,35 @@ async fn project(state: &AppState, id: &str) -> CmdResult<Value> {
 }
 
 async fn version(state: &AppState, id: &str) -> CmdResult<Value> {
+    if let Some(file_id) = curseforge::parse_ref(id) {
+        return curseforge::version(state, file_id).await;
+    }
     if !valid_id(id) {
         return Err("Invalid version".into());
     }
     state.modrinth.get_fresh(&state.http, &format!("/version/{id}"), VERSIONS_TTL, "Couldn't load a version from Modrinth").await
+}
+
+/// How a version's file is checked and where it may come from: Modrinth's SHA-512 from its CDN, or CurseForge's SHA-1
+/// from CurseForge's. None when the source published no hash or address (a CurseForge file kept on CurseForge).
+pub(crate) fn file_source<'a>(state: &AppState, project_id: &str, file: &'a Value) -> Option<(Expected<'a>, &'a str, &'static [&'static str])> {
+    let url = file["url"].as_str()?;
+    if curseforge::is_ref(project_id) {
+        let sha1 = file["hashes"]["sha1"].as_str().filter(|h| !h.is_empty())?;
+        Some((Expected::Sha1(sha1), url, state.curseforge.download_hosts()))
+    } else {
+        let sha512 = file["hashes"]["sha512"].as_str().filter(|h| !h.is_empty())?;
+        Some((Expected::Sha512(sha512), url, MODRINTH_CDN))
+    }
+}
+
+/// Mods that are the same project on both sites go by the same slug ("fabric-api", "cloth-config"), so a dependency
+/// already in the profile from the other site isn't added twice. Iris is "iris" on Modrinth and "irisshaders" on CurseForge.
+fn slug_key(slug: &str) -> String {
+    match slug.to_ascii_lowercase().as_str() {
+        "irisshaders" => "iris".into(),
+        other => other.to_owned(),
+    }
 }
 
 /// Where planning reads Modrinth's projects and versions: the app's cached client (`AppState`), or fixed
@@ -250,24 +316,71 @@ impl Catalog for AppState {
         version(self, id).await
     }
     async fn versions(&self, project_id: &str, kind: &str, game_version: &str) -> CmdResult<Value> {
+        if let Some(mod_id) = curseforge::parse_ref(project_id) {
+            return curseforge::versions(self, mod_id, kind, Some(game_version)).await;
+        }
         if !valid_id(project_id) {
             return Err("Invalid project".into());
         }
-        let path = format!("/project/{project_id}/version{}", version_query(loaders_for(kind), Some(game_version)));
+        let (loaders, game) = version_filter(project_id, kind, game_version);
+        let path = format!("/project/{project_id}/version{}", version_query(loaders, game));
         self.modrinth.get_fresh(&self.http, &path, VERSIONS_TTL, "Couldn't check versions on Modrinth").await
     }
 }
 
-fn fits(version: &Value, kind: &str, game_version: &str) -> bool {
-    let loaders = loaders_for(kind);
-    let game = version["game_versions"].as_array().is_some_and(|v| v.iter().any(|x| x.as_str() == Some(game_version)));
+/// Whether a version is made for `kind` content on `game_version` (for 1.8.9 mods: an Ornithe build, see `version_filter`).
+pub(crate) fn fits(version: &Value, kind: &str, game_version: &str) -> bool {
+    let (loaders, wanted) = version_filter(version["project_id"].as_str().unwrap_or_default(), kind, game_version);
+    let game = wanted.is_none_or(|wanted| version["game_versions"].as_array().is_some_and(|v| v.iter().any(|x| x.as_str() == Some(wanted))));
     let loader = version["loaders"].as_array().is_some_and(|v| v.iter().any(|x| x.as_str().is_some_and(|l| loaders.contains(&l))));
     game && loader
 }
 
 async fn best_version(catalog: &impl Catalog, project_id: &str, kind: &str, profile: &Profile) -> CmdResult<Option<Value>> {
     let list = catalog.versions(project_id, kind, &profile.game_version).await?;
-    Ok(pick_version(list.as_array().map(Vec::as_slice).unwrap_or_default()))
+    let list = list.as_array().map(Vec::as_slice).unwrap_or_default();
+    let best = pick_version(list);
+    if best.as_ref().is_none_or(|v| !pins_required_versions(v)) {
+        return Ok(best);
+    }
+    // A build that names the exact build of a mod it requires, where that build isn't made for this Minecraft, can't run here
+    // even when its own page lists this version: Iris 1.11.4 is listed for 26.1, 26.1.1 and 26.1.2 and requires Sodium 0.9.2,
+    // which exists only for 26.1.2, so on 26.1 and 26.1.1 Minecraft refused to start ("incompatible mods"). Such builds are
+    // passed over for the newest one whose required builds all fit (Iris 1.10.9 with Sodium 0.8.9 there). Candidates are
+    // checked in pick_version's order (releases, then betas, then the rest, newest first) and the first that fits wins, so
+    // only as many builds are looked up as it takes.
+    let rank = |v: &Value| match v["version_type"].as_str() {
+        Some("release") => 0,
+        Some("beta") => 1,
+        _ => 2,
+    };
+    for wanted in 0..3 {
+        for v in list.iter().filter(|v| rank(v) == wanted) {
+            if pinned_requirements_fit(catalog, v, &profile.game_version).await {
+                return Ok(Some(v.clone()));
+            }
+        }
+    }
+    Ok(best)
+}
+
+/// Whether `version` names the exact build of a mod it requires.
+fn pins_required_versions(version: &Value) -> bool {
+    version["dependencies"].as_array().is_some_and(|deps| deps.iter().any(|d| d["dependency_type"] == "required" && d["version_id"].is_string()))
+}
+
+/// Whether every build `version` requires by its exact id is made for `game_version` (one that can't be looked up counts as
+/// fitting: the resolver then decides as before).
+async fn pinned_requirements_fit(catalog: &impl Catalog, version: &Value, game_version: &str) -> bool {
+    for dep in version["dependencies"].as_array().into_iter().flatten() {
+        let Some(id) = dep["version_id"].as_str().filter(|_| dep["dependency_type"] == "required") else { continue };
+        if let Ok(pinned) = catalog.version(id).await {
+            if !fits(&pinned, "mod", game_version) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn plan_item(p: &Pending, version: Option<&Value>, status: &str, message: Option<String>) -> Value {
@@ -296,6 +409,15 @@ fn plan_item(p: &Pending, version: Option<&Value>, status: &str, message: Option
     })
 }
 
+/// A CurseForge file's page, where its author lets players download it (the project's page when the file is unknown).
+fn curseforge_file_page(project: &Value, version: &Value) -> Value {
+    let Some(site) = project["website_url"].as_str().filter(|u| u.starts_with("https://")) else { return Value::Null };
+    match version["id"].as_str().and_then(curseforge::parse_ref) {
+        Some(file) => json!(format!("{}/files/{file}", site.trim_end_matches('/'))),
+        None => json!(site),
+    }
+}
+
 async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, roots: Vec<Pending>) -> CmdResult<Value> {
     let installed = profile_id.map(|id| load(state, id)).unwrap_or_default();
     resolve_among(state, &installed, profile, roots).await
@@ -305,7 +427,9 @@ async fn resolve(state: &AppState, profile: &Profile, profile_id: Option<&str>, 
 async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profile: &Profile, roots: Vec<Pending>) -> CmdResult<Value> {
     let installed_ids: HashSet<String> = installed.iter().map(|e| format!("{}:{}", e.kind, e.project_id)).collect();
     let installed_mods: HashMap<String, String> = installed.iter().filter(|e| e.kind == "mod").map(|e| (e.project_id.clone(), e.title.clone())).collect();
-    let fabric = takes_mods(profile);
+    // The same mod from the other site counts as installed (see `slug_key`).
+    let installed_slugs: HashSet<String> = installed.iter().filter(|e| e.kind == "mod" && !e.slug.is_empty()).map(|e| slug_key(&e.slug)).collect();
+    let shaders = takes_shaders(profile);
 
     let mut items: Vec<Value> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -314,7 +438,7 @@ async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profi
     let mut incompatible: HashMap<String, String> = HashMap::new();
     let mut queue = roots;
 
-    if fabric && queue.iter().any(|p| p.kind == "shader") && !installed_mods.contains_key(IRIS) {
+    if shaders && queue.iter().any(|p| p.kind == "shader") && !installed_mods.contains_key(IRIS) && !installed_slugs.contains("iris") {
         if let Ok(iris) = catalog.project(IRIS).await {
             let by = queue.iter().find(|p| p.kind == "shader").and_then(|p| p.project["title"].as_str()).map(str::to_owned);
             queue.push(Pending { project: iris, kind: "mod".into(), version_id: None, source: "dependency".into(), reason: Some("Shader packs need the Iris shader loader".into()), required_by: by, required: true });
@@ -336,27 +460,32 @@ async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profi
                 continue;
             }
             let loaders: Vec<String> = p.project["loaders"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
-            let needed = loaders_for(&p.kind);
+            let (needed, _) = version_filter(&pid, &p.kind, &profile.game_version);
+            let ornithe = p.kind == "mod" && crate::ornithe::on_ornithe(&profile.game_version);
 
             if installed_ids.contains(&format!("{}:{pid}", p.kind)) {
                 items.push(plan_item(&p, None, "installed", Some("Already in this profile".into())));
                 continue;
             }
-            if (p.kind == "mod" || p.kind == "shader") && !fabric {
-                items.push(plan_item(&p, None, "unavailable", Some(no_mods_reason(profile).into())));
+            if !takes(profile, &p.kind) {
+                items.push(plan_item(&p, None, "unavailable", Some(refusal(profile, &p.kind).into())));
                 continue;
             }
             if !loaders.iter().any(|l| needed.contains(&l.as_str())) {
                 if p.source == "dependency" && p.kind == "mod" {
-                    items.push(plan_item(&p, None, "not-needed", Some("Only used by the Forge or NeoForge build, so Fabric doesn't need it".into())));
+                    // On 1.8.9 a library with no Ornithe build (Modrinth lists Fabric API for some Ornithe mods that don't
+                    // load it) is left out too; the start check (`dependency_check`) names any the mod's jar really needs.
+                    let why = if ornithe { "Has no Ornithe build for Minecraft 1.8.9, so it's left out" } else { "Only used by the Forge or NeoForge build, so Fabric doesn't need it" };
+                    items.push(plan_item(&p, None, "not-needed", Some(why.into())));
                 } else {
                     let what = match p.kind.as_str() {
+                        "mod" if ornithe => "Ornithe build",
                         "mod" => "a Fabric build",
                         "shader" => "an Iris-compatible build",
                         "datapack" => "a data pack build",
                         _ => "a compatible build",
                     };
-                    items.push(plan_item(&p, None, "unavailable", Some(format!("Modrinth has no {what} of this project"))));
+                    items.push(plan_item(&p, None, "unavailable", Some(format!("{} has no {what} of this project", curseforge::platform_name(&pid)))));
                 }
                 continue;
             }
@@ -378,11 +507,23 @@ async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profi
                 None => best_version(catalog, &pid, &p.kind, profile).await?,
             };
             let Some(v) = chosen else {
-                items.push(plan_item(&p, None, "unavailable", Some(format!("Not available for Minecraft {}", profile.game_version))));
+                let why = if ornithe {
+                    "No Ornithe build for Minecraft 1.8.9 (Flint's 1.8.9 can't load its Legacy Fabric builds)".to_owned()
+                } else {
+                    format!("Not available for Minecraft {}", profile.game_version)
+                };
+                items.push(plan_item(&p, None, "unavailable", Some(why)));
                 continue;
             };
             if primary_file(&v).and_then(|f| f["filename"].as_str()).is_none_or(|n| !file_fits(&p.kind, n)) {
                 items.push(plan_item(&p, None, "unavailable", Some("The published file isn't a type Flint can install here".into())));
+                continue;
+            }
+            // A CurseForge file whose author allows downloads on CurseForge only: Flint links to it, never fetches it.
+            if curseforge::is_ref(&pid) && !curseforge::downloadable(&v) {
+                let mut item = plan_item(&p, Some(&v), "unavailable", Some("Its author allows downloads only on CurseForge".into()));
+                item["externalUrl"] = curseforge_file_page(&p.project, &v);
+                items.push(item);
                 continue;
             }
             for dep in v["dependencies"].as_array().into_iter().flatten() {
@@ -400,6 +541,9 @@ async fn resolve_among(catalog: &impl Catalog, installed: &[ContentEntry], profi
                             continue;
                         }
                         if let Ok(dp) = catalog.project(&dep_id).await {
+                            if dp["slug"].as_str().is_some_and(|s| installed_slugs.contains(&slug_key(s))) {
+                                continue;
+                            }
                             let dep_kind = project_kind(&dp);
                             next.push(Pending {
                                 kind: if dep_kind == "datapack" { p.kind.clone() } else { dep_kind },
@@ -480,7 +624,7 @@ pub async fn content_plan(state: State<'_, AppState>, profile_id: String, reques
         roots.push(Pending {
             project: p,
             kind: r.kind,
-            version_id: r.version_id.filter(|v| valid_id(v)),
+            version_id: r.version_id.filter(|v| curseforge::valid_ref(v)),
             source: match r.source.as_deref() {
                 Some("assistant") => "assistant".into(),
                 Some("optional") => "optional".into(),
@@ -524,13 +668,14 @@ fn resolve_kind(kind: Option<&str>) -> Option<&'static str> {
 
 /// Modrinth search facets for a resolve request: client-side Fabric mods, resource packs (which
 /// need no loader and work on vanilla profiles too), or shader packs Iris can load (as the Library
-/// searches them).
+/// searches them). Mods for 1.8.9 are Ornithe builds (see `modrinth::loaders_on`).
 fn search_facets(kind: &str, game_version: &str) -> Value {
     let version = format!("versions:{game_version}");
+    let loader = format!("categories:{}", loaders_on("mod", game_version)[0]);
     match kind {
         "resourcepack" => json!([["project_type:resourcepack"], [version]]),
         "shader" => json!([["project_type:shader"], ["categories:iris"], [version]]),
-        _ => json!([["project_type:mod"], ["categories:fabric"], [version], ["client_side:required", "client_side:optional"]]),
+        _ => json!([["project_type:mod"], [loader], [version], ["client_side:required", "client_side:optional"]]),
     }
 }
 
@@ -736,7 +881,11 @@ pub async fn mods_resolve(
             _ => "No matching mod on Modrinth for this version",
         }
         .into();
-        let found = if let Some(refusal) = resolve_refusal(kind, fabric) {
+        let refused = match kind {
+            Some(k) if fabric && !takes(&profile, k) => Some(refusal(&profile, k)),
+            _ => resolve_refusal(kind, fabric),
+        };
+        let found = if let Some(refusal) = refused {
             message = refusal.into();
             None
         } else if let Some(id) = request.project.as_deref().filter(|p| valid_id(p)) {
@@ -879,9 +1028,165 @@ fn backup_dir(state: &AppState, profile_id: &str, kind: &str) -> PathBuf {
 /// file takes a name nothing in its folder has, so a pack the game has open is never replaced, and the game is told
 /// (`enable_live`: turn the packs on in the game now). Mods need a restart and are refused then.
 pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile_id: &str, items: Vec<InstallItem>, world: Option<String>, enable_live: bool) -> CmdResult<Value> {
+    install_batch_as(app, state, job, profile_id, items, world, enable_live, false).await
+}
+
+/// Whether content of these kinds can change in this profile now, as [`livepacks::check_kinds`] says, except for the in-game
+/// Library (`in_game`): while its own game runs it may also add a mod, which Fabric loads at the next start. Such a mod only
+/// ever goes in as a new file (`commit_staged`), so nothing the running game has loaded is touched.
+fn can_change<'a>(state: &AppState, profile_id: &str, kinds: impl IntoIterator<Item = &'a str>, in_game: bool) -> CmdResult<bool> {
+    if in_game && livepacks::running(state, profile_id) {
+        for kind in kinds {
+            if !matches!(kind, "mod" | "resourcepack" | "shader") {
+                return Err("That kind of content is installed from the Flint app.".into());
+            }
+        }
+        return Ok(true);
+    }
+    livepacks::check_kinds(state, profile_id, kinds)
+}
+
+/// What every file of one install batch shares: the profile, where its downloads are staged, and the job they report to.
+struct Batch<'a> {
+    app: &'a AppHandle,
+    state: &'a AppState,
+    job: &'a str,
+    profile: &'a Profile,
+    profile_id: &'a str,
+    staging: &'a Path,
+    world: &'a Option<String>,
+    /// One of several files at once: the job counts files, not one file's bytes.
+    quiet: bool,
+}
+
+/// Checks, downloads and verifies one item of a batch into its staging folder. On 1.8.9 a mod's jar is checked too
+/// (`ornithe::check_jar`), and what it showed comes back with it (for `with_osl`).
+async fn stage_item(b: &Batch<'_>, item: &InstallItem) -> CmdResult<(Staged, Option<crate::ornithe::Evidence>)> {
+    let (app, state, job, profile) = (b.app, b.state, b.job, b.profile);
+    let kind = item.kind.clone().unwrap_or_else(|| "mod".into());
+    if !takes(profile, &kind) {
+        return Err(refusal(profile, &kind).into());
+    }
+    let v = version(state, &item.version_id).await?;
+    // On 1.8.9 a mod must be an Ornithe build, and its jar is checked once it's downloaded (below).
+    let ornithe = kind == "mod" && crate::ornithe::on_ornithe(&profile.game_version);
+    if !fits(&v, &kind, &profile.game_version) {
+        let release = v["name"].as_str().unwrap_or("This release");
+        return Err(if ornithe {
+            format!("{release} isn't an Ornithe build. Flint's Minecraft 1.8.9 runs Fabric from Ornithe, which can't load Legacy Fabric mods.")
+        } else {
+            format!("{release} isn't built for Minecraft {} with this loader", profile.game_version)
+        });
+    }
+    let file = primary_file(&v).ok_or("This release has no downloadable file")?;
+    let name = safe_name(file["filename"].as_str().unwrap_or_default())?.to_owned();
+    if !file_fits(&kind, &name) {
+        return Err(format!("{name} isn't a file type Flint installs for this content"));
+    }
+    let project_id = v["project_id"].as_str().unwrap_or_default();
+    let (expected, url, hosts) = file_source(state, project_id, file).ok_or_else(|| {
+        if curseforge::is_ref(project_id) {
+            "Its author allows downloads only on CurseForge".to_owned()
+        } else {
+            "Modrinth published no SHA-512 hash for this file".to_owned()
+        }
+    })?;
+    let (sha512, sha1) = match expected {
+        Expected::Sha512(h) => (h.to_owned(), String::new()),
+        Expected::Sha1(h) => (String::new(), h.to_owned()),
+    };
+    let p = project(state, project_id).await?;
+    let dir = kind_dir(state, b.profile_id, &kind, b.world.as_deref())?;
+    let target = b.staging.join(&name);
+    let size = download_verified(app, state, job, Fetch { url, expected, max_bytes: jobs::listed_cap(file["size"].as_u64()), allowed_hosts: hosts, quiet: b.quiet }, &target).await?;
+    let found = if ornithe {
+        // A Legacy Fabric jar tagged `ornithe` by mistake (or a CurseForge one) would break the game or Instant Swap:
+        // refused here, before anything goes in (the batch is all or nothing).
+        Some(crate::ornithe::check_jar_async(target.clone(), p["title"].as_str().unwrap_or_default().to_owned()).await?)
+    } else {
+        None
+    };
+    let requires: Vec<String> = v["dependencies"]
+        .as_array()
+        .map(|d| d.iter().filter(|x| x["dependency_type"] == "required").filter_map(|x| x["project_id"].as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    let staged = Staged {
+        entry: ContentEntry {
+            kind: kind.clone(),
+            project_id: v["project_id"].as_str().unwrap_or_default().to_owned(),
+            version_id: item.version_id.clone(),
+            slug: p["slug"].as_str().unwrap_or_default().to_owned(),
+            title: p["title"].as_str().unwrap_or_default().to_owned(),
+            author: None,
+            version_number: v["version_number"].as_str().unwrap_or_default().to_owned(),
+            file_name: name,
+            sha512,
+            sha1,
+            size,
+            source: match item.source.as_str() {
+                "assistant" | "dependency" | "optional" | "modpack" | "flint" => item.source.clone(),
+                _ => "user".into(),
+            },
+            reason: item.reason.clone().map(|r| r.chars().take(200).collect()),
+            icon_url: p["icon_url"].as_str().map(str::to_owned),
+            installed_at: now_secs(),
+            world: if kind == "datapack" { b.world.clone() } else { None },
+            requires,
+            previous: None,
+            pinned: false,
+        },
+        staged: target,
+        dir,
+    };
+    Ok((staged, found))
+}
+
+/// A 1.8.9 batch whose mods require Ornithe Standard Libraries in their `fabric.mod.json` (MinecraftCapes and Titanium
+/// need `osl-entrypoints`) without saying so on Modrinth, in a profile that doesn't have it: OSL's Ornithe build goes in
+/// with them, in the same all-or-nothing batch, recorded as their dependency. The jar is only known once downloaded, so
+/// the plan can't name it beforehand; without OSL the game wouldn't start, so a batch that can't get it fails.
+async fn with_osl(b: &Batch<'_>, found: Vec<(Staged, Option<crate::ornithe::Evidence>)>) -> CmdResult<Vec<Staged>> {
+    let needed_by = if found.iter().any(|(_, f)| f.as_ref().is_some_and(crate::ornithe::Evidence::needs_osl)) {
+        let present = crate::ornithe::has_osl(&crate::perfcore::scan_mods(&b.state.paths.profile_dir(b.profile_id).join("mods")));
+        crate::ornithe::osl_needed_by(found.iter().map(|(s, f)| (s.entry.project_id.as_str(), s.entry.title.as_str(), f.as_ref())), present)
+    } else {
+        Vec::new()
+    };
+    let mut staged: Vec<Staged> = Vec::with_capacity(found.len() + 1);
+    for (mut s, f) in found {
+        if !needed_by.is_empty() && f.as_ref().is_some_and(crate::ornithe::Evidence::needs_osl) && !s.entry.requires.iter().any(|r| r == crate::ornithe::OSL_PROJECT) {
+            s.entry.requires.push(crate::ornithe::OSL_PROJECT.into());
+        }
+        staged.push(s);
+    }
+    if needed_by.is_empty() {
+        return Ok(staged);
+    }
+    let by = mod_names(&needed_by);
+    let unavailable = |why: String| format!("{by} needs Ornithe Standard Libraries, which Flint couldn't get: {why}");
+    let osl = best_version(b.state, crate::ornithe::OSL_PROJECT, "mod", b.profile).await.map_err(unavailable)?.ok_or_else(|| unavailable("Modrinth has no build of it for Minecraft 1.8.9.".into()))?;
+    let id = osl["id"].as_str().filter(|id| valid_id(id)).ok_or_else(|| unavailable("Modrinth's answer was incomplete.".into()))?;
+    let item = InstallItem { version_id: id.to_owned(), kind: Some("mod".into()), source: "dependency".into(), reason: Some(format!("Needed by {by}")) };
+    b.state.jobs.update(b.app, b.job, false, |j| j.stage = "Adding Ornithe Standard Libraries".into());
+    let (s, _) = stage_item(b, &item).await?;
+    staged.push(s);
+    Ok(staged)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn install_batch_as(
+    app: &AppHandle,
+    state: &AppState,
+    job: &str,
+    profile_id: &str,
+    items: Vec<InstallItem>,
+    world: Option<String>,
+    enable_live: bool,
+    in_game: bool,
+) -> CmdResult<Value> {
     let profile = find_profile(state, profile_id)?;
     let items: Vec<InstallItem> = items.into_iter().take(60).collect();
-    livepacks::check_kinds(state, profile_id, items.iter().map(|i| i.kind.as_deref().unwrap_or("mod")))?;
+    can_change(state, profile_id, items.iter().map(|i| i.kind.as_deref().unwrap_or("mod")), in_game)?;
     let staging = state.paths.profile_dir(profile_id).join(format!(".flint-staging-{job}"));
     std::fs::create_dir_all(&staging).map_err(err("Could not prepare the download"))?;
     let total = items.len();
@@ -901,9 +1206,10 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
             j.items_total = total;
         });
     }
-    let staged: CmdResult<Vec<Staged>> = {
+    let batch = Batch { app, state, job, profile: &profile, profile_id, staging: &staging, world: &world, quiet };
+    let staged: CmdResult<Vec<Staged>> = async {
         use futures_util::{StreamExt, TryStreamExt};
-        let (profile, staging, world, finished) = (&profile, &staging, &world, &finished);
+        let (batch, finished) = (&batch, &finished);
         // Made in a loop rather than by a stream's closure, whose borrowing futures Rust can't prove Send for every
         // lifetime; none starts before `buffered` polls it.
         let mut each = Vec::with_capacity(total);
@@ -917,64 +1223,18 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
                         j.items_total = total;
                     });
                 }
-                let kind = item.kind.clone().unwrap_or_else(|| "mod".into());
-                if (kind == "mod" || kind == "shader") && !takes_mods(profile) {
-                    return Err(no_mods_reason(profile).into());
-                }
-                let v = version(state, &item.version_id).await?;
-                if !fits(&v, &kind, &profile.game_version) {
-                    return Err(format!("{} isn't built for Minecraft {} with this loader", v["name"].as_str().unwrap_or("This release"), profile.game_version));
-                }
-                let file = primary_file(&v).ok_or("This release has no downloadable file")?;
-                let name = safe_name(file["filename"].as_str().unwrap_or_default())?.to_owned();
-                if !file_fits(&kind, &name) {
-                    return Err(format!("{name} isn't a file type Flint installs for this content"));
-                }
-                let sha512 = file["hashes"]["sha512"].as_str().ok_or("Modrinth published no SHA-512 hash for this file")?.to_owned();
-                let url = file["url"].as_str().ok_or("No download address")?.to_owned();
-                let p = project(state, v["project_id"].as_str().unwrap_or_default()).await?;
-                let dir = kind_dir(state, profile_id, &kind, world.as_deref())?;
-                let target = staging.join(&name);
-                let size = download_verified(app, state, job, Fetch { url: &url, expected: Expected::Sha512(&sha512), max_bytes: jobs::listed_cap(file["size"].as_u64()), allowed_hosts: MODRINTH_CDN, quiet }, &target).await?;
+                let out = stage_item(batch, item).await?;
                 if quiet {
                     let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     state.jobs.update(app, job, false, |j| j.items_done = done);
                 }
-                let requires: Vec<String> = v["dependencies"]
-                    .as_array()
-                    .map(|d| d.iter().filter(|x| x["dependency_type"] == "required").filter_map(|x| x["project_id"].as_str().map(str::to_owned)).collect())
-                    .unwrap_or_default();
-                Ok::<_, String>(Staged {
-                    entry: ContentEntry {
-                        kind: kind.clone(),
-                        project_id: v["project_id"].as_str().unwrap_or_default().to_owned(),
-                        version_id: item.version_id.clone(),
-                        slug: p["slug"].as_str().unwrap_or_default().to_owned(),
-                        title: p["title"].as_str().unwrap_or_default().to_owned(),
-                        author: None,
-                        version_number: v["version_number"].as_str().unwrap_or_default().to_owned(),
-                        file_name: name,
-                        sha512,
-                        size,
-                        source: match item.source.as_str() {
-                            "assistant" | "dependency" | "optional" | "modpack" | "flint" => item.source.clone(),
-                            _ => "user".into(),
-                        },
-                        reason: item.reason.clone().map(|r| r.chars().take(200).collect()),
-                        icon_url: p["icon_url"].as_str().map(str::to_owned),
-                        installed_at: now_secs(),
-                        world: if kind == "datapack" { world.clone() } else { None },
-                        requires,
-                        previous: None,
-                        pinned: false,
-                    },
-                    staged: target,
-                    dir,
-                })
+                Ok::<_, String>(out)
             });
         }
-        futures_util::stream::iter(each).buffered(parallel).try_collect().await
-    };
+        let found: Vec<(Staged, Option<crate::ornithe::Evidence>)> = futures_util::stream::iter(each).buffered(parallel).try_collect().await?;
+        with_osl(batch, found).await
+    }
+    .await;
 
     let staged = match staged {
         Ok(s) => s,
@@ -989,21 +1249,37 @@ pub async fn install_batch(app: &AppHandle, state: &AppState, job: &str, profile
         j.items_done = total;
     });
     let _guard = state.file_lock.lock().await;
-    let outcome = commit_staged(state, profile_id, staged, enable_live);
+    let outcome = commit_staged(state, profile_id, staged, enable_live, in_game);
     let _ = std::fs::remove_dir_all(&staging);
     outcome
 }
 
 /// Moves a batch's verified downloads into the profile and records them (under the file lock). Whether the profile's game
 /// runs is looked at again here, as it may have started or closed during the download: while it runs, only packs go in, live.
-fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable_live: bool) -> CmdResult<Value> {
-    let live = livepacks::check_kinds(state, profile_id, staged.iter().map(|s| s.entry.kind.as_str()))?;
+fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable_live: bool, in_game: bool) -> CmdResult<Value> {
+    let live = can_change(state, profile_id, staged.iter().map(|s| s.entry.kind.as_str()), in_game)?;
     let mut manifest = load(state, profile_id);
     let mut placed = Vec::new();
+    // What went where, for the in-game Library's cards (`kind`, `projectId`, `fileName`).
+    let mut files: Vec<Value> = Vec::new();
     let mut notes: Vec<livepacks::Note> = Vec::new();
     for s in staged {
         std::fs::create_dir_all(&s.dir).map_err(err("Could not create the content folder"))?;
         let mut entry = s.entry;
+        if live && entry.kind == "mod" {
+            // A mod added while its game runs (the in-game Library): Fabric loads it at the next start. It only ever goes in
+            // as a new file: a project already in the profile, or a jar of the same name, is left as it is (the running game
+            // may have it loaded, and Windows keeps a loaded jar locked).
+            let present = manifest.iter().any(|m| m.kind == "mod" && m.project_id == entry.project_id) || s.dir.join(&entry.file_name).exists();
+            if present {
+                continue;
+            }
+            livepacks::place(&s.staged, &s.dir, &entry.file_name)?;
+            files.push(json!({ "kind": entry.kind, "projectId": entry.project_id, "fileName": entry.file_name, "title": entry.title }));
+            placed.push(entry.title.clone());
+            manifest.push(entry);
+            continue;
+        }
         if live {
             // The running game may have the old file of this project (or one of the same name) open or turned on: it stays
             // where it is, and the new file takes a name nothing in the folder has.
@@ -1015,6 +1291,7 @@ fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable
             }
             notes.push(livepacks::Note::added(&entry.kind, &entry.file_name, &entry.title, entry.world.as_deref(), enable_live));
             manifest.retain(|m| !(m.kind == entry.kind && m.project_id == entry.project_id && m.world == entry.world));
+            files.push(json!({ "kind": entry.kind, "projectId": entry.project_id, "fileName": entry.file_name, "title": entry.title }));
             placed.push(entry.title.clone());
             manifest.push(entry);
             continue;
@@ -1044,6 +1321,7 @@ fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable
         }
         std::fs::rename(&s.staged, &target).map_err(err("Could not move the file into the profile"))?;
         manifest.retain(|m| !(m.kind == entry.kind && m.project_id == entry.project_id && m.world == entry.world));
+        files.push(json!({ "kind": entry.kind, "projectId": entry.project_id, "fileName": entry.file_name, "title": entry.title }));
         placed.push(entry.title.clone());
         manifest.push(entry);
     }
@@ -1053,16 +1331,19 @@ fn commit_staged(state: &AppState, profile_id: &str, staged: Vec<Staged>, enable
     }
     save(state, profile_id, &manifest)?;
     if !live {
-        return Ok(json!({ "installed": placed, "failed": [] }));
+        return Ok(json!({ "installed": placed, "failed": [], "files": files }));
     }
     // The files are in: a game that misses the message still lists them when its pack screen opens.
-    if let Err(error) = livepacks::tell_game(&state.paths.profile_dir(profile_id), &notes) {
-        eprintln!("[flint] couldn't tell the running game about new packs: {error}");
+    if !notes.is_empty() {
+        if let Err(error) = livepacks::tell_game(&state.paths.profile_dir(profile_id), &notes) {
+            eprintln!("[flint] couldn't tell the running game about new packs: {error}");
+        }
     }
     let kinds: HashSet<&str> = notes.iter().map(|n| n.kind.as_str()).collect();
     Ok(json!({
         "installed": placed,
         "failed": [],
+        "files": files,
         "live": {
             "enable": enable_live && kinds.iter().any(|k| *k != "datapack"),
             "datapack": kinds.contains("datapack"),
@@ -1090,7 +1371,8 @@ fn set_aside(path: &Path) -> CmdResult<PathBuf> {
     Ok(kept)
 }
 
-/// `enable_live`: while the profile's game runs, the packs installed are turned on in it at once (the default).
+/// `enable_live`: while the profile's game runs, also turn the packs installed on in it. Off unless asked (owner, 1.0.4):
+/// an install goes into the folder and the player turns it on.
 #[tauri::command]
 pub async fn content_install(
     app: AppHandle,
@@ -1109,7 +1391,7 @@ pub async fn content_install(
     let (id, _) = state.jobs.create(&app, "install", Some(&profile.id), &title, items.len());
     jobs::spawn(&app, id.clone(), move |app, job| async move {
         let state = app.state::<AppState>();
-        install_batch(&app, &state, &job, &profile_id, items, world, enable_live.unwrap_or(true)).await
+        install_batch(&app, &state, &job, &profile_id, items, world, enable_live.unwrap_or(false)).await
     });
     Ok(id)
 }
@@ -1292,7 +1574,16 @@ pub fn list_content(state: &AppState, profile_id: &str) -> CmdResult<Value> {
         .iter()
         .flat_map(|w| list_kind(state, profile_id, "datapack", w["id"].as_str(), &manifest, &identified))
         .collect();
-    let mods = list_kind(state, profile_id, "mod", None, &manifest, &identified);
+    let mut mods = list_kind(state, profile_id, "mod", None, &manifest, &identified);
+    // Mods the in-game Library marked while their game ran: they go when it ends (ingame::settle_pending).
+    let pending = ingame::pending_names(state, profile_id);
+    if !pending.is_empty() {
+        for m in mods.iter_mut() {
+            if m["fileName"].as_str().is_some_and(|n| pending.contains(n)) {
+                m["pendingRemoval"] = json!(true);
+            }
+        }
+    }
     let iris = mods.iter().any(|m| m["projectId"] == IRIS || m["fileName"].as_str().is_some_and(|n| n.to_ascii_lowercase().starts_with("iris")));
     Ok(json!({
         "profileId": profile.id,
@@ -1530,6 +1821,30 @@ fn remove_items(state: &AppState, profile_id: &str, items: &[ContentRef]) -> Cmd
     outcome
 }
 
+/// "Show in folder" for one installed item: opens its folder with that file (or folder pack) selected, whether it is on
+/// or switched off (`.disabled`). When the file is gone, the folder opens as before.
+#[tauri::command]
+pub fn content_reveal(app: AppHandle, state: State<'_, AppState>, profile_id: String, item: ContentRef) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    find_profile(&state, &profile_id)?;
+    let dir = kind_dir(&state, &profile_id, &item.kind, item.world.as_deref())?;
+    match reveal_target(&dir, safe_name(&item.file_name)?) {
+        Some(path) => app.opener().reveal_item_in_dir(&path).map_err(err("Could not show the file")),
+        None => {
+            std::fs::create_dir_all(&dir).map_err(err("Could not open the folder"))?;
+            app.opener().open_path(dir.display().to_string(), None::<&str>).map_err(err("Could not open the folder"))
+        }
+    }
+}
+
+/// The file "Show in folder" selects: the item itself, else its switched-off copy. Only ever a direct child of `dir`.
+fn reveal_target(dir: &Path, name: &str) -> Option<PathBuf> {
+    [name.to_owned(), format!("{name}{DISABLED}")]
+        .into_iter()
+        .map(|candidate| dir.join(candidate))
+        .find(|path| path.parent() == Some(dir) && path.exists())
+}
+
 #[tauri::command]
 pub async fn content_rollback(state: State<'_, AppState>, profile_id: String, kind: String, project_id: String, world: Option<String>) -> CmdResult<()> {
     find_profile(&state, &profile_id)?;
@@ -1606,15 +1921,16 @@ fn already_present(slug: &str, present: &HashSet<String>) -> bool {
 /// set, or Modrinth couldn't be reached). Only reads: Modrinth's answers land in its cache.
 async fn plan_performance_set(state: &AppState, profile_id: &str) -> Option<(Profile, Value)> {
     let profile = find_profile(state, profile_id).ok()?;
-    if profile.performance.as_deref() != Some("pending") || !takes_mods(&profile) || !crate::data::performance_mods_enabled(state) {
+    if profile.performance.as_deref() != Some("pending") || !takes_mods(&profile) || crate::ornithe::on_ornithe(&profile.game_version) || !crate::data::performance_mods_enabled(state) {
         return None;
     }
     // The set's projects and their versions for this Minecraft version are asked for all at once (twelve requests, well
     // inside Modrinth's limits), so the resolver below, which goes one project at a time, finds them in the Modrinth cache
     // instead of waiting for each in turn.
-    let projects = futures_util::future::join_all(PERFORMANCE_SET.iter().map(|(slug, _)| project(state, slug))).await;
+    let set: Vec<&(&str, &str)> = PERFORMANCE_SET.iter().filter(|(slug, _)| !performance_skipped(slug, &profile.game_version)).collect();
+    let projects = futures_util::future::join_all(set.iter().map(|(slug, _)| project(state, slug))).await;
     let mut roots = Vec::new();
-    for ((_, reason), found) in PERFORMANCE_SET.iter().zip(projects) {
+    for ((_, reason), found) in set.into_iter().zip(projects) {
         if let Ok(p) = found {
             roots.push(Pending { project: p, kind: "mod".into(), version_id: None, source: "flint".into(), reason: Some(reason.to_string()), required: false, required_by: None });
         }
@@ -1663,7 +1979,7 @@ pub async fn apply_performance_set(app: &AppHandle, state: &AppState, profile_id
 /// Libraries mods commonly need: the mod id they declare, their Modrinth project and their name. A mod copied in from
 /// another launcher often comes without the library its old launcher had installed; when one of these is missing, Play
 /// adds it (`add_missing_libraries`) instead of letting Minecraft refuse to start.
-const LIBRARIES: [(&str, &str, &str); 18] = [
+const LIBRARIES: [(&str, &str, &str); 19] = [
     ("fabric-api", "fabric-api", "Fabric API"),
     ("fabric", "fabric-api", "Fabric API"),
     ("cloth-config", "cloth-config", "Cloth Config API"),
@@ -1682,7 +1998,15 @@ const LIBRARIES: [(&str, &str, &str); 18] = [
     ("collective", "collective", "Collective"),
     ("libipn", "libipn", "libIPN"),
     ("walksylib", "walksylib", "Walksy Lib"),
+    // Ornithe mods for 1.8.9 require its modules by their own ids (`osl-entrypoints`, `osl-keybinds`…): see `library_for`.
+    ("osl", "osl", "Ornithe Standard Libraries"),
 ];
+
+/// The library (`LIBRARIES`) that provides a required mod id: its own entry, or OSL for one of its modules (`osl-*`).
+fn library_for(id: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    let id = if id.starts_with("osl-") { "osl" } else { id };
+    LIBRARIES.iter().find(|(lib, _, _)| *lib == id)
+}
 
 /// "AppleSkin", "AppleSkin and Axiom", "AppleSkin, Axiom and 19 more".
 fn mod_names(names: &[String]) -> String {
@@ -1705,7 +2029,7 @@ pub async fn add_missing_libraries(app: &AppHandle, state: &AppState, profile_id
     let missing = crate::perfcore::missing_dependencies(&crate::perfcore::scan_mods(&state.paths.profile_dir(profile_id).join("mods")));
     let mut wanted: Vec<(&str, String)> = Vec::new();
     for m in &missing {
-        if let Some((_, slug, _)) = LIBRARIES.iter().find(|(id, _, _)| *id == m.id) {
+        if let Some((_, slug, _)) = library_for(&m.id) {
             if !wanted.iter().any(|(s, _)| s == slug) {
                 wanted.push((slug, mod_names(&m.needed_by)));
             }
@@ -1742,7 +2066,7 @@ fn missing_lines(missing: &[crate::perfcore::Missing]) -> Vec<String> {
         .iter()
         .take(3)
         .map(|m| {
-            let what = LIBRARIES.iter().find(|(id, _, _)| *id == m.id).map(|(_, _, name)| (*name).to_owned()).unwrap_or_else(|| format!("the mod “{}”", m.id));
+            let what = library_for(&m.id).map(|(_, _, name)| (*name).to_owned()).unwrap_or_else(|| format!("the mod “{}”", m.id));
             let one = m.needed_by.len() == 1;
             format!(
                 "{} {} {what}, which isn't in this profile. Add it from the Library (or switch it back on), or remove {}.",
@@ -1913,6 +2237,111 @@ mod tests {
     use super::*;
 
     #[test]
+    fn show_in_folder_selects_the_item_on_or_off_and_never_leaves_its_folder() {
+        let dir = TestDir::new();
+        let mods = dir.0.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("sodium.jar"), b"x").unwrap();
+        std::fs::write(mods.join("lithium.jar.disabled"), b"x").unwrap();
+        std::fs::create_dir_all(mods.join("Folder Pack")).unwrap();
+        assert_eq!(reveal_target(&mods, "sodium.jar"), Some(mods.join("sodium.jar")));
+        assert_eq!(reveal_target(&mods, "lithium.jar"), Some(mods.join("lithium.jar.disabled")), "a switched-off mod is still found");
+        assert_eq!(reveal_target(&mods, "Folder Pack"), Some(mods.join("Folder Pack")), "folder packs are selected too");
+        assert_eq!(reveal_target(&mods, "gone.jar"), None, "a missing file opens the folder instead");
+        assert!(safe_name("../outside.jar").is_err(), "names with paths are refused before any lookup");
+    }
+
+    /// Fixed CurseForge answers, already in Flint's shapes (curseforge.rs), for planning tests.
+    struct CurseForgeCatalog {
+        projects: Vec<Value>,
+        files: Vec<Value>,
+    }
+
+    impl Catalog for CurseForgeCatalog {
+        async fn project(&self, id: &str) -> CmdResult<Value> {
+            self.projects.iter().find(|p| p["id"] == id).cloned().ok_or_else(|| "not found on CurseForge".into())
+        }
+        async fn version(&self, id: &str) -> CmdResult<Value> {
+            self.files.iter().find(|v| v["id"] == id).cloned().ok_or_else(|| "not found on CurseForge".into())
+        }
+        async fn versions(&self, project_id: &str, kind: &str, game_version: &str) -> CmdResult<Value> {
+            Ok(json!(self.files.iter().filter(|v| v["project_id"] == project_id && fits(v, kind, game_version)).cloned().collect::<Vec<_>>()))
+        }
+    }
+
+    /// Modrinth's Iris and Sodium as published for 26.1.x (2026-11-10): Iris 1.11.4 is listed for 26.1, 26.1.1 and 26.1.2 but
+    /// requires the exact Sodium 0.9.2 build, which is only for 26.1.2.
+    #[tokio::test]
+    async fn a_build_whose_exact_requirement_isnt_for_this_minecraft_is_passed_over() {
+        let version = |id: &str, project: &str, number: &str, games: &[&str], deps: Value| {
+            json!({ "id": id, "project_id": project, "version_number": number, "version_type": "release", "game_versions": games, "loaders": ["fabric"], "dependencies": deps })
+        };
+        let catalog = CurseForgeCatalog {
+            projects: vec![json!({ "id": "iris" }), json!({ "id": "sodium" })],
+            files: vec![
+                version("iris-1114", "iris", "1.11.4+26.1", &["26.1", "26.1.1", "26.1.2"], json!([{ "project_id": "sodium", "version_id": "sodium-092", "dependency_type": "required" }])),
+                version("iris-1109", "iris", "1.10.9+26.1", &["26.1", "26.1.1"], json!([{ "project_id": "sodium", "version_id": "sodium-089", "dependency_type": "required" }])),
+                version("sodium-092", "sodium", "mc26.1.2-0.9.2", &["26.1.2"], json!([])),
+                version("sodium-089", "sodium", "mc26.1.1-0.8.9", &["26.1", "26.1.1"], json!([])),
+            ],
+        };
+        let on = |game: &str| Profile { id: "p".into(), game_version: game.into(), loader: "fabric".into(), ..Default::default() };
+        let picked = |v: Option<Value>| v.map(|v| v["id"].as_str().unwrap().to_owned());
+        assert_eq!(picked(best_version(&catalog, "iris", "mod", &on("26.1.2")).await.unwrap()).as_deref(), Some("iris-1114"));
+        assert_eq!(picked(best_version(&catalog, "iris", "mod", &on("26.1.1")).await.unwrap()).as_deref(), Some("iris-1109"));
+        assert_eq!(picked(best_version(&catalog, "iris", "mod", &on("26.1")).await.unwrap()).as_deref(), Some("iris-1109"));
+        // A build with no exact requirement is taken as before (the newest release).
+        assert_eq!(picked(best_version(&catalog, "sodium", "mod", &on("26.1.1")).await.unwrap()).as_deref(), Some("sodium-089"));
+    }
+
+    #[tokio::test]
+    async fn curseforge_content_is_planned_with_its_dependencies_and_links_where_flint_cant_download() {
+        let cf_mod = |id: u64, slug: &str, name: &str| {
+            curseforge::project_of(&json!({ "id": id, "classId": 6, "slug": slug, "name": name, "latestFilesIndexes": [{ "gameVersion": "1.21.1", "fileId": 1, "modLoader": 4 }], "links": { "websiteUrl": format!("https://www.curseforge.com/minecraft/mc-mods/{slug}") } }))
+        };
+        let file = |id: u64, mod_id: u64, deps: Value, url: Option<&str>| {
+            curseforge::version_of(&json!({ "id": id, "modId": mod_id, "displayName": format!("File {id}"), "fileName": format!("f{id}.jar"), "releaseType": 1, "fileDate": "2026-10-01T00:00:00Z", "fileLength": 10, "gameVersions": ["1.21.1", "Fabric"], "downloadUrl": url, "hashes": [{ "value": "ab", "algo": 1 }], "dependencies": deps }))
+        };
+        let catalog = CurseForgeCatalog {
+            projects: vec![cf_mod(248787, "appleskin", "AppleSkin"), cf_mod(306612, "fabric-api", "Fabric API"), cf_mod(451136, "simple-voice-chat", "Simple Voice Chat"), cf_mod(238222, "jei", "JEI")],
+            files: vec![
+                file(5001, 248787, json!([{ "modId": 306612, "relationType": 3 }, { "modId": 238222, "relationType": 2 }]), Some("https://edge.forgecdn.net/files/5/1/f5001.jar")),
+                file(6001, 306612, json!([]), Some("https://edge.forgecdn.net/files/6/1/f6001.jar")),
+                file(8501, 238222, json!([]), Some("https://edge.forgecdn.net/files/8/501/f8501.jar")),
+                file(7001, 451136, json!([{ "modId": 306612, "relationType": 3 }]), None),
+            ],
+        };
+        let profile = Profile { id: "p".into(), game_version: "1.21.1".into(), loader: "fabric".into(), ..Default::default() };
+        let root = |id: &str| Pending { project: catalog.projects.iter().find(|p| p["id"] == id).unwrap().clone(), kind: "mod".into(), version_id: None, source: "user".into(), reason: None, required_by: None, required: true };
+
+        // Nothing installed: AppleSkin brings Fabric API from CurseForge, and offers JEI.
+        let plan = resolve_among(&catalog, &[], &profile, vec![root("cf:248787")]).await.unwrap();
+        let items = plan["items"].as_array().unwrap();
+        let by = |id: &str| items.iter().find(|i| i["projectId"] == id).unwrap_or_else(|| panic!("{id}: {items:?}"));
+        assert_eq!((by("cf:248787")["status"].as_str(), by("cf:248787")["versionId"].as_str()), (Some("ok"), Some("cf:5001")));
+        assert_eq!((by("cf:306612")["source"].as_str(), by("cf:306612")["status"].as_str()), (Some("dependency"), Some("ok")));
+        assert_eq!(by("cf:238222")["source"], "optional");
+        assert!(plan["blockers"].as_array().unwrap().is_empty());
+
+        // Fabric API from Modrinth is already there: the CurseForge copy isn't added.
+        let installed = [ContentEntry { kind: "mod".into(), project_id: "P7dR8mSH".into(), slug: "fabric-api".into(), title: "Fabric API".into(), file_name: "fabric-api.jar".into(), ..Default::default() }];
+        let plan = resolve_among(&catalog, &installed, &profile, vec![root("cf:248787")]).await.unwrap();
+        assert!(!plan["items"].as_array().unwrap().iter().any(|i| i["projectId"] == "cf:306612"), "{}", plan["items"]);
+
+        // Its author keeps it on CurseForge: never downloaded, linked instead, and it blocks the install.
+        let plan = resolve_among(&catalog, &[], &profile, vec![root("cf:451136")]).await.unwrap();
+        let voice = &plan["items"][0];
+        assert_eq!(voice["status"], "unavailable");
+        assert_eq!(voice["externalUrl"], "https://www.curseforge.com/minecraft/mc-mods/simple-voice-chat/files/7001");
+        assert_eq!(plan["blockers"].as_array().unwrap().len(), 1);
+
+        // A vanilla profile takes no CurseForge mods either.
+        let vanilla = Profile { loader: "vanilla".into(), ..profile.clone() };
+        let plan = resolve_among(&catalog, &[], &vanilla, vec![root("cf:248787")]).await.unwrap();
+        assert_eq!(plan["items"][0]["status"], "unavailable");
+    }
+
+    #[test]
     fn missing_requirements_are_explained_in_plain_words() {
         let missing = |id: &str, by: &[&str]| crate::perfcore::Missing { id: id.into(), needed_by: by.iter().map(|s| s.to_string()).collect() };
         let lines = missing_lines(&[
@@ -1929,6 +2358,18 @@ mod tests {
         for (id, slug, name) in LIBRARIES {
             assert!(!id.is_empty() && crate::modrinth::valid_id(slug) && !name.is_empty(), "{id}");
         }
+    }
+
+    #[test]
+    fn ornithe_mods_missing_osl_modules_get_osl() {
+        // Titanium and MinecraftCapes require `osl-entrypoints`; AxolotlClient `osl-keybinds` and more: all are OSL.
+        for module in ["osl", "osl-entrypoints", "osl-keybinds", "osl-resource-loader"] {
+            assert_eq!(library_for(module).map(|(_, slug, _)| *slug), Some("osl"), "{module}");
+        }
+        assert_eq!(library_for("fabric").map(|(_, slug, _)| *slug), Some("fabric-api"));
+        assert_eq!(library_for("oslo"), None, "only OSL's own ids");
+        let lines = missing_lines(&[crate::perfcore::Missing { id: "osl-entrypoints".into(), needed_by: vec!["Titanium".into()] }]);
+        assert!(lines[0].starts_with("Titanium needs Ornithe Standard Libraries"), "{}", lines[0]);
     }
 
 
@@ -2131,14 +2572,88 @@ mod tests {
     }
 
     #[test]
-    fn a_1_8_9_fabric_profile_takes_no_modrinth_mods() {
+    fn a_1_8_9_fabric_profile_takes_ornithe_mods_but_no_shader_packs() {
         let profile = |version: &str, loader: &str| Profile { game_version: version.into(), loader: loader.into(), ..Profile::default() };
-        assert!(takes_mods(&profile("26.3", "fabric")));
-        assert!(takes_mods(&profile("1.21.11", "fabric")));
-        assert!(!takes_mods(&profile("1.8.9", "fabric")), "Modrinth's 1.8.9 Fabric mods are Legacy Fabric builds");
-        assert!(!takes_mods(&profile("26.3", "vanilla")));
-        assert!(no_mods_reason(&profile("1.8.9", "fabric")).contains("Legacy Fabric"));
+        for version in ["26.3", "1.21.11", "1.21.1", "1.19.2"] {
+            assert!(takes(&profile(version, "fabric"), "mod") && takes(&profile(version, "fabric"), "shader"), "{version}");
+        }
+        let ornithe = profile("1.8.9", "fabric");
+        assert!(takes_mods(&ornithe) && takes(&ornithe, "mod") && takes(&ornithe, "resourcepack"), "Ornithe builds go in");
+        assert!(!takes(&ornithe, "shader") && refusal(&ornithe, "shader").contains("Iris"), "no Iris for 1.8.9");
+        assert!(!takes(&profile("26.3", "vanilla"), "mod") && takes(&profile("26.3", "vanilla"), "resourcepack"));
         assert!(no_mods_reason(&profile("26.3", "vanilla")).contains("vanilla"));
+        // Resolve searches (Flint AI) ask for Ornithe builds on 1.8.9 too.
+        assert_eq!(search_facets("mod", "1.8.9")[1], json!(["categories:ornithe"]));
+        assert_eq!(search_facets("mod", "1.21.11")[1], json!(["categories:fabric"]));
+    }
+
+    /// Modrinth's 1.8.9 builds as published (2026-11-12): e4mc Retro has an `ornithe` build and a `fabric`+`legacy-fabric`
+    /// one; PolySprint (Ornithe) requires OSL, OneConfig, Fabric Language Kotlin (Fabric builds only, no 1.8.9 listed) and,
+    /// per Modrinth, AxolotlClient requires Fabric API (which has no 1.8.9 build and isn't in its jar's `depends`).
+    #[test]
+    fn versions_for_1_8_9_must_be_ornithe_builds() {
+        let v = |project: &str, loaders: &[&str], games: &[&str]| json!({ "project_id": project, "loaders": loaders, "game_versions": games });
+        assert!(fits(&v("e4mc", &["ornithe"], &["1.8.9"]), "mod", "1.8.9"));
+        assert!(!fits(&v("e4mc", &["fabric", "legacy-fabric"], &["1.8.9"]), "mod", "1.8.9"), "Legacy Fabric's build");
+        assert!(!fits(&v("e4mc", &["fabric"], &["1.8.9"]), "mod", "1.8.9"), "a 1.8.9 `fabric` build is Legacy Fabric's");
+        assert!(fits(&v("ksyxis", &["fabric", "legacy-fabric", "ornithe", "quilt"], &["1.8.9"]), "mod", "1.8.9"), "one jar for every loader");
+        assert!(!fits(&v("e4mc", &["ornithe"], &["1.12.2"]), "mod", "1.8.9"));
+        assert!(fits(&v("Ha28R6CL", &["fabric"], &["1.21.11"]), "mod", "1.8.9"), "Fabric Language Kotlin, any version");
+        assert!(!fits(&v("P7dR8mSH", &["fabric"], &["1.21.11"]), "mod", "1.8.9"), "Fabric API isn't a shared library");
+        // Elsewhere nothing changed: an `ornithe`-only build never goes into a modern profile.
+        assert!(fits(&v("e4mc", &["fabric"], &["1.21.11"]), "mod", "1.21.11"));
+        assert!(!fits(&v("e4mc", &["ornithe"], &["1.21.11"]), "mod", "1.21.11"));
+        assert!(fits(&v("pack", &["minecraft"], &["1.8.9"]), "resourcepack", "1.8.9"), "resource packs as before");
+    }
+
+    #[tokio::test]
+    async fn a_1_8_9_plan_takes_ornithe_builds_and_their_libraries() {
+        let project = |id: &str, title: &str, loaders: &[&str]| json!({ "id": id, "slug": id, "title": title, "project_type": "mod", "loaders": loaders, "client_side": "required" });
+        let version = |id: &str, project: &str, loaders: &[&str], games: &[&str], deps: Value| {
+            json!({ "id": id, "project_id": project, "version_number": id, "version_type": "release", "game_versions": games, "loaders": loaders, "dependencies": deps, "files": [{ "filename": format!("{id}.jar"), "primary": true, "url": format!("https://cdn.modrinth.com/{id}.jar"), "hashes": { "sha512": "ab" }, "size": 10 }] })
+        };
+        let req = |project: &str| json!({ "project_id": project, "dependency_type": "required" });
+        let catalog = CurseForgeCatalog {
+            projects: vec![
+                project("polysprint", "PolySprint", &["forge", "ornithe"]),
+                project("osl", "Ornithe Standard Libraries", &["ornithe"]),
+                project("Ha28R6CL", "Fabric Language Kotlin", &["fabric"]),
+                project("P7dR8mSH", "Fabric API", &["fabric"]),
+                project("e4mc", "e4mc Retro", &["fabric", "forge", "legacy-fabric", "ornithe"]),
+                project("legacyonly", "Legacy Only", &["fabric", "legacy-fabric"]),
+            ],
+            files: vec![
+                version("polysprint-133", "polysprint", &["ornithe"], &["1.8.9"], json!([req("osl"), req("Ha28R6CL"), req("P7dR8mSH")])),
+                version("polysprint-forge", "polysprint", &["forge"], &["1.8.9"], json!([])),
+                version("osl-0231", "osl", &["ornithe"], &["1.8.9"], json!([])),
+                version("flk-1137", "Ha28R6CL", &["fabric"], &["1.21.11", "26.3"], json!([])),
+                version("fabric-api-1", "P7dR8mSH", &["fabric"], &["1.21.11"], json!([])),
+                // Legacy Fabric's build is the newer one: it's still passed over.
+                version("e4mc-fabric-102", "e4mc", &["fabric", "legacy-fabric"], &["1.8.9"], json!([])),
+                version("e4mc-ornithe-101", "e4mc", &["ornithe"], &["1.8.9"], json!([req("osl")])),
+                version("legacyonly-1", "legacyonly", &["fabric", "legacy-fabric"], &["1.8.9"], json!([])),
+            ],
+        };
+        let profile = Profile { id: "p".into(), game_version: "1.8.9".into(), loader: "fabric".into(), ..Default::default() };
+        let root = |id: &str, kind: &str| Pending { project: catalog.projects.iter().find(|p| p["id"] == id).unwrap().clone(), kind: kind.into(), version_id: None, source: "user".into(), reason: None, required_by: None, required: true };
+
+        let plan = resolve_among(&catalog, &[], &profile, vec![root("polysprint", "mod"), root("e4mc", "mod"), root("legacyonly", "mod")]).await.unwrap();
+        let items = plan["items"].as_array().unwrap();
+        let by = |id: &str| items.iter().find(|i| i["projectId"] == id).unwrap_or_else(|| panic!("{id}: {items:?}"));
+        let status = |id: &str| (by(id)["status"].as_str().unwrap().to_owned(), by(id)["versionId"].as_str().map(str::to_owned));
+        assert_eq!(status("polysprint"), ("ok".into(), Some("polysprint-133".into())));
+        assert_eq!(status("osl"), ("ok".into(), Some("osl-0231".into())));
+        assert_eq!(status("Ha28R6CL"), ("ok".into(), Some("flk-1137".into())), "Kotlin's Fabric build, though it lists no 1.8.9");
+        assert_eq!(status("P7dR8mSH").0, "not-needed", "no Ornithe build of Fabric API exists");
+        assert!(by("P7dR8mSH")["message"].as_str().unwrap().contains("Ornithe"));
+        assert_eq!(status("e4mc"), ("ok".into(), Some("e4mc-ornithe-101".into())), "the Ornithe build, never the newer Legacy Fabric one");
+        assert_eq!(status("legacyonly").0, "unavailable");
+        assert!(by("legacyonly")["message"].as_str().unwrap().contains("Ornithe build"), "{:?}", by("legacyonly")["message"]);
+
+        // On 1.21.11 the same catalog plans as before: Fabric builds, Fabric API required.
+        let modern = Profile { game_version: "1.21.11".into(), ..profile.clone() };
+        let plan = resolve_among(&catalog, &[], &modern, vec![root("Ha28R6CL", "mod")]).await.unwrap();
+        assert_eq!(plan["items"][0]["versionId"], "flk-1137");
     }
 
     #[test]
@@ -2174,6 +2689,17 @@ mod tests {
         assert!(!file_fits("mod", "pack.zip"));
         assert!(file_fits("resourcepack", "pack.zip"));
         assert!(!file_fits("shader", "evil.jar"));
+    }
+
+    #[test]
+    fn immediatelyfast_is_left_out_on_1_19_only() {
+        assert!(performance_skipped("immediatelyfast", "1.19"), "its 1.19 builds crash 1.19.0 at start");
+        for v in ["1.19.2", "1.19.1", "1.21.1", "26.3"] {
+            assert!(!performance_skipped("immediatelyfast", v), "{v}");
+        }
+        for (slug, _) in PERFORMANCE_SET {
+            assert!(slug == "immediatelyfast" || !performance_skipped(slug, "1.19"), "{slug} stays in on 1.19");
+        }
     }
 
     #[test]
@@ -2342,7 +2868,7 @@ mod tests {
 
         let shaders = state.paths.profile_dir("p1").join("shaderpacks");
         let batch = vec![staged_file(&state, "resourcepack", "Dirt Tint.zip", None, b"new"), staged_file(&state, "shader", "Tint.zip", None, b"shader")];
-        let result = commit_staged(&state, "p1", batch, true).unwrap();
+        let result = commit_staged(&state, "p1", batch, true, false).unwrap();
         assert_eq!(result["installed"], json!(["Dirt Tint", "Tint"]));
         assert_eq!(result["live"], json!({ "enable": true, "datapack": false, "applies": true }));
         assert_eq!(std::fs::read(packs.join("Dirt Tint.zip")).unwrap(), b"in use", "never replaced");
@@ -2359,7 +2885,7 @@ mod tests {
         assert_eq!(changes[0]["revision"], file["revision"]);
 
         // "Turn it on in the game now" off: the game only lists it.
-        let result = commit_staged(&state, "p1", vec![staged_file(&state, "resourcepack", "Quiet.zip", None, b"q")], false).unwrap();
+        let result = commit_staged(&state, "p1", vec![staged_file(&state, "resourcepack", "Quiet.zip", None, b"q")], false, false).unwrap();
         assert_eq!(result["live"], json!({ "enable": false, "datapack": false, "applies": true }));
         let file = handoff(&state);
         let last = file["changes"].as_array().unwrap().last().unwrap().clone();
@@ -2376,7 +2902,7 @@ mod tests {
         std::fs::write(world.join("level.dat"), b"x").unwrap();
         state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
 
-        let result = commit_staged(&state, "p1", vec![staged_file(&state, "datapack", "Trees.zip", Some("New World"), b"dp")], true).unwrap();
+        let result = commit_staged(&state, "p1", vec![staged_file(&state, "datapack", "Trees.zip", Some("New World"), b"dp")], true, false).unwrap();
         assert_eq!(result["live"], json!({ "enable": false, "datapack": true, "applies": false }), "no runtime in this game");
         assert!(world.join("datapacks").join("Trees.zip").is_file());
         let change = handoff(&state)["changes"][0].clone();
@@ -2386,7 +2912,7 @@ mod tests {
         // A mod in the batch: nothing is moved, and the reason is the restart.
         let mods = state.paths.profile_dir("p1").join("mods");
         let batch = vec![staged_file(&state, "resourcepack", "Fine.zip", None, b"f"), staged_file(&state, "mod", "iris.jar", None, b"jar")];
-        assert_eq!(commit_staged(&state, "p1", batch, true).unwrap_err(), "Mods need a restart: close Minecraft first.");
+        assert_eq!(commit_staged(&state, "p1", batch, true, false).unwrap_err(), "Mods need a restart: close Minecraft first.");
         assert!(!mods.join("iris.jar").exists());
         assert!(!state.paths.profile_dir("p1").join("resourcepacks").join("Fine.zip").exists());
     }
@@ -2396,8 +2922,11 @@ mod tests {
         let dir = TestDir::new();
         let state = AppState::for_tests(dir.0.clone());
         let batch = vec![staged_file(&state, "resourcepack", "Dirt Tint.zip", None, b"new"), staged_file(&state, "mod", "lithium.jar", None, b"jar")];
-        let result = commit_staged(&state, "p1", batch, true).unwrap();
-        assert_eq!(result, json!({ "installed": ["Dirt Tint", "lithium.jar"], "failed": [] }));
+        let result = commit_staged(&state, "p1", batch, true, false).unwrap();
+        assert_eq!(result["installed"], json!(["Dirt Tint", "lithium.jar"]));
+        assert_eq!(result["failed"], json!([]));
+        assert_eq!(result["files"].as_array().map(Vec::len), Some(2), "what went where, for the in-game Library");
+        assert!(result.get("live").is_none());
         assert!(state.paths.profile_dir("p1").join("resourcepacks").join("Dirt Tint.zip").is_file());
         assert!(state.paths.profile_dir("p1").join("mods").join("lithium.jar").is_file());
         assert!(!state.paths.profile_dir("p1").join(livepacks::FILE).exists());
@@ -2408,7 +2937,7 @@ mod tests {
         let dir = TestDir::new();
         let state = AppState::for_tests(dir.0.clone());
         let batch = vec![staged_file(&state, "resourcepack", "Old.zip", None, b"old"), staged_file(&state, "mod", "sodium.jar", None, b"jar")];
-        commit_staged(&state, "p1", batch, false).unwrap();
+        commit_staged(&state, "p1", batch, false, false).unwrap();
         state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
 
         let pack = ContentRef { kind: "resourcepack".into(), file_name: "Old.zip".into(), world: None };
@@ -2459,7 +2988,7 @@ mod tests {
                     ..Default::default()
                 };
                 let dir = kind_dir(&state, &id, &kind, world.as_deref());
-                let result = dir.and_then(|dir| commit_staged(&state, &id, vec![Staged { entry, staged: staging.join(&name), dir }], env("FLINT_QA_ENABLE") != "false"));
+                let result = dir.and_then(|dir| commit_staged(&state, &id, vec![Staged { entry, staged: staging.join(&name), dir }], env("FLINT_QA_ENABLE") != "false", false));
                 let _ = std::fs::remove_dir_all(&staging);
                 result
             }

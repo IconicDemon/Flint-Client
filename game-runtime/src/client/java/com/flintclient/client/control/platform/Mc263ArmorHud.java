@@ -169,7 +169,11 @@ public final class Mc263ArmorHud {
 				}
 			}
 		}
-		if (shown == IF_ANY_PRESENT && !any) {
+		if (!any && com.flintclient.client.control.hud.render.HudPreview.active()) {
+			// The Right Shift menu's preview, with nothing worn or carried: a set of sample pieces shows how the strip looks.
+			n = samplePieces();
+			shownPlaces = 0;
+		} else if (shown == IF_ANY_PRESENT && !any) {
 			n = 0;
 			shownPlaces = 0;
 		}
@@ -184,6 +188,28 @@ public final class Mc263ArmorHud {
 			}
 		}
 		return n;
+	}
+
+	/** The menu preview's sample armour (made once, worn by no one), helmet first, some of it worn down. */
+	private static ItemStack @Nullable [] samples;
+
+	/** Fills {@link #ITEMS} with the sample armour ({@link #samples}) and returns how many. */
+	private static int samplePieces() {
+		ItemStack[] pieces = samples;
+		if (pieces == null) {
+			pieces = new ItemStack[] {new ItemStack(Items.DIAMOND_HELMET), new ItemStack(Items.DIAMOND_CHESTPLATE),
+				new ItemStack(Items.IRON_LEGGINGS), new ItemStack(Items.DIAMOND_BOOTS)};
+			int[] worn = {12, 4, 41, 77};
+			for (int i = 0; i < pieces.length; i++) {
+				pieces[i].setDamageValue(pieces[i].getMaxDamage() * worn[i] / 100);
+			}
+			samples = pieces;
+		}
+		for (int i = 0; i < pieces.length; i++) {
+			ITEMS[i] = pieces[i];
+			FROM[i] = i;
+		}
+		return pieces.length;
 	}
 
 	/** Whether a slot holding {@code stack} shows with Show widget {@code shown}. */

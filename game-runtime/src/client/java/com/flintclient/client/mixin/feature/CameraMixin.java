@@ -2,6 +2,7 @@ package com.flintclient.client.mixin.feature;
 
 import com.flintclient.client.control.platform.Mc263Camera;
 import com.flintclient.client.control.platform.Mc263Features;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -24,7 +25,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Zoom and Freelook: the camera reads the zoom and freelook keys once per frame before it is placed, takes freelook's
  * angles instead of the player's while freelook is on (the third-person distance and mirroring then follow them), and
- * divides its field of view by the zoom. Wrapping and returning values allocates nothing.
+ * divides its field of view by the zoom. The angles and the field of view are swapped as values, so nothing is boxed or
+ * allocated for them each frame.
  *
  * <p>The Camera module, in third person: just before Minecraft pulls the camera back from you, it turns the camera around
  * you, moves it sideways and up (stopping short of a wall), and scales the distance; Minecraft's own wall check then
@@ -85,14 +87,15 @@ abstract class CameraMixin {
 		Mc263Features.beforeCamera();
 	}
 
-	@WrapOperation(method = "alignWithEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getViewYRot(F)F"))
-	private float flint$freelookYaw(Entity entity, float partialTicks, Operation<Float> original) {
-		return Mc263Features.cameraYaw(original.call(entity, partialTicks));
+	/** Freelook's angles instead of the player's: the value Minecraft read, swapped (no boxing, unlike a wrapped call). */
+	@ModifyExpressionValue(method = "alignWithEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getViewYRot(F)F"))
+	private float flint$freelookYaw(float yaw) {
+		return Mc263Features.cameraYaw(yaw);
 	}
 
-	@WrapOperation(method = "alignWithEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getViewXRot(F)F"))
-	private float flint$freelookPitch(Entity entity, float partialTicks, Operation<Float> original) {
-		return Mc263Features.cameraPitch(original.call(entity, partialTicks));
+	@ModifyExpressionValue(method = "alignWithEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getViewXRot(F)F"))
+	private float flint$freelookPitch(float pitch) {
+		return Mc263Features.cameraPitch(pitch);
 	}
 
 	@ModifyReturnValue(method = "calculateFov", at = @At("RETURN"))

@@ -63,6 +63,22 @@ public final class Texture {
 	}
 
 	/**
+	 * A {@code width × height} texture of {@code pixels} already in {@link #WRITE_LAYOUT} (row by row), registered as
+	 * {@code flintclient:<path>} and sampled as they are: one copy and one upload, and no CPU copy kept, for a picture that is
+	 * never written again (a Cosmetics tile's picture, an animated cape's frames side by side).
+	 */
+	public static Texture uploadFixed(String path, int width, int height, int[] pixels) {
+		NativeImage image = new NativeImage(width, height, false);
+		MemoryUtil.memIntBuffer(image.getPointer(), width * height).put(0, pixels, 0, width * height);
+		Identifier id = id(path);
+		Pixels texture = new Pixels(id, image, false);
+		// Uploaded: only uploading it again would read the CPU copy, which nothing does.
+		texture.setPixels(new NativeImage(1, 1, false));
+		Minecraft.getInstance().getTextureManager().register(id, texture);
+		return new Texture(id, null);
+	}
+
+	/**
 	 * Writes {@code width × height} pixels at the top left of this texture (made by {@link #upload}, at least that large) and
 	 * uploads only that rectangle. {@code pixels} are row by row in the layout of {@code NativeImage}'s memory (R, G, B, A
 	 * bytes read as this machine's ints: {@code CapeFrames.Layout.RGBA_BYTES}), so this is one copy into a staging image made

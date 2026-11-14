@@ -1,11 +1,15 @@
 // Browser-only development stand-in for the Rust backend (vite dev without Tauri).
 // Never bundled into production builds; see initBridge() in api.ts.
+import appPackage from "../../package.json";
+import { curseforgeMock } from "./devMockCurseForge";
 import type { Account, Profile, ProfileState } from "./api";
 import { RELEASE_NOTES } from "../data/releaseNotes";
 import { createPartnersMock } from "./devMockPartners";
+import { createShowcaseMock } from "./devMockShowcase";
 import { createSocialMock, demoSkin } from "./devMockSocial";
 import { communityAccounts, communitySkin, createCommunityMock } from "./devMockCommunity";
 import { createStoreMock } from "./devMockStore";
+import { appliedSkin, skinLibraryCall } from "./devMockWardrobe";
 
 type Handler = (payload: unknown) => void;
 const handlers = new Map<string, Set<Handler>>();
@@ -58,21 +62,21 @@ if (params.has("demo")) {
     db.active = null;
   }
 }
-// `?demo&capes`: the Capes mod (it shows capes of its own) is on in the 26.2 profile, so wearing a Flint cape on the Store
-// page (`&store=in`) says it can hide the cape there. `&capes=2`: Essential is on in Iconic too, beside a switched-off MinecraftCapes
+// `?demo&capes`: Cosmetica (it shows capes of its own) is on in the 26.2 profile, so wearing a Flint cape on the Store
+// page (`&store=in`) says it can hide the cape there; the Capes mod beside it doesn't count (Flint decides after it). `&capes=2`: Essential is on in Iconic too, beside a switched-off MinecraftCapes
 // (which doesn't count). The mock's `modId` stands in for the jar's fabric.mod.json id (src-tauri/src/capemods.rs).
 if (params.has("demo") && params.has("capes")) {
   const mod = (title: string, fileName: string, modId: string, enabled = true) => ({
     kind: "mod", title, projectId: `mock-${modId}`, fileName, versionNumber: "1.0.0", versionId: `v-${modId}`, iconUrl: null, source: "manual", size: 90_000, enabled, missing: false, tracked: false, identified: true, requires: [], modId,
   });
-  db.mods.demo262 = [...(db.mods.demo262 ?? []), mod("Capes", "capes-1.5.10+26.2.jar", "capes")];
+  db.mods.demo262 = [...(db.mods.demo262 ?? []), mod("Cosmetica", "cosmetica-26.2.jar", "cosmetica"), mod("Capes", "capes-1.5.11+26.2.jar", "capes")];
   if (params.get("capes") === "2") {
     db.mods.demoiconic = [mod("Essential", "Essential (fabric_26.3).jar", "essential-container"), mod("MinecraftCapes", "minecraftcapes-fabric-26.3-1.1.0.jar", "minecraftcapes", false)];
     db.profiles = db.profiles.map((p) => (p.id === "demoiconic" ? { ...p, lastPlayed: Date.now() / 1000 - 3600 } : p));
   }
 }
 /** The mock's cape mods by id (the real list: src-tauri/src/capemods.rs `CAPE_MODS`). */
-const MOCK_CAPE_MODS: Record<string, string> = { capes: "Capes", "essential-container": "Essential", minecraftcapes: "MinecraftCapes" };
+const MOCK_CAPE_MODS: Record<string, string> = { cosmetica: "Cosmetica", "essential-container": "Essential", minecraftcapes: "MinecraftCapes" };
 /** `cape_mod_conflicts` over the mock's profiles: Fabric ones, the selected first, then the latest played. */
 function capeModConflicts() {
   const order = [...db.profiles].filter((p) => p.loader === "fabric").sort((a, b) => Number(b.id === db.selected) - Number(a.id === db.selected) || (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));
@@ -135,6 +139,8 @@ function demoContent() {
     item("mod", "Fabric API", "P7dR8mSH", "fabric-api-0.130.0+26.2.jar", "0.130.0+26.2", { source: "dependency", size: 2_400_000 }),
     item("mod", "Xaero's Minimap", "1bokaNcj", "Xaeros_Minimap_25.2.10_Fabric_26.2.jar", "25.2.10", { size: 1_900_000 }),
     item("mod", "Mod Menu", "mOgUt4GM", "modmenu-15.0.0.jar", "15.0.0", { source: "optional", size: 650_000 }),
+    item("mod", "AppleSkin", "cf:248787", "appleskin-fabric-mc26.2-3.0.7.jar", "appleskin-fabric-mc26.2-3.0.7", { size: 96_000 }),
+    item("mod", "Jade 🔍", "cf:324717", "Jade-26.2-Fabric-19.3.1.jar", "Jade-26.2-Fabric-19.3.1", { size: 1_100_000, source: "dependency" }),
     item("mod", "old-zoom-tweak", "", "old-zoom-tweak.jar", "", { source: "manual", tracked: false, identified: false, projectId: null, versionId: null, size: 42_000 }),
     item("resourcepack", "Faithful 32x", "Ma5BV2xc", "Faithful 32x - 26.2.zip", "26.2.1", { size: 31_000_000 }),
     item("shader", "Complementary Shaders - Reimagined", "HVnmMxH1", "ComplementaryReimagined_r5.4.zip", "r5.4", { size: 610_000 }),
@@ -187,6 +193,17 @@ const setState = (s: ProfileState) => {
 };
 
 const jobs: unknown[] = [];
+// `?jobs`: a Downloads history to look at (two finished installs, a failed one and one still downloading).
+if (params.has("jobs")) {
+  const at = Date.now() / 1000;
+  const job = (id: string, title: string, state: string, stage: string, extra: object = {}) => ({ id, kind: "install", profileId: null, title, state, stage, bytesDone: 0, bytesTotal: null, itemsDone: 0, itemsTotal: 1, createdAt: at, ...extra });
+  jobs.push(
+    job("jd1", "Sodium", "done", "Done", { result: { installed: ["Sodium"], failed: [] } }),
+    job("jd2", "Iris Shaders", "done", "Done", { result: { installed: ["Iris Shaders"], failed: [] } }),
+    job("jf1", "Complementary Shaders", "failed", "Failed", { message: "The download didn't match its Modrinth hash, so nothing was kept." }),
+    job("jr1", "Faithful 32x", "running", "Downloading", { bytesDone: 12_400_000, bytesTotal: 31_000_000 }),
+  );
+}
 // Auto Sync's status line: `?autosync=waiting` shows "Waiting for your first game", `?autosync=notice` a notice.
 let autoSyncDismissed = false;
 // Settings → Syncing: the switches as the backend keeps them (servers, hotbars and command history start off), the
@@ -220,9 +237,9 @@ function syncOverview() {
     lastSync: enabled && mode !== "waiting" && profiles[0] ? { at: Date.now() / 1000 - 600, profile: profiles[0].id } : undefined,
   };
 }
-const JAVA_PLAN = ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.8.9"].map((version) => {
-  const own = version.startsWith("26.") ? { component: "java-runtime-epsilon", major: 25, minimum: 25 } : version === "1.8.9" ? { component: "jre-legacy", major: 8, minimum: 8 } : { component: "java-runtime-delta", major: 21, minimum: 21 };
-  const withMenu = version.startsWith("26.") ? own : { component: "java-runtime-epsilon", major: 25, minimum: 21, fallback: 21 };
+const JAVA_PLAN = ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.19.2", "1.19", "1.8.9"].map((version) => {
+  const own = version.startsWith("26.") ? { component: "java-runtime-epsilon", major: 25, minimum: 25 } : version === "1.8.9" ? { component: "jre-legacy", major: 8, minimum: 8 } : version.startsWith("1.19") ? { component: "java-runtime-gamma", major: 17, minimum: 17 } : { component: "java-runtime-delta", major: 21, minimum: 21 };
+  const withMenu = version.startsWith("26.") || version.startsWith("1.19") ? own : { component: "java-runtime-epsilon", major: 25, minimum: 21, fallback: 21 };
   return { version, withMenu, withoutMenu: own };
 });
 const CAPE_COLORS: [string, string, string][] = [
@@ -316,11 +333,11 @@ async function skinData(): Promise<string | null> {
 }
 
 const catalog = {
-  versions: ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.8.9"].map((id, i) => ({
+  versions: ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.19.2", "1.19", "1.8.9"].map((id, i) => ({
     id,
     available: true,
     fabric: true,
-    releaseTime: ["2026-09-15", "2026-06-16", "2026-04-09", "2026-04-01", "2026-03-24", "2025-12-09", "2025-10-07", "2024-08-08", "2015-12-03"][i],
+    releaseTime: ["2026-09-15", "2026-06-16", "2026-04-09", "2026-04-01", "2026-03-24", "2025-12-09", "2025-10-07", "2024-08-08", "2022-08-05", "2022-06-07", "2015-12-03"][i],
   })),
   fabricLoader: "0.19.5",
   offline: false,
@@ -697,15 +714,19 @@ async function launchMock(id: string) {
 }
 
 // Partners (devMockPartners.ts): `?partners=<set>` picks the listings.
+const cfMock = curseforgeMock(params);
+// Home's sponsored card (devMockShowcase.ts): `?showcase=<set>` picks the slides.
+const showcaseMock = createShowcaseMock(params);
 const partnersMock = createPartnersMock(params, () => db.profiles, () => Object.values(states).filter((s) => s.state === "running").map((s) => s.profileId), launchMock);
 
 export async function invoke(cmd: string, args: Record<string, any> = {}): Promise<unknown> {
   await sleep(40);
   if (cmd.startsWith("social_")) return socialMock(cmd, args);
   if (cmd.startsWith("partners_")) return partnersMock(cmd, args);
+  if (cmd.startsWith("showcase_")) return showcaseMock(cmd, args);
   switch (cmd) {
     case "app_info":
-      return { version: "0.4.0", build: null, commit: null, platform: params.get("platform") ?? "macos", arch: "aarch64", dataDir: "~/Library/Application Support/Flint Client", qa: params.has("qa"), forceOnboarding: params.has("onboarding"), gatewayConfigured: fail !== "ai", discordUrl: "https://discord.gg/59rAHZMWb7", qaStartPage: params.get("page") ?? undefined };
+      return { version: appPackage.version, build: null, commit: null, platform: params.get("platform") ?? "macos", arch: "aarch64", dataDir: "~/Library/Application Support/Flint Client", qa: params.has("qa"), forceOnboarding: params.has("onboarding"), gatewayConfigured: fail !== "ai", discordUrl: "https://discord.gg/flintclient", qaStartPage: params.get("page") ?? undefined };
     case "settings_get":
       return db.settings;
     case "settings_set":
@@ -750,6 +771,8 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
       if (db.active === args.uuid) db.active = db.accounts[0]?.uuid ?? null;
       return save();
     case "skin_texture": {
+      const applied = appliedSkin(args.uuid);
+      if (applied) return { ...applied, capeUrl: null };
       if (demoSkin(args.uuid)) return { dataUrl: demoSkin(args.uuid), model: "classic", capeUrl: null };
       if (communitySkin(args.uuid)) return { dataUrl: communitySkin(args.uuid), model: "classic", capeUrl: null };
       // The Minecraft cape Mojang has active for the demo account (Skins → Capes), as Flint caches it with the skin.
@@ -826,20 +849,32 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
         .map(([projectId, slug, title, description], i) => ({ projectId, slug, title, description, iconUrl: null, author: "dev", downloads: 9_000_000 - i * 1_200_000, follows: 30_000 - i * 3000, categories: ["optimization"], projectType: p.kind, dateModified: "2026-09-20T10:00:00Z", gallery: null }));
       return { hits, offset: p.offset, limit: p.limit, total: hits.length, stale: false, staging: true, rateLimit: { limit: 300, remaining: 297, resetIn: 42 } };
     }
+    case "curseforge_search":
+      return cfMock.search(args.params);
+    case "curseforge_categories":
+      return cfMock.categories();
+    case "curseforge_changelog":
+      await sleep(250);
+      return cfMock.changelog();
+    case "curseforge_status":
+      return { base: "http://127.0.0.1:4810", production: false };
     case "library_tags":
       return { categories: ["optimization", "utility", "decoration", "adventure", "realistic", "simplistic"].map((name) => ({ name, projectType: name === "realistic" ? "shader" : "mod", header: "categories" })) };
     case "library_status":
       return { base: "https://staging-api.modrinth.com/v2", staging: true, userAgent: "IconicDemon/FlintClient/1.0.0 (flintclient.com)", rateLimit: {} };
     case "library_project": {
+      if (cfMock.owns(args.id)) return cfMock.project(args.id);
       const m = SAMPLE_MODS.find(([id]) => id === args.id) ?? SAMPLE_MODS[0];
       return { id: m[0], slug: m[1], title: m[2], description: m[3], body: `## ${m[2]}\n\n${m[3]}\n\n- Development mock description.`, iconUrl: null, projectType: "mod", categories: ["optimization"], loaders: ["fabric"], gameVersions: ["26.3", "26.2"], clientSide: "required", serverSide: "optional", downloads: 9_000_000, followers: 30_000, license: { id: "LGPL-3.0-only", name: "GNU Lesser General Public License v3.0 only" }, published: "2020-01-01T00:00:00Z", updated: "2026-09-20T00:00:00Z", gallery: [], members: [{ username: "dev", role: "Owner", owner: true }], stale: false };
     }
     case "library_versions":
+      if (cfMock.owns(args.id)) return cfMock.versions(args.id);
       return { versions: [{ id: `v-${args.id}`, projectId: args.id, name: "1.0.0", versionNumber: "1.0.0", versionType: "release", gameVersions: ["26.3"], loaders: ["fabric"], datePublished: "2026-09-20T00:00:00Z", downloads: 120_000, changelog: "- Mock changelog", dependencies: [], files: [{ filename: "mock.jar", size: 1_200_000, primary: true }] }], stale: false };
     case "content_plan":
     case "mods_resolve": {
       await sleep(700);
       if (fail === "resolve") throw "Modrinth search failed: could not connect (check your internet connection)";
+      if (cmd === "content_plan" && (args.requests as { project?: string }[]).some((r) => cfMock.owns(r.project))) return cfMock.plan(args.requests);
       const requests = args.requests as { query?: string; project?: string; source?: string; reason?: string; kind?: string }[];
       const items: any[] = requests.flatMap((r, i) => {
         const m = SAMPLE_MODS.find(([id, slug, title]) => (r.project && (r.project === slug || r.project === id)) || (r.query && title.toLowerCase().includes(r.query.toLowerCase().split(" ")[0]))) ?? SAMPLE_MODS[i % SAMPLE_MODS.length];
@@ -866,7 +901,7 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
           await sleep(220);
           const list = (db.mods[args.profileId] = (db.mods[args.profileId] ?? []).filter((m: any) => m.projectId !== item.versionId));
           const sample = SAMPLE_MODS.find(([id]) => `v${id}` === item.versionId);
-          list.push(mockItem(sample?.[2] ?? `Mod ${item.versionId}`, item.versionId, item.source, item.kind ?? "mod"));
+          list.push(mockItem(sample?.[2] ?? cfMock.titleOf(item.versionId) ?? `Mod ${item.versionId}`, item.versionId, item.source, item.kind ?? "mod"));
           emit("job", { ...job, itemsDone: i + 1 });
         }
         // A moment apart, as the backend's events are, so the jobs tray sees the job run before it finishes.
@@ -877,7 +912,7 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
         // Into a running game: the packs went in live (content.rs commit_staged).
         const live = states[args.profileId]?.state === "running";
         const titles = items.map((item) => SAMPLE_MODS.find(([id]) => `v${id}` === item.versionId)?.[2] ?? `Pack ${item.versionId}`);
-        job.result = { installed: titles, failed: [], ...(live ? { live: { enable: (args.enableLive ?? true) && items.some((i) => i.kind !== "datapack"), datapack: items.some((i) => i.kind === "datapack"), applies: !params.has("noruntime") } } : {}) };
+        job.result = { installed: titles, failed: [], ...(live ? { live: { enable: (args.enableLive ?? false) && items.some((i) => i.kind !== "datapack"), datapack: items.some((i) => i.kind === "datapack"), applies: !params.has("noruntime") } } : {}) };
         emit("job", { ...job });
       };
       if (cmd === "content_install") {
@@ -988,6 +1023,9 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
       if (args.id === importRun.job) importRun.cancel = true;
       return;
     case "job_dismiss":
+      return;
+    case "jobs_clear_finished":
+      for (let i = jobs.length - 1; i >= 0; i--) if (!["queued", "running"].includes((jobs[i] as any).state)) jobs.splice(i, 1);
       return;
     case "import_launchers":
       // A real scan reads a few small files per launcher.
@@ -1118,6 +1156,7 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
       window.open(args.url, "_blank", "noopener");
       return;
     case "reveal_folder":
+    case "content_reveal":
       return;
     case "launch_at_login_get":
       return !!db.settings.launchAtLogin;
@@ -1238,7 +1277,18 @@ export async function invoke(cmd: string, args: Record<string, any> = {}): Promi
     case "store_wallet":
     case "store_orders":
     case "store_approve_link":
+    case "store_set_emotes":
+    case "store_model_file":
+    case "badge_list":
+    case "badge_set":
       return storeMock(cmd, args);
+    // The wardrobe's skin changer: devMockWardrobe.ts (never a real account; Apply is only recorded).
+    case "skin_library_list":
+    case "skin_library_add":
+    case "skin_library_remove":
+    case "skin_library_png":
+    case "skin_library_apply":
+      return skinLibraryCall(cmd, args);
     // Discord connected accounts and community rewards: devMockCommunity.ts (`?demo&community=…`).
     case "store_connections":
     case "store_discord_link_start":

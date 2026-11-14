@@ -1,5 +1,7 @@
 package com.flintclient.client.control.model;
 
+import com.flintclient.client.control.model.mods.ToolMods;
+import com.flintclient.client.control.model.mods.VisualMods;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.List;
@@ -35,9 +37,17 @@ import org.jspecify.annotations.Nullable;
  * {@code movementBlur}) leave the file: Natural keeps their recommended values. A Motion Blur that was on stays on.</li>
  * <li>Wavy Capes {@code capeMovement} → {@code movement}, whose new default is Realistic: the old default, Simulation 3D, becomes
  * Realistic (a file can't tell it from a choice); Vanilla, Simulation and Dungeons, which were chosen, stay.</li>
+ * <li>Block Indicator {@code indicatorRange} (1 to 32 blocks, past your reach) is retired, not read: it shows the block within
+ * your reach that Minecraft outlines, and nothing further.</li>
  * <li>The style's "Show label" off → {@code labelPosition} Hidden (Ping, CPS), {@code showLabel} off (FPS) or
  * {@code labels} off (Coordinates), when the file has no such setting yet. Those modules' own setting decides the label from then
  * on, so the override is dropped then (it leaves the file on the next save).</li>
+ * <li>Item Customizer (Flint 1.0.4, View Model's id): View Model's group switches ({@code position}, {@code rotation},
+ * {@code scale}, off by default) are retired, a group that was off going back to Minecraft's place, and its {@code shieldHeight}
+ * becomes a Shields entry. Animations' swing duration ({@code modifySwingDuration}, {@code swingDurationMultiplier}) becomes its
+ * Swing Speed Modifier (speed = 1 / duration) and Item Physics' item scales ({@code itemScale}, {@code uhcOverlay} with
+ * {@code uhcItemList}) its Dropped Item Size, when their module was on ({@link #across}). Crosshair's {@code drawCrosshair} switch
+ * is retired (the page has a pad).</li>
  * </ul>
  */
 public final class ModuleMigrations {
@@ -75,6 +85,8 @@ public final class ModuleMigrations {
 	/** Motion Blur before its two modes (Flint 1.0.2): Natural Motion Blur's algorithms and fine settings, its 0–2 strength. */
 	private static final List<String> MOTION_BLUR_RETIRED = List.of("blurAlgorithm", "motionBlurStrength", "refreshRateScaling", "blurProfile",
 		"quality", "movementBlur");
+	/** Block Indicator looked past your reach ({@code indicatorRange}, 1 to 32 blocks); it follows your reach now. */
+	private static final List<String> BLOCK_INDICATOR_RETIRED = List.of("indicatorRange");
 
 	private ModuleMigrations() {
 	}
@@ -109,6 +121,7 @@ public final class ModuleMigrations {
 			}
 			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> wavyCapes(module, settings);
 			case com.flintclient.client.control.model.mods.VisualMods.MotionBlur.ID -> motionBlur(module, settings);
+			case VisualMods.ViewModel.ID -> viewModel(module, settings);
 			case com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.ID -> {
 				// Shulker Preview {@code show}: Holding Shift is now the hold switch (the key stays Shift).
 				if ("shift".equals(string(settings, "show")) && !has(settings, com.flintclient.client.control.model.mods.UtilityMods.ShulkerPreview.HOLD)) {
@@ -192,6 +205,11 @@ public final class ModuleMigrations {
 			case com.flintclient.client.control.model.mods.ToolMods.DropPrevention.ID -> DROP_RETIRED;
 			case com.flintclient.client.control.model.mods.VisualMods.WavyCapes.ID -> WAVY_CAPES_RETIRED;
 			case com.flintclient.client.control.model.mods.VisualMods.MotionBlur.ID -> MOTION_BLUR_RETIRED;
+			case VisualMods.ViewModel.ID -> VIEW_MODEL_RETIRED;
+			case ToolMods.Animations.ID -> ANIMATIONS_RETIRED;
+			case VisualMods.ItemPhysics.ID -> ITEM_PHYSICS_RETIRED;
+			case com.flintclient.client.control.model.mods.PlayerMods.Crosshair.ID -> CROSSHAIR_RETIRED;
+			case com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.ID -> BLOCK_INDICATOR_RETIRED;
 			default -> NONE;
 		};
 	}
@@ -325,6 +343,134 @@ public final class ModuleMigrations {
 		if (own.backgroundOpacity() != null && !has(settings, ModuleSettings.Fps.BACKGROUND_OPACITY)) {
 			fps.set(ModuleSettings.Fps.BACKGROUND_OPACITY, ModuleSettings.Fps.BACKGROUND_OPACITY.clamp(own.backgroundOpacity()));
 		}
+	}
+
+	// ---------- Item Customizer (Flint 1.0.4) ----------
+
+	/** View Model's switches for its three groups and the shield's own height, before it became Item Customizer. */
+	private static final List<String> VIEW_MODEL_RETIRED = List.of("position", "rotation", "scale", "shieldHeight");
+	/** Animations' swing duration, now Item Customizer's Swing Speed Modifier. */
+	private static final List<String> ANIMATIONS_RETIRED = List.of("modifySwingDuration", "swingDurationMultiplier");
+	/** Item Physics' item scales (Dropped Item Tweaks'), now Item Customizer's Dropped Item Size. */
+	private static final List<String> ITEM_PHYSICS_RETIRED = List.of("itemScale", "uhcOverlay", "uhcItemList");
+	/** Crosshair's Draw crosshair row (a switch that opened the old editor); the page's pad replaced it. */
+	private static final List<String> CROSSHAIR_RETIRED = List.of("drawCrosshair");
+
+	/**
+	 * View Model before Item Customizer: each group (position, rotation, scale) had a switch, off by default, and a shield its own
+	 * height. A group that was off moved nothing, so its numbers go back to Minecraft's place; a shield height becomes a Shields
+	 * entry (the item's place, raised or lowered).
+	 */
+	private static void viewModel(ModuleState module, @Nullable JsonObject settings) {
+		if (settings == null || !(settings.has("position") || settings.has("rotation") || settings.has("scale") || settings.has("shieldHeight"))) {
+			return;
+		}
+		List<FloatSetting> parts = VisualMods.ViewModel.ITEM_TRANSFORM;
+		if (!Boolean.TRUE.equals(bool(settings, "position"))) {
+			for (int i = 0; i < 3; i++) {
+				module.set(parts.get(i), 0F);
+			}
+		}
+		if (!Boolean.TRUE.equals(bool(settings, "rotation"))) {
+			for (int i = 3; i < 6; i++) {
+				module.set(parts.get(i), 0F);
+			}
+		}
+		if (!Boolean.TRUE.equals(bool(settings, "scale"))) {
+			for (int i = 6; i < 9; i++) {
+				module.set(parts.get(i), 1F);
+			}
+		}
+		Float shield = number(settings, "shieldHeight");
+		if (shield != null && shield != 0 && !settings.has(VisualMods.ViewModel.HELD.id())) {
+			float[] place = new float[HeldTransform.SIZE];
+			for (int i = 0; i < place.length; i++) {
+				place[i] = module.decimal(parts.get(i));
+			}
+			place[1] += shield;
+			HeldItemsSetting held = VisualMods.ViewModel.HELD;
+			module.set(held, held.with(module.get(held), HeldItemsSetting.CATEGORY + "shields", HeldTransform.of(place)));
+		}
+	}
+
+	/**
+	 * Settings that moved from one module to another, read once every module of {@code layout} is: Animations' swing duration and
+	 * Item Physics' item scales become Item Customizer's (only when the file has no Item Customizer value for them yet). They did
+	 * something only while their module was on; then Item Customizer takes them over, switched on if it wasn't, with only the
+	 * groups that came over in use (so its own older numbers stay as quiet as they were). {@code modules} is the file's.
+	 */
+	public static void across(Layout layout, @Nullable JsonObject modules) {
+		ModuleState view = layout.module(VisualMods.ViewModel.ID);
+		if (view == null || modules == null) {
+			return;
+		}
+		JsonObject viewSettings = settingsOf(modules, VisualMods.ViewModel.ID);
+		boolean swing = false;
+		JsonObject animations = settingsOf(modules, ToolMods.Animations.ID);
+		ModuleState animationsState = layout.module(ToolMods.Animations.ID);
+		if (animations != null && animations.has("modifySwingDuration") && !has(viewSettings, VisualMods.ViewModel.SWING_SPEED)) {
+			Float duration = number(animations, "swingDurationMultiplier");
+			if (duration != null && duration > 0) {
+				view.set(VisualMods.ViewModel.SWING_SPEED_VALUE, 1 / duration);
+			}
+			swing = Boolean.TRUE.equals(bool(animations, "modifySwingDuration")) && animationsState != null && animationsState.enabled();
+		}
+		boolean dropped = false;
+		JsonObject physics = settingsOf(modules, VisualMods.ItemPhysics.ID);
+		ModuleState physicsState = layout.module(VisualMods.ItemPhysics.ID);
+		if (physics != null && (physics.has("itemScale") || physics.has("uhcOverlay")) && !has(viewSettings, VisualMods.ViewModel.DROPPED_SCALE)
+			&& physicsState != null && physicsState.enabled()) {
+			Float all = number(physics, "itemScale");
+			if (all != null && all != 1) {
+				view.set(VisualMods.ViewModel.DROPPED_SCALE, all);
+				dropped = true;
+			}
+			Float custom = number(physics, "uhcOverlay");
+			List<String> listed = VisualMods.ViewModel.DROPPED_ITEMS.parse(physics.get("uhcItemList"));
+			if (!physics.has("uhcItemList")) {
+				// Never written: Dropped Item Tweaks' own list, as Item Physics started with it.
+				listed = List.of("minecraft:apple", "minecraft:enchanted_golden_apple", "minecraft:gold_block", "minecraft:gold_ingot",
+					"minecraft:gold_nugget", "minecraft:golden_apple", "minecraft:player_head");
+			}
+			if (custom != null && custom != 0 && !listed.isEmpty()) {
+				view.set(VisualMods.ViewModel.DROPPED_SELECTED_SCALE, custom);
+				view.set(VisualMods.ViewModel.DROPPED_ITEMS, listed);
+				dropped = true;
+			}
+		}
+		if (!swing && !dropped) {
+			return;
+		}
+		if (!view.enabled()) {
+			view.setEnabled(true);
+			view.set(VisualMods.ViewModel.FIRST_PERSON, false);
+			view.set(VisualMods.ViewModel.ANIMATIONS, swing);
+			view.set(VisualMods.ViewModel.DROPPED, dropped);
+		} else {
+			view.set(VisualMods.ViewModel.ANIMATIONS, view.bool(VisualMods.ViewModel.ANIMATIONS) || swing);
+			view.set(VisualMods.ViewModel.DROPPED, view.bool(VisualMods.ViewModel.DROPPED) || dropped);
+		}
+		if (swing) {
+			view.set(VisualMods.ViewModel.SWING_SPEED, true);
+		}
+	}
+
+	private static @Nullable JsonObject settingsOf(JsonObject modules, String id) {
+		JsonElement module = modules.get(id);
+		if (module == null || !module.isJsonObject()) {
+			return null;
+		}
+		JsonElement settings = module.getAsJsonObject().get("settings");
+		return settings != null && settings.isJsonObject() ? settings.getAsJsonObject() : null;
+	}
+
+	private static @Nullable Float number(@Nullable JsonObject settings, String key) {
+		if (settings == null) {
+			return null;
+		}
+		JsonElement value = settings.get(key);
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber() && Double.isFinite(value.getAsDouble())
+			? (float) value.getAsDouble() : null;
 	}
 
 	/** Whether the file has a usable value for {@code setting} (not one this version reads as the default for being unusable). */

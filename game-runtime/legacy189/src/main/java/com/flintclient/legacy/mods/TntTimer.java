@@ -36,7 +36,8 @@ public final class TntTimer extends Module {
 		if (!enabled() || dispatcher.camera == null || tnt.squaredDistanceTo(dispatcher.camera) > 48 * 48) {
 			return;
 		}
-		float seconds = Math.max(0, (tnt.fuseTimer - tickDelta) / 20.0F);
+		// 1.8.9 explodes a tick after the fuse runs out (GameTime.legacyFuseSeconds).
+		float seconds = (float) com.flintclient.client.control.feature.GameTime.legacyFuseSeconds(tnt.fuseTimer, tickDelta);
 		String text = String.format(Locale.ROOT, "%." + Math.max(0, Math.min(2, decimals.value())) + "f", seconds);
 		int color;
 		if (staticColor.on()) {

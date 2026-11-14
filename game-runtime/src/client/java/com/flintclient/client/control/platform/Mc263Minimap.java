@@ -163,7 +163,8 @@ public final class Mc263Minimap {
 		if (s.bool(Minimap.WAYPOINTS)) {
 			waypoints(c, s, unit, round, x, y, size);
 		}
-		if (s.bool(Minimap.RADAR)) {
+		// No entity radar on a server (fair play): it would show players and mobs behind walls.
+		if (s.bool(Minimap.RADAR) && !com.flintclient.client.control.feature.ServerRules.fairPlay()) {
 			radar(c, s, level, player, py, partial, unit, round, x, y, size);
 		}
 		arrow(g, s, player, unit, yaw, rotate, cx, cy);
@@ -570,7 +571,7 @@ public final class Mc263Minimap {
 		int flags = (s.bool(Minimap.COORDINATES) ? 1 : 0) | (s.bool(Minimap.BIOME) ? 2 : 0) | (s.bool(Minimap.FACING) ? 4 : 0)
 			| (s.bool(Minimap.OTHER_DIMENSION) ? 8 : 0) | (s.bool(Minimap.TIME) ? 16 : 0);
 		// A height chosen for the map (Xaero's manual cave mode status): always said, so the map is never mistaken for the surface.
-		int layer = s.integer(Minimap.LAYER);
+		int layer = com.flintclient.client.control.feature.ServerRules.fairPlay() ? Minimap.LAYER_AUTO : s.integer(Minimap.LAYER);
 		int bx = Mth.floor(player.getX());
 		int by = Mth.floor(player.getY());
 		int bz = Mth.floor(player.getZ());
@@ -605,10 +606,11 @@ public final class Mc263Minimap {
 		}
 		if ((flags & 16) != 0) {
 			long ticks = Mc263GameData.dayTicks();
-			long ofDay = Math.floorMod(ticks + 6000, 24000L);
-			int hours = (int) (ofDay / 1000);
-			int minutes = (int) (ofDay % 1000 * 60 / 1000);
-			out.add("Day " + (ticks / 24000L + 1) + " · " + String.format(Locale.ROOT, "%02d:%02d", hours, minutes));
+			int clock = com.flintclient.client.control.feature.GameTime.clockMinutes(ticks);
+			int hours = clock / 60;
+			int minutes = clock % 60;
+			// The day as Minecraft counts it ("/time query day", Day Counter): the first day is day 0.
+			out.add("Day " + com.flintclient.client.control.feature.GameTime.day(ticks) + " · " + String.format(Locale.ROOT, "%02d:%02d", hours, minutes));
 		}
 		if (layer != Minimap.LAYER_AUTO && mc.level != null) {
 			out.add("Layer Y " + Mc263Maps.clampY(mc.level, layer));

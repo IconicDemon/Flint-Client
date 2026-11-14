@@ -6,6 +6,7 @@
 // usage: node qa/tools/mock-store.mjs [--port 8787] [--cape FILE.png] [--only UUID] [--revoke-after SECONDS] [--bad-hash]
 //        [--handoff GAME_DIR] [--equip-after SECONDS] [--animated standard|hd|long|region|region-fast] [--bad-strip]
 //        [--region-cape SCALE] [--asset FILE.json] [--switch SECONDS] [--switch-after SECONDS] [--slow-ms MS]
+//        [--preview SCALE] [--cdn] [--cdn-fail] [--asset-cache DIR]
 //
 // - Listens on 127.0.0.1 only. Point the game at it with -Dflint.store.baseUrl=http://127.0.0.1:8787 (for QA tours:
 //   FLINTQA_JVM="-Dflint.store.baseUrl=http://127.0.0.1:8787" node qa/run_qa_windows.mjs ...). A Store on loopback may be
@@ -35,6 +36,16 @@
 //   after an equip: cape switching A → B → A … in a running game (--switch-after: the first switch that many seconds after
 //   the first lookup instead). --slow-ms: the second cape's texture answers that much later
 //   (a slow download), so a game that shows nothing while it loads would show it.
+// - --preview SCALE (with --animated): the Store's card preview (animation.preview, Store src/lib/cape-animation.ts CapePreview):
+//   the same frames at SCALE (4, 8 or 16, below the animation's), its own strips; other players' capes play it in game.
+// - --cdn: every file also has a cdn_url (Flint's CDN in production, assets.flintclient.com), here this server's /cdn/ copy of
+//   it; --cdn-fail answers 404 there, so the game falls back to the url.
+// - --asset-cache DIR (with --handoff): the handoff names DIR as the launcher's shared cache of verified files (assetCacheDir).
+// - --models DIR: 3D cosmetics too (the cosmetics contract, website's answer: asset.model). Every subfolder of DIR with an
+//   item.json (the dev items' format, see game-runtime cosmetics/DevCosmetics) is worn by every player asked about (--models-for
+//   UUID,UUID… for only those), in its kind's slot (wings: back, headwear: head, bodywear: body, aura, pet, shield, gloves:
+//   hands); its files are served here with their sha256 and byte counts. --bad-model-hash: the geometry's hash is wrong (the
+//   game must refuse those items and draw the rest). --models-no-cape: no cape with them.
 // Logs one line per request.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -52,6 +63,12 @@ const only = option("--only", null)?.toLowerCase();
 const revokeAfter = Number(option("--revoke-after", "0"));
 const badHash = args.includes("--bad-hash");
 const handoffDir = option("--handoff", null);
+const assetCache = option("--asset-cache", null);
+const previewScale = Number(option("--preview", "0"));
+const cdn = args.includes("--cdn");
+const cdnFail = args.includes("--cdn-fail");
+/** A file's descriptor with its cdn_url beside its url (--cdn): this server's /cdn/ copy. */
+const withCdn = (d) => (cdn ? { ...d, cdn_url: d.url.replace(`127.0.0.1:${port}/`, `127.0.0.1:${port}/cdn/`) } : d);
 const equipAfter = Number(option("--equip-after", "0"));
 let equipped = equipAfter <= 0;
 
@@ -60,7 +77,7 @@ function writeHandoff(equipRevision) {
 	if (!handoffDir) return;
 	const base = `http://127.0.0.1:${port}`;
 	const json = JSON.stringify({ schema: 1, contractVersion: 1, storeBaseUrl: base, publicCosmeticsUrl: `${base}/api/v1/players/cosmetics/`,
-		equipRevision }, null, 2);
+		equipRevision, ...(assetCache ? { assetCacheDir: path.resolve(assetCache) } : {}) }, null, 2);
 	const file = path.join(handoffDir, ".flint-store.json");
 	fs.writeFileSync(file + ".tmp", json);
 	fs.renameSync(file + ".tmp", file);
@@ -175,7 +192,20 @@ if (animatedName) {
 		for (let k = 0; k < count; k++) px.set((spec.frame ?? syntheticFrame)(first + k, n, scale), k * w * h * 4);
 		const strip = encodePng(w, h * count, px), hash = crypto.createHash("sha256").update(strip).digest("hex");
 		files.set(`/test-capes/animated/${hash}.png`, badStrip && first > 0 ? Buffer.concat([strip.subarray(0, strip.length - 1), Buffer.from([0])]) : strip);
-		strips.push({ path: `animated/${hash}.png`, sha256: hash, bytes: strip.length, frames: count, url: `http://127.0.0.1:${port}/test-capes/animated/${hash}.png` });
+		strips.push(withCdn({ path: `animated/${hash}.png`, sha256: hash, bytes: strip.length, frames: count, url: `http://127.0.0.1:${port}/test-capes/animated/${hash}.png` }));
+	}
+	let preview;
+	if (previewScale) {
+		const pw = 22 * previewScale, ph = 17 * previewScale, pper = framesPerStrip(ph), pstrips = [];
+		for (let first = 0; first < n; first += pper) {
+			const count = Math.min(pper, n - first), px = new Uint8Array(pw * ph * count * 4);
+			for (let k = 0; k < count; k++) px.set((spec.frame ?? syntheticFrame)(first + k, n, previewScale), k * pw * ph * 4);
+			const strip = encodePng(pw, ph * count, px), hash = crypto.createHash("sha256").update(strip).digest("hex");
+			files.set(`/test-capes/animated/${hash}.png`, strip);
+			pstrips.push(withCdn({ path: `animated/${hash}.png`, sha256: hash, bytes: strip.length, frames: count, url: `http://127.0.0.1:${port}/test-capes/animated/${hash}.png` }));
+		}
+		preview = { scale: previewScale, width: pw, height: ph, frames_per_strip: pper, strips: pstrips };
+		console.log(`preview at ${previewScale}: ${pstrips.map((s) => s.sha256.slice(0, 12) + " " + s.bytes + " B").join(", ")}; full: ${strips.map((s) => s.sha256.slice(0, 12) + " " + s.bytes + " B").join(", ")}`);
 	}
 	const s = Math.min(scale, 16), step = scale / s, pw = 64 * s, ph = 32 * s, frame0 = (spec.frame ?? syntheticFrame)(0, n, scale), poster = new Uint8Array(pw * ph * 4);
 	for (let y = 0; y < 17 * s; y++) for (let x = 0; x < 22 * s; x++) {
@@ -185,7 +215,7 @@ if (animatedName) {
 	animatedPoster = encodePng(pw, ph, poster);
 	animation = { v: 1, layout: "cape-atlas-22x17", width: w, height: h, scale, frame_count: n, durations_ms: durations,
 		duration_ms: durations.reduce((a, d) => a + d, 0), frames_per_strip: per, strips,
-		source: { format: "webp", sha256: crypto.createHash("sha256").update(animatedName).digest("hex"), bytes: 4096 } };
+			source: { format: "webp", sha256: crypto.createHash("sha256").update(animatedName).digest("hex"), bytes: 4096 }, ...(preview ? { preview } : {}) };
 }
 
 const capeFile = option("--cape", null);
@@ -207,6 +237,41 @@ const switchAfter = Number(option("--switch-after", "0"));
 const pngB = testCape([40, 200, 60, 255], [240, 240, 240, 255]);
 const sha256B = crypto.createHash("sha256").update(pngB).digest("hex");
 let wornB = false;
+
+/* ---------- 3D cosmetics (--models) ---------- */
+const SLOTS = { wings: "back", headwear: "head", bodywear: "body", aura: "aura", pet: "pet", shield: "shield", gloves: "hands" };
+const modelsDir = option("--models", null);
+const modelsFor = option("--models-for", null)?.toLowerCase().split(",");
+const badModelHash = args.includes("--bad-model-hash");
+const models = {};
+if (modelsDir) {
+	for (const name of fs.readdirSync(modelsDir).sort()) {
+		const dir = path.join(modelsDir, name);
+		const itemFile = path.join(dir, "item.json");
+		if (!fs.existsSync(itemFile)) continue;
+		const item = JSON.parse(fs.readFileSync(itemFile, "utf8"));
+		const slot = SLOTS[item.kind];
+		if (!slot || models[slot]) continue;
+		const ref = (suffix) => {
+			const f = fs.readdirSync(dir).find((n) => n.endsWith(suffix));
+			if (!f) return null;
+			const bytes = fs.readFileSync(path.join(dir, f));
+			const at = "/test-models/" + encodeURIComponent(name) + "/" + encodeURIComponent(f);
+			files.set(at, bytes);
+			return { path: at.slice(1), sha256: crypto.createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length, url: "http://127.0.0.1:" + port + at };
+		};
+		const geometry = ref(".geo.json");
+		if (geometry && badModelHash) geometry.sha256 = "0".repeat(64);
+		const texture = ref(".png");
+		if (texture) { const b = files.get("/" + texture.path); texture.width = b.readUInt32BE(16); texture.height = b.readUInt32BE(20); }
+		const hex = crypto.createHash("md5").update(name).digest("hex");
+		models[slot] = { cosmetic_id: hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-4" + hex.slice(13, 16) + "-8" + hex.slice(17, 20) + "-" + hex.slice(20, 32),
+			kind: item.kind, asset: { model: { geometry, texture, animation: ref(".animation.json"), thumbnail: null,
+				texture_frames: item.texture_frames ?? null, frame_ms: item.frame_ms ?? null,
+				attach: { anchor: item.attach?.anchor ?? null, side: item.attach?.side ?? null }, hides_cape: !!item.hides_cape } } };
+	}
+	console.log("3D cosmetics: " + Object.entries(models).map(([slot, m]) => slot + "=" + m.kind).join(", "));
+}
 
 http.createServer((req, res) => {
 	const url = new URL(req.url, `http://127.0.0.1:${port}`);
@@ -244,14 +309,28 @@ http.createServer((req, res) => {
 			if (wornB) { players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555557", kind: "cape", asset: {
 				id: "6f9619ff-8b86-4d01-b42d-00cf4fc96500", version: 1, path: "/test-capes/qa-cape-b.png", sha256: sha256B, width: 64, height: 32,
 				url: `http://127.0.0.1:${port}/test-capes/qa-cape-b.png` } } }; continue; }
-			players[id] = { cape: { cosmetic_id: "11111111-2222-4333-8444-555555555555", kind: "cape", asset: {
+			if (modelsDir && (!modelsFor || modelsFor.includes(id))) {
+				players[id] = { ...models };
+				if (args.includes("--models-no-cape")) continue;
+			}
+			players[id] = { ...(players[id] ?? {}), cape: { cosmetic_id: "11111111-2222-4333-8444-555555555555", kind: "cape", asset: withCdn({
 				id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff", version: 1, path: "/test-capes/qa-cape.png", sha256, width, height,
-				url: `http://127.0.0.1:${port}/test-capes/qa-cape.png`, animation } } };
+				url: `http://127.0.0.1:${port}/test-capes/qa-cape.png`, animation }) } };
 		}
 		console.log(`${new Date().toISOString()} lookup #${requests}: ${uuids.length} asked, ${Object.keys(players).length} wearing${revoked ? " (revoked)" : ""}`);
 		return send(200, JSON.stringify({ players }), { "Content-Type": "application/json", "Cache-Control": "public, max-age=60" });
 	}
-	if (req.method === "GET" && url.pathname === "/test-capes/qa-cape.png") {
+		if (req.method === "GET" && url.pathname.startsWith("/cdn/")) {
+			const real = url.pathname.slice(4);
+			const body = real === "/test-capes/qa-cape.png" ? png : files.get(real);
+			if (cdnFail || !body) {
+				console.log(`${new Date().toISOString()} cdn 404 ${real.slice(-20)}`);
+				return send(404, "", {});
+			}
+			console.log(`${new Date().toISOString()} cdn ${real.slice(-20)} (${body.length} bytes)`);
+			return send(200, body, { "Content-Type": "image/png" });
+		}
+		if (req.method === "GET" && url.pathname === "/test-capes/qa-cape.png") {
 		console.log(`${new Date().toISOString()} texture ${width}x${height} (${png.length} bytes)`);
 		return send(200, png, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
 	}
@@ -261,7 +340,7 @@ http.createServer((req, res) => {
 	}
 	if (req.method === "GET" && files.has(url.pathname)) {
 		const strip = files.get(url.pathname);
-		console.log(`${new Date().toISOString()} strip ${url.pathname.slice(-20)} (${strip.length} bytes)`);
+		console.log(`${new Date().toISOString()} ${url.pathname.startsWith("/test-models/") ? "model file" : "strip"} ${url.pathname.slice(-40)} (${strip.length} bytes)`);
 		return send(200, strip, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
 	}
 	console.log(`${new Date().toISOString()} 404 ${req.method} ${url.pathname}`);

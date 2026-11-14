@@ -20,6 +20,10 @@ public final class Layout {
 	private final ModuleState[] modules;
 	private final List<ModuleState> moduleList;
 	private int revision;
+	/** {@link #revision()} as last added up, at {@link ModuleState#changes()} {@link #summedAt} and own revision {@link #summedOwn}. */
+	private long summed;
+	private int summedAt = Integer.MIN_VALUE;
+	private int summedOwn;
 
 	/** A layout with the default style and every module off at its default position. */
 	public Layout(String id, String name) {
@@ -124,10 +128,18 @@ public final class Layout {
 	 * with the revision it last saved.
 	 */
 	public long revision() {
+		// Read before the modules: a change made meanwhile is seen at the next call (the count it bumps is newer).
+		int changes = ModuleState.changes();
+		if (changes == summedAt && revision == summedOwn && summedAt != Integer.MIN_VALUE) {
+			return summed;
+		}
 		long total = revision;
 		for (ModuleState module : modules) {
 			total += module.revision();
 		}
+		summed = total;
+		summedAt = changes;
+		summedOwn = revision;
 		return total;
 	}
 

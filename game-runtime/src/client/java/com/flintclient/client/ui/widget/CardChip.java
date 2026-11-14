@@ -100,8 +100,8 @@ public final class CardChip extends FlintButton {
 			float lift = Math.max(hover, focus);
 			int radius = kind == Kind.ICON ? Math.min(w, h) / 2 : c.px(RADIUS);
 			int fill = switch (kind) {
-				case ICON -> Palette.withAlpha(active ? 0x33E07D70 : 0x14FFFFFF, lift);
-				case NEUTRAL -> Palette.lerp(0x14FFFFFF, 0x24FFFFFF, lift);
+				case ICON -> Palette.withAlpha(active ? 0x33E07D70 : Palette.tint(0x14FFFFFF), lift);
+				case NEUTRAL -> Palette.lerp(Palette.tint(0x14FFFFFF), Palette.tint(0x24FFFFFF), lift);
 				case DANGER -> Palette.lerp(0xFF8E2F26, 0xFFA8382D, lift);
 			};
 			if ((fill >>> 24) != 0) {

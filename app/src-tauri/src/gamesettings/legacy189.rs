@@ -584,7 +584,9 @@ mod tests {
             let catalogue = registry::catalogue(Some(family));
             for key in keys() {
                 let setting = setting(&catalogue, &key).unwrap_or_else(|| panic!("{key} isn't in the registry"));
-                assert!(setting.available_in(family).is_ok(), "{key} in {}", family.id);
+                // Or defined differently there, and left out of that version's sync (1.19.x's GUI scale, smooth
+                // lighting and clouds; see the registry).
+                assert!(setting.available_in(family).is_ok() || family.changed_definitions.contains(&key.as_str()), "{key} in {}", family.id);
             }
         }
         for mapping in MAPPINGS {

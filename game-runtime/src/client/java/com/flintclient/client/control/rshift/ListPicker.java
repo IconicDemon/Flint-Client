@@ -32,11 +32,16 @@ import org.jspecify.annotations.Nullable;
 final class ListPicker extends Node {
 	/**
 	 * One entry: its id (what is stored), what it's called, a quieter second line (the id, a category) and whether it is an
-	 * item, drawn beside its name ({@code picture}: asked for as the row is drawn, since the game can't make one everywhere).
+	 * item, drawn beside its name ({@code picture}: asked for as the row is drawn, since the game can't make one everywhere);
+	 * {@code art}, when given, is the item drawn in place of the entry's own id (a category's typical item).
 	 */
-	record Item(String id, String label, String detail, boolean picture) {
+	record Item(String id, String label, String detail, boolean picture, @Nullable String art) {
 		Item(String id, String label, String detail) {
-			this(id, label, detail, false);
+			this(id, label, detail, false, null);
+		}
+
+		Item(String id, String label, String detail, boolean picture) {
+			this(id, label, detail, picture, null);
 		}
 
 		String haystack() {
@@ -432,15 +437,8 @@ final class ListPicker extends Node {
 	@Override
 	protected void paint(Canvas c) {
 		float pw = r(PANEL_W);
-		int x0 = c.px(px);
-		int y0 = c.px(py);
-		int w0 = c.px(px + pw) - x0;
-		int h0 = c.px(py + ph) - y0;
-		for (int i = 3; i >= 1; i--) {
-			int spread = c.px(r(8 * i));
-			c.roundRect(x0 - spread, y0 - spread + c.px(r(10)), w0 + 2 * spread, h0 + 2 * spread, c.px(r(22)) + spread,
-				Palette.withAlpha(0xFF000000, 0.10F));
-		}
+		// The page behind dims evenly (no banded glow round the panel).
+		c.fill(c.px(x), c.px(y), c.px(x + w), c.px(y + h), Palette.withAlpha(0xFF000000, 0.45F));
 		MenuStyle.block(c, px, py, pw, ph, MenuStyle.radius(), 0, 0);
 		MenuStyle.text(c, title, px + r(PAD), py + r(PAD) + r(20), MenuStyle.ROW_TEXT);
 		MenuStyle.fitted(c, count, px + r(PAD), done.y() + done.height() / 2, MenuStyle.LABEL, done.x() - px - r(PAD) * 2);
@@ -473,7 +471,7 @@ final class ListPicker extends Node {
 			// place is kept even while the game can't draw items yet (the title screen on 26.x), so the names never shift.
 			if (item.picture()) {
 				int size = Math.max(16, Math.round(c.px(r(ICON)) / 16F) * 16);
-				Object stack = Ids.stack(item.id());
+				Object stack = Ids.stack(item.art() != null ? item.art() : item.id());
 				if (stack != null) {
 					ItemPainter.item(c.frame(), stack, c.px(textX), c.px(cy) - size / 2, size, null, false);
 				}
@@ -496,7 +494,7 @@ final class ListPicker extends Node {
 				float bx = right - button;
 				MenuStyle.box(c, bx, cy - button / 2, button, button, r(10), on ? MenuStyle.ACCENT : MenuStyle.CHIP);
 				if (on) {
-					Glyph.CHECK.draw(c, bx + button / 2, cy, r(26), 0xFFFFFFFF);
+					Glyph.CHECK.draw(c, bx + button / 2, cy, r(26), MenuStyle.ON_ACCENT);
 				}
 			} else if (adding) {
 				// Not in the list yet: an Add button in ember outline.
@@ -504,7 +502,7 @@ final class ListPicker extends Node {
 				boolean hot = slot == hover;
 				MenuStyle.box(c, bx, cy - button / 2, r(ADD_W), button, r(10), hot ? MenuStyle.ACCENT : MenuStyle.CHIP);
 				MenuStyle.ring(c, bx, cy - button / 2, r(ADD_W), button, r(10), MenuStyle.edge(), Palette.withAlpha(MenuStyle.ACCENT, hot ? 0 : 0.6F));
-				int ink = hot ? 0xFFFFFFFF : MenuStyle.ACCENT;
+				int ink = hot ? MenuStyle.ON_ACCENT : MenuStyle.ACCENT;
 				Glyph.PLUS.draw(c, bx + r(30), cy, r(18), ink);
 				values[slot].set("Add");
 				MenuStyle.centered(c, values[slot], bx + r(ADD_W) / 2 + r(12), cy, ink, r(ADD_W) - r(50));

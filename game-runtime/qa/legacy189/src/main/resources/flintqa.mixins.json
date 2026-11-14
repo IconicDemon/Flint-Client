@@ -6,9 +6,11 @@
   "client": [
     "GameRendererMixin",
     "MinecraftMixin",
+    "UpdateDisplayMixin",
     "PlayerInfoMixin",
     "ScreenAccessor",
-    "ClientPlayNetworkHandlerAccessor"
+    "ClientPlayNetworkHandlerAccessor",
+    "EntityPortalAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -204,7 +204,7 @@
   height: 58px;
   padding: 0 30px;
   border-radius: var(--r-lg);
-  background: linear-gradient(to bottom, var(--accent-hover), var(--accent) 70%);
+  background: var(--play-fill, linear-gradient(to bottom, var(--accent-hover), var(--accent) 70%));
   color: var(--accent-ink);
   font-family: var(--font-display);
   font-size: 18px;
@@ -566,18 +566,68 @@
   transition: none;
 }
 
+/* Signed out: one calm glass card over the wallpaper, a title, one line, the Microsoft button and a note on privacy. */
 .home-signin {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  max-width: 340px;
-  padding: 22px 26px;
+  width: min(360px, calc(100% - 32px));
+  padding: 28px 30px 22px;
   border-radius: var(--r-xl);
-  background: rgba(var(--bg-rgb), 0.78);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(var(--bg-rgb), 0.74);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--ink-rgb), 0.1),
+    0 24px 60px -28px rgba(0, 0, 0, 0.7);
   color: var(--text-2);
   text-align: center;
+  animation: rise-in 360ms 80ms var(--ease) both;
+}
+
+[data-effects="full"] .home-signin {
+  background: rgba(var(--bg-rgb), 0.6);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.home-signin-avatar {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--text-2);
+}
+
+.home-signin-title {
+  margin: 0 0 6px;
+  color: var(--fg);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.home-signin p {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.home-signin-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.home-signin-note {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+[data-motion="reduced"] .home-signin {
+  animation: none;
 }
 
 /* ---------- Side column: news, then one line for friends ---------- */
@@ -874,6 +924,218 @@
 
 .side-link-ext {
   color: var(--text-3);
+}
+
+/* ---------- Sponsored: Flint Admin's launcher slides (ShowcaseCard.tsx), 3:1 ---------- */
+.side-showcase {
+  padding: 10px 10px 6px;
+  border-radius: var(--r-lg);
+  background: rgba(var(--bg-rgb), 0.62);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  animation: launch-in var(--t-page) var(--ease-out) both;
+}
+
+[data-effects="full"] .side-showcase {
+  background: rgba(var(--bg-rgb), 0.5);
+  backdrop-filter: blur(18px) saturate(1.1);
+}
+
+.side-showcase > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 4px 8px;
+}
+
+.side-showcase h2 {
+  flex: none;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.showcase-host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.showcase-frame {
+  position: relative;
+  aspect-ratio: 3 / 1;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.05);
+  transition: transform var(--t-micro) var(--ease);
+}
+
+/* The frame's edge, drawn over the pictures. */
+.showcase-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  pointer-events: none;
+}
+
+.showcase-frame:has(.showcase-slide.is-link:active) {
+  transform: scale(0.99);
+  transition-duration: var(--t-press);
+}
+
+.showcase-frame:has(.showcase-slide:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+
+.showcase-slide {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 480ms var(--ease);
+}
+
+.showcase-slide.is-current {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.showcase-slide.is-link {
+  cursor: pointer;
+}
+
+.showcase-slide.is-link:focus-visible {
+  outline: none;
+}
+
+.showcase-slide img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  transition: filter var(--t-micro) var(--ease);
+}
+
+.showcase-slide.is-link:hover img {
+  filter: brightness(1.06);
+}
+
+.showcase-go {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.showcase-slide.is-link:hover .showcase-go,
+.showcase-slide.is-link:focus-visible .showcase-go {
+  opacity: 1;
+}
+
+/* One thin line per slide: the ones shown already, the current one filling up, the rest still to come. */
+.showcase-progress {
+  display: flex;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.showcase-step {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  padding: 0;
+  border-radius: var(--r-pill);
+}
+
+.showcase-step::before,
+.showcase-fill {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 2px;
+}
+
+.showcase-step::before {
+  background: rgba(var(--ink-rgb), 0.14);
+  transition: background-color var(--t-micro) var(--ease);
+}
+
+.showcase-step:hover::before {
+  background: rgba(var(--ink-rgb), 0.28);
+}
+
+.showcase-step:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.showcase-fill {
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.showcase-step.is-done .showcase-fill {
+  transform: scaleX(1);
+  background: rgba(var(--ink-rgb), 0.4);
+}
+
+.showcase-step.is-current .showcase-fill {
+  background: var(--accent);
+  animation: showcase-fill 6s linear forwards;
+}
+
+.side-showcase.is-paused .showcase-step.is-current .showcase-fill {
+  animation-play-state: paused;
+}
+
+@keyframes showcase-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Reduced motion: slides change without a fade, and the current line is simply full. */
+[data-motion="reduced"] .side-showcase,
+[data-motion="reduced"] .showcase-slide,
+[data-motion="reduced"] .showcase-slide img,
+[data-motion="reduced"] .showcase-frame {
+  animation: none;
+  transition: none;
+}
+
+[data-motion="reduced"] .showcase-step.is-current .showcase-fill {
+  animation: none;
+  transform: scaleX(1);
 }
 
 /* ---------- Responsive ---------- */

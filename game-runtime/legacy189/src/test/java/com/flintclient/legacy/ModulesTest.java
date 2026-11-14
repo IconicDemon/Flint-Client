@@ -45,8 +45,9 @@ class ModulesTest {
 		expected.add(com.flintclient.client.control.model.mods.MoreMods.UhcOverlay.ID);
 		expected.add(com.flintclient.client.control.model.mods.HudMods.TntCountdown.ID);
 		expected.add(com.flintclient.client.control.model.mods.MoreMods.Subtitles.ID);
+		expected.add(com.flintclient.client.control.model.mods.VisualMods.ViewModel.ID);
 		assertEquals(expected, ids);
-		assertEquals(28, modules.all().size());
+		assertEquals(29, modules.all().size());
 		assertEquals(modules.byId("fps"), modules.byId("fps"));
 		assertEquals("animations", modules.byId("hitcolor").id, "an old 1.8.9 id still finds its mod");
 	}
@@ -113,7 +114,7 @@ class ModulesTest {
 				}
 			}
 		}
-		assertTrue(rows.containsAll(Arrays.asList(GameOptions.MENU_KEY, GameOptions.MENU_SCALE, GameOptions.CLOCK_24H, GameOptions.MOD_KEYS)),
+		assertTrue(rows.containsAll(Arrays.asList(GameOptions.MENU_KEY, GameOptions.MENU_SIZE, GameOptions.CLOCK_24H, GameOptions.MOD_KEYS)),
 			rows.toString());
 		// Each is kept in control-center.json, but the menu's key: Minecraft's binding, as on every line.
 		for (Setting<?> s : modules.general.settings()) {

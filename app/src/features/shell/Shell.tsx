@@ -8,7 +8,7 @@ import { sidebarProfiles } from "../../lib/profileOrder";
 import { useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { jobActive, useStoreSelect } from "../../lib/store";
-import { IconButton, Progress, Spinner } from "../../ui/controls";
+import { Button, IconButton, Progress, Spinner } from "../../ui/controls";
 import { Icon, type IconName } from "../../ui/Icon";
 import { FlintMark } from "../../ui/Logo";
 import { PerfArea } from "../../lib/perf";
@@ -335,13 +335,14 @@ function jobProgress(job: Job): number | null {
 
 function JobsTray({ navigate }: { navigate: Navigate }) {
   const t = useT();
-  const store = useStoreSelect((s) => ({ jobs: s.jobs, dismissJob: s.dismissJob }));
+  const store = useStoreSelect((s) => ({ jobs: s.jobs, dismissJob: s.dismissJob, clearFinishedJobs: s.clearFinishedJobs }));
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const seen = useRef(new Map<string, string>());
   const visible = store.jobs.filter((j) => j.kind !== "install" || j.title !== "Mods for your new profile");
   const active = visible.filter(jobActive);
+  const finished = visible.length - active.length;
 
   useEffect(() => {
     for (const job of visible) {
@@ -407,8 +408,16 @@ function JobsTray({ navigate }: { navigate: Navigate }) {
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label={t("shell.jobs.title")} className="jobs-pop">
         <header className="jobs-head">
-          <strong>{t("shell.jobs.title")}</strong>
-          <span className="faint">{t("shell.jobs.verified")}</span>
+          <span className="jobs-head-text">
+            <strong>{t("shell.jobs.title")}</strong>
+            <span className="faint">{t("shell.jobs.verified")}</span>
+          </span>
+          {/* The history only: installed files stay where they are. What is still working stays listed. */}
+          {finished > 0 && (
+            <Button size="sm" variant="ghost" className="jobs-clear" title={t("shell.jobs.clearAllHint")} onClick={store.clearFinishedJobs}>
+              {t("shell.jobs.clearAll")}
+            </Button>
+          )}
         </header>
         <ul className="jobs-list">
           {visible

@@ -6,8 +6,29 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "bridge.MinecraftFriendsAccessor",
+    "control.FriendsKeyMixin",
     "feature.NameTagShadowMixin",
-    "feature.HudFoodMixin"
+    "feature.HudFoodMixin",
+    "feature.OwnSkinMixin",
+    "cosmetics.AvatarRenderStateCosmeticsMixin",
+    "cosmetics.AvatarRendererCosmeticsMixin",
+    "cosmetics.PlayerModelEmoteMixin",
+    "cosmetics.CapeLayerCosmeticsMixin",
+    "cosmetics.ShieldSpecialRendererCosmeticsMixin",
+    "cosmetics.ItemInHandLayerCosmeticsMixin",
+    "cosmetics.FirstPersonShieldCosmeticsMixin",
+    "cosmetics.OptionsEmoteKeyMixin",
+    "cosmetics.MinecraftCosmeticsMixin",
+    "cosmetics.DebugScreenCosmeticsMixin",
+    "cosmetics.InventoryScreenCosmeticsMixin",
+    "cosmetics.GuiEntityCosmeticsMixin",
+    "fx.PanelBlurMixin",
+    "swap.SwapFrameMixin",
+    "swap.SwapOptionsMixin",
+    "swap.SwapSoundMixin",
+    "swap.SwapWindowAccess",
+    "swap.SwapWindowMixin",
+    "swap.SwapShowMixin"
   ],
   "injectors": {
     "defaultRequire": 0

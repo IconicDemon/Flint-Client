@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
  * default, and a number out of range is clamped, so one bad field never costs the rest of a file.
  */
 public abstract sealed class SettingDescriptor<T> permits BoolSetting, IntSetting, FloatSetting, ChoiceSetting, RgbSetting, OptionSetting, KeySetting,
-	TextSetting, IdSetting, IdValuesSetting, IdListSetting {
+	TextSetting, IdSetting, IdValuesSetting, IdListSetting, HeldItemsSetting {
 	private final String id;
 	/** The first module built with this setting and its position there: a lookup every frame then needs no search. */
 	@Nullable ModuleDescriptor owner;

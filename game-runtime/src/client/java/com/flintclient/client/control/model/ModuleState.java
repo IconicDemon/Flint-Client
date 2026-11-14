@@ -4,6 +4,7 @@ import com.flintclient.client.control.hud.HudPlacement;
 import com.google.gson.JsonElement;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -19,6 +20,11 @@ public final class ModuleState {
 	private HudPlacement placement;
 	private Appearance appearance = Appearance.INHERIT;
 	private int revision;
+	/**
+	 * Counts real changes to every module (from any thread), so a {@link Layout} adds up its modules' revisions again only after
+	 * one changed instead of every frame.
+	 */
+	private static final AtomicInteger CHANGES = new AtomicInteger();
 
 	/** Off, with every default. */
 	public ModuleState(ModuleDescriptor descriptor) {
@@ -49,6 +55,7 @@ public final class ModuleState {
 		}
 		enabled = value;
 		revision++;
+		CHANGES.incrementAndGet();
 		return true;
 	}
 
@@ -104,9 +111,12 @@ public final class ModuleState {
 		return values[index];
 	}
 
-	/** Sets a value, clamped to the setting's rules. Returns whether this changed anything. */
-	public <T> boolean set(SettingDescriptor<T> setting, T value) {
-		return store(index(setting), setting.clamp(Objects.requireNonNull(value)));
+	/**
+	 * Sets a value, clamped to the setting's rules; a value of the wrong type (or null, a slip in a caller) means the default,
+	 * so a change never throws. Returns whether this changed anything.
+	 */
+	public <T> boolean set(SettingDescriptor<T> setting, @Nullable T value) {
+		return store(index(setting), setting.coerce(value));
 	}
 
 	/** Sets the value read from a file (unusable values become the default). Returns whether this changed anything. */
@@ -124,6 +134,7 @@ public final class ModuleState {
 		}
 		placement = value;
 		revision++;
+		CHANGES.incrementAndGet();
 		return true;
 	}
 
@@ -138,6 +149,7 @@ public final class ModuleState {
 		}
 		appearance = value;
 		revision++;
+		CHANGES.incrementAndGet();
 		return true;
 	}
 
@@ -174,6 +186,11 @@ public final class ModuleState {
 		return revision;
 	}
 
+	/** Grows whenever any module changes (see {@link #CHANGES}). */
+	static int changes() {
+		return CHANGES.get();
+	}
+
 	/** Makes this identical to {@code other} (same module), counting it as one change when anything differs. */
 	public boolean copyFrom(ModuleState other) {
 		if (other.descriptor != descriptor) {
@@ -187,6 +204,7 @@ public final class ModuleState {
 		placement = other.placement;
 		appearance = other.appearance;
 		revision++;
+		CHANGES.incrementAndGet();
 		return true;
 	}
 
@@ -202,6 +220,7 @@ public final class ModuleState {
 		}
 		values[index] = value;
 		revision++;
+		CHANGES.incrementAndGet();
 		return true;
 	}
 

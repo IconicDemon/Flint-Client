@@ -8,7 +8,8 @@
  * A Store without these routes answers `off`, and then nothing here shows at all.
  */
 import type { MessageKey } from "./i18n.ts";
-import { canonicalUuid, type StoreAsset, type StoreInventory, type StoreItem, type StoreSlot } from "./storeSync.ts";
+import { slotOf } from "./cosmeticTypes.ts";
+import { canonicalUuid, type StoreAsset, type StoreInventory, type StoreItem } from "./storeSync.ts";
 
 /** `ok`: the Store answered. `off`: this Store doesn't have the feature (show nothing). `signedOut`: no Store session.
  * `unavailable`: the Store couldn't answer now (keep what was shown). */
@@ -124,7 +125,7 @@ export type Recheck = { state: "ok"; connections: ConnectionsView; rewards: Rewa
 export type CommunityReward = {
   cosmeticId: string;
   slug: string;
-  kind: StoreSlot;
+  kind: string;
   name: string;
   description?: string | null;
   /** `label`: the Store's own words for what earns it, shown as they are. */
@@ -204,7 +205,7 @@ export function joinRewards(catalog: CommunityCatalog | null, rewards: RewardsVi
         status,
         action,
         item,
-        worn: !!item && inventory?.equipped[reward.kind] === reward.cosmeticId,
+        worn: !!item && !!slotOf(reward) && inventory?.equipped[slotOf(reward)!] === reward.cosmeticId,
         conditional: !permanent && (reward.permanence !== "permanent" || (!!item && isConditional(item))),
       };
     });
@@ -260,6 +261,19 @@ export function cardAction(card: RewardCard): CardAction {
   if (kind === "join_discord") return { kind: "invite", url, label: "store.rewards.action.join" };
   if (kind === "complete_screening") return { kind: "invite", url, label: "store.rewards.action.screening" };
   if (kind === "boost_discord") return { kind: "invite", url, label: "store.rewards.action.boost" };
+  return null;
+}
+
+/** Flint's Discord server (src-tauri data.rs DISCORD_INVITE), for a Discord reward's button when the Store sends no invite. */
+export const FLINT_DISCORD_INVITE = "https://discord.gg/flintclient";
+
+/**
+ * A Flint Discord reward's own words (from the community catalog's `requirement.type`): how it unlocks, and its button to
+ * the server. Null for any other reward. Never "In the Store": these are earned, and the Store unlocks and locks them.
+ */
+export function discordUnlock(reward: Pick<CommunityReward, "requirement">): { how: MessageKey; button: MessageKey } | null {
+  if (reward.requirement.type === "discord_member") return { how: "wardrobe.unlock.joinHow", button: "wardrobe.unlock.join" };
+  if (reward.requirement.type === "discord_booster") return { how: "wardrobe.unlock.boostHow", button: "wardrobe.unlock.boost" };
   return null;
 }
 

@@ -1,25 +1,27 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api } from "./api";
+import { api, subscribe } from "./api";
 import { isLanguageSetting, type LanguageSetting } from "./i18n";
 import { sound } from "./sound";
 import { DOWNLOAD_LIMITS, limitSetting } from "./storage";
 
-export type ThemeId = "ember" | "obsidian" | "moss" | "bloodstone" | "dusk";
+export type ThemeId = "ember" | "icecream" | "moss" | "bloodstone" | "dusk" | "aurora";
 export type FontId = "default" | "minecraft";
 export type EffectsLevel = "full" | "balanced" | "minimal";
 export type GameStartBehavior = "minimize" | "keep" | "tray";
 
 export const THEMES: { id: ThemeId; name: string; note: string; swatch: [string, string, string] }[] = [
-  { id: "ember", name: "Ember", note: "Signature amber", swatch: ["#0c0b0a", "#2a2724", "#cd8b3e"] },
-  { id: "obsidian", name: "Obsidian", note: "Graphite, neutral", swatch: ["#080809", "#242427", "#a8abb6"] },
-  { id: "moss", name: "Moss", note: "Forest and sage", swatch: ["#0b0c0b", "#262b26", "#76986a"] },
-  { id: "bloodstone", name: "Bloodstone", note: "Deep crimson", swatch: ["#0d0a0a", "#2b2323", "#ac383e"] },
-  { id: "dusk", name: "Dusk", note: "Plum violet", swatch: ["#0b0a0e", "#292432", "#9276ba"] },
+  { id: "ember", name: "Orange", note: "Slate black, white and orange", swatch: ["#0c0b0a", "#2a2724", "#cd8b3e"] },
+  { id: "icecream", name: "Ice Cream", note: "Strawberry & vanilla", swatch: ["#fbf6ee", "#e6dacb", "#e07a93"] },
+  { id: "moss", name: "Mint", note: "Cool mint on charcoal", swatch: ["#0a0e0d", "#24322d", "#3eb489"] },
+  { id: "bloodstone", name: "Cherry", note: "Deep crimson", swatch: ["#0d0a0a", "#2b2323", "#ac383e"] },
+  { id: "dusk", name: "Passion Fruit", note: "Plum violet", swatch: ["#0b0a0e", "#292432", "#9276ba"] },
+  { id: "aurora", name: "Blueberry", note: "Blueberry on deep indigo", swatch: ["#0b0d1c", "#283052", "#6b7fe3"] },
 ];
 
-/** Older saved themes map to the closest current one. Frost (cool blue) becomes Obsidian, the
- *  neutral theme, rather than a different colour the player never chose. */
-const THEME_ALIASES: Record<string, ThemeId> = { mono: "obsidian", slate: "obsidian", frost: "obsidian" };
+/** Older saved themes map to a current one: Obsidian was remade as Ice Cream, and the older names that read as Obsidian
+ *  (Mono, Slate, Frost) follow it, so nobody's choice breaks. Kept equal to ui_theme in src-tauri/src/perfcore.rs and the
+ *  game's MenuTheme.Look.forLauncher. */
+const THEME_ALIASES: Record<string, ThemeId> = { obsidian: "icecream", mono: "icecream", slate: "icecream", frost: "icecream" };
 
 export const FONTS: { id: FontId; name: string; note: string; display: string; body: string }[] = [
   { id: "default", name: "Flint Default", note: "Outfit headings, Inter text", display: "Outfit", body: "Inter" },
@@ -31,6 +33,16 @@ export const EFFECTS: { id: EffectsLevel; name: string; note: string }[] = [
   { id: "balanced", name: "Balanced", note: "Solid panels and a 30 fps character" },
   { id: "minimal", name: "Minimal", note: "No blur or motion; best for older computers" },
 ];
+
+/** Settings → Java and memory → Memory cleaner (Minecraft 1.21.x): Generational ZGC or the official launcher's G1. */
+export type MemoryCleaner = "smooth" | "official";
+/** Kept equal to DEFAULT_MEMORY_CLEANER in src-tauri/src/perfcore.rs (a settings file without the key gets that one). */
+export const DEFAULT_MEMORY_CLEANER: MemoryCleaner = "official";
+/**
+ * The smallest memory (MB) Smooth runs with, the size it was measured at; with less, a launch uses Official whatever is
+ * chosen. Kept equal to SMOOTH_MIN_HEAP_MB in src-tauri/src/perfcore.rs.
+ */
+export const SMOOTH_MIN_HEAP_MB = 4096;
 
 export type Settings = {
   theme: ThemeId;
@@ -51,6 +63,12 @@ export type Settings = {
   gameMaximized: boolean;
   /** Settings → Java and memory: extra Java arguments for every launch (checked by the launcher before saving). */
   jvmArgs: string;
+  /**
+   * Settings → Java and memory → Memory cleaner, for Minecraft 1.21.x only (Java 21): "smooth" runs Java's Generational ZGC (the
+   * collector Mojang's own settings use for 26.x), "official" G1 as the Minecraft Launcher does. Read at each launch
+   * (src-tauri/src/perfcore.rs MemoryCleaner); nothing in the game changes.
+   */
+  memoryCleaner: MemoryCleaner;
   /** New Fabric profiles start with Flint's performance mods. */
   performanceMods: boolean;
   /** Flint Performance Core picks Java settings per Minecraft version and runs the in-game runtime's optimization modules; off uses Flint 0.4.0's Java flags and turns those modules off. */
@@ -102,6 +120,7 @@ export const DEFAULT_SETTINGS: Settings = {
   gameStartBehavior: "minimize",
   gameMaximized: true,
   jvmArgs: "",
+  memoryCleaner: DEFAULT_MEMORY_CLEANER,
   performanceMods: true,
   automaticOptimization: true,
   flintAssist: true,
@@ -168,6 +187,16 @@ export function SettingsProvider({ initial, children }: { initial: Settings; chi
     });
   }, []);
 
+  // A theme the player picked in the game (its Right Shift menu's Theme page): the app takes it too, one theme everywhere.
+  useEffect(
+    () =>
+      subscribe<{ theme?: string }>("theme-changed", (e) => {
+        const theme = THEMES.find((t) => t.id === e?.theme)?.id;
+        if (theme) update({ theme });
+      }),
+    [update],
+  );
+
   const value = useMemo(
     () => ({
       settings,
@@ -212,6 +241,7 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
   s.friendsInSidebar = s.friendsInSidebar === true;
   if (!isLanguageSetting(s.language)) s.language = "system";
   s.jvmArgs = typeof s.jvmArgs === "string" ? s.jvmArgs : "";
+  if (s.memoryCleaner !== "smooth" && s.memoryCleaner !== "official") s.memoryCleaner = DEFAULT_MEMORY_CLEANER;
   // Retired: the on/off minimize switch (now gameStartBehavior) and the AI gateway address.
   delete (s as Record<string, unknown>).minimizeOnLaunch;
   delete (s as Record<string, unknown>).aiGatewayUrl;

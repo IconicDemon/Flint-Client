@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, errorText, type ContentKind, type LibraryKind, type ModPlan, type PlanItem, type Profile, type World } from "../../lib/api";
+import { isCurseForge } from "../../lib/contentSource";
 import { bytes } from "../../lib/format";
 import { t, useT, type MessageKey, type PluralKey } from "../../lib/i18n";
 import { liveInstall } from "../../lib/livePacks";
@@ -126,6 +127,11 @@ export function PlanRow({ item, checked, onToggle, locked, summary }: { item: Pl
       {item.kind !== "mod" && <Badge>{KIND_LABEL[item.kind]}</Badge>}
       {item.status === "installed" ? (
         <Badge tone="success">{t("library.card.installed")}</Badge>
+      ) : item.externalUrl ? (
+        // Its author lets players download it on CurseForge only: never fetched by Flint, opened there instead.
+        <Button size="sm" variant="secondary" iconRight="external" onClick={() => void api.openExternal(item.externalUrl!)}>
+          {t("library.curseforge.download")}
+        </Button>
       ) : item.status === "not-needed" ? (
         <Badge>{t("library.plan.notNeeded")}</Badge>
       ) : blocked ? (
@@ -151,7 +157,8 @@ export function InstallDialog({ target, profile, onClose }: { target: InstallTar
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // While the profile's game runs: turn the packs on in it as they arrive (on by default).
-  const [enableLive, setEnableLive] = useState(true);
+  // Off by default (owner, 1.0.4): a pack installed while the game runs goes into its folder; the player turns it on.
+  const [enableLive, setEnableLive] = useState(false);
   const isPack = target?.kind === "modpack";
   const needsFabric = !!target && (target.kind === "mod" || target.kind === "shader") && profile?.loader !== "fabric";
   // A pack for the running game's profile goes into the game at once (lib/livePacks.ts); mods need a restart.
@@ -163,7 +170,7 @@ export function InstallDialog({ target, profile, onClose }: { target: InstallTar
     setOptional({});
     setWorlds(null);
     setWorld("");
-    setEnableLive(true);
+    setEnableLive(false);
     setName(target?.title ?? "");
     if (!target || isPack || !profile || needsFabric) return;
     let live = true;
@@ -315,7 +322,7 @@ export function InstallDialog({ target, profile, onClose }: { target: InstallTar
           )}
 
           {isPack ? (
-            <TextField label={t("library.install.profileName")} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} hint={t("library.install.profileNameHint")} />
+            <TextField label={t("library.install.profileName")} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} hint={t(isCurseForge(target.projectId) ? "library.install.profileNameHintCurseForge" : "library.install.profileNameHint")} />
           ) : !profile ? (
             <p className="field-error">{t("library.install.chooseProfile")}</p>
           ) : needsFabric ? (

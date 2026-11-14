@@ -43,6 +43,9 @@ export const VERSIONS: VersionMeta[] = [
   { id: "1.21.11", drop: "Mounts of Mayhem", java: 21, wallpaper: w1_21_11, thumb: t1_21_11, card: c1_21_11, fabric: true },
   { id: "1.21.10", drop: "The Copper Age", java: 21, wallpaper: w1_21_10, thumb: t1_21_10, card: c1_21_10, fabric: true },
   { id: "1.21.1", drop: "Tricky Trials", java: 21, wallpaper: w1_21_1, thumb: t1_21_1, card: c1_21_1, fabric: true },
+  // No art of The Wild Update yet: 26.1.1's outdoor scene full of mobs stands in.
+  { id: "1.19.2", drop: "The Wild Update", java: 17, wallpaper: w26_1_1, thumb: t26_1_1, card: c26_1_1, fabric: true },
+  { id: "1.19", drop: "The Wild Update", java: 17, wallpaper: w26_1_1, thumb: t26_1_1, card: c26_1_1, fabric: true },
   {
     id: "1.8.9",
     drop: "Bountiful Update",

@@ -48,9 +48,11 @@ public final class MenuSizesScreen extends Screen {
 	private static final int RESET_H = 15;
 	/** The card's distance from the window's corner. */
 	private static final int MARGIN = 10;
-	private static final int PANEL_FILL = 0xF5111216;
+	private static int panelFill() {
+		return Palette.CARD;
+	}
 	private static final float PANEL_RADIUS = 4.6F;
-	private static final String[] PART_KEYS = {"logo", "buttons", "version", "rewards", "news", "switch", "topRight"};
+	private static final String[] PART_KEYS = {"logo", "buttons", "version", "rewards", "news", "switch", "topRight", "discord", "showcase"};
 
 	private final Screen parent;
 	/** The main menu drawn behind the page (the one Utilities was opened from), or null: then the page's own backdrop. */
@@ -309,14 +311,14 @@ public final class MenuSizesScreen extends Screen {
 			int spread = c.px(1.2F * i);
 			c.roundRect(x - spread, y - spread + c.px(1.5F), w + 2 * spread, h + 2 * spread, radius + spread, 0x14000000);
 		}
-		c.panel(x, y, w, h, radius, border, Palette.BORDER_HOVER, PANEL_FILL);
+		c.panel(x, y, w, h, radius, border, Palette.BORDER_HOVER, panelFill());
 		int left = panelX + PAD;
 		c.text(heading, c.px(left + HEADER_H + 5), c.baselineFor(heading, c.px(panelY + PAD + HEADER_H / 2.0F)), Palette.TEXT);
 		int noteY = panelY + PAD + HEADER_H + 5;
 		c.text(note, c.px(left), c.baselineFor(note, c.px(noteY + NOTE_H / 2.0F)), Palette.MUTED, c.px(panelW - 2 * PAD));
 		int line = Math.max(1, Math.round(c.scale() / 4.0F));
 		int separator = c.px(noteY + NOTE_H + 3.5F);
-		c.fill(c.px(left), separator, c.px(panelX + panelW - PAD), separator + line, 0x14FFFFFF);
+		c.fill(c.px(left), separator, c.px(panelX + panelW - PAD), separator + line, Palette.tint(0x14FFFFFF));
 		for (Row row : rows) {
 			boolean on = row == lit;
 			int middle = c.px(row.y + ROW_H / 2.0F);

@@ -127,3 +127,21 @@ s getMapRenderer\(\)\.render\(id, data, render\) => getMapRenderer().extractRend
 file control/platform/Mc263LootBeams.java
 # 1.21.11 draws a GuiGraphics' deferred tooltip with renderDeferredElements (26.x: extractDeferredElements with the mouse).
 s graphics\.extractDeferredElements\(0, 0, 0\) => graphics.renderDeferredElements()
+
+# ---------- the hot loader (hotload/HotLoader) on 1.21.x ----------
+# Fabric API's key registry here is the key binding one (yarn's names until 26.1), and Minecraft's fields have intermediary
+# names at run time: the key list is set through an accessor, a key pressed by its saved name.
+file hotload/HotLoader.java
+s net\.fabricmc\.fabric\.impl\.client\.keymapping\.KeyMappingRegistryImpl => net.fabricmc.fabric.impl.client.keybinding.KeyBindingRegistryImpl
+s field\(net\.minecraft\.client\.Options\.class, "keyMappings"\)\.set\(mc\.options, next\) => ((com.flintclient.client.mixin.bridge.OptionsKeysAccessor) mc.options).flint\$keyMappings(next)
+s \(com\.mojang\.blaze3d\.platform\.InputConstants\.Key\) field\(KeyMapping\.class, "key"\)\.get\(key\) => com.mojang.blaze3d.platform.InputConstants.getKey(key.saveString())
+s \} catch \(ReflectiveOperationException e\) \{\n(\t+)return "failed " => } catch (RuntimeException e) {\n$1return "failed "
+
+file thirdparty/mixin/HotLoadKeyMappingMixin.java
+s net\.fabricmc\.fabric\.impl\.client\.keymapping\.KeyMappingRegistryImpl => net.fabricmc.fabric.impl.client.keybinding.KeyBindingRegistryImpl
+s method = "registerKeyMapping" => method = "registerKeyBinding"
+# Minecraft's field is remapped (to its intermediary name); Fabric API's class and method are not.
+s target = "Lnet/minecraft/client/Minecraft;options:Lnet/minecraft/client/Options;"\) => target = "Lnet/minecraft/client/Minecraft;options:Lnet/minecraft/client/Options;", remap = true)
+
+file thirdparty/ThirdPartyMixinPlugin.java
+s "fabric-key-mapping-api-v1" => "fabric-key-binding-api-v1"

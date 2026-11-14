@@ -49,6 +49,9 @@ const REPORT_FILE: &str = "flint-presence.json";
 const REPORT_POLL: Duration = Duration::from_secs(5);
 /// Discord cuts an activity's details and state at this many characters.
 const LINE_MAX: usize = 128;
+/// The button every Flint activity carries, so anyone looking at the profile can find Flint.
+const WEBSITE_LABEL: &str = "Website";
+const WEBSITE_URL: &str = "https://flintclient.com/";
 
 /// One running game, as Discord shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -86,6 +89,7 @@ pub fn activity(session: &Session, details: bool) -> Value {
         "assets": { "large_image": LARGE_IMAGE, "large_text": LARGE_TEXT },
         "instance": false,
     });
+    let mut own = None;
     if details {
         let loader = match session.loader.as_str() {
             "fabric" => "Fabric",
@@ -99,9 +103,7 @@ pub fn activity(session: &Session, details: bool) -> Value {
                 if let Some(state) = state {
                     activity["state"] = json!(state);
                 }
-                if let Some(buttons) = buttons(&report) {
-                    activity["buttons"] = buttons;
-                }
+                own = buttons(&report);
             }
             None => {
                 activity["details"] = json!(format!("Minecraft {}", session.version));
@@ -111,6 +113,7 @@ pub fn activity(session: &Session, details: bool) -> Value {
     } else {
         activity["details"] = json!("Playing Minecraft");
     }
+    activity["buttons"] = with_website(own);
     activity
 }
 
@@ -122,7 +125,23 @@ pub fn idle_activity(opened_at: u64, details: bool) -> Value {
         "timestamps": { "start": opened_at },
         "assets": { "large_image": LARGE_IMAGE, "large_text": LARGE_TEXT },
         "instance": false,
+        "buttons": with_website(None),
     })
+}
+
+/// The activity's buttons: the player's own from the Discord mod (the first one; Discord shows two at most), then Flint's
+/// Website button, which is always there. A player button that already opens the website isn't shown twice.
+fn with_website(own: Option<Value>) -> Value {
+    let same = |url: &str| url.trim_end_matches('/') == WEBSITE_URL.trim_end_matches('/');
+    let mut list: Vec<Value> = own
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| !b.get("url").and_then(Value::as_str).is_some_and(same))
+        .take(1)
+        .collect();
+    list.push(json!({ "label": WEBSITE_LABEL, "url": WEBSITE_URL }));
+    Value::Array(list)
 }
 
 /// The game's report, if it wrote one during this session (one left from an earlier run is ignored).
@@ -801,6 +820,38 @@ mod tests {
         assert!(buttons(&json!({})).is_none());
         let many = json!({"buttons":[{"label":"a","url":"https://a"},{"label":"b","url":"https://b"},{"label":"c","url":"https://c"}]});
         assert_eq!(buttons(&many).unwrap().as_array().unwrap().len(), 2, "Discord shows two at most");
+    }
+
+    #[test]
+    fn every_activity_carries_the_website_button() {
+        let website = json!({"label":"Website","url":"https://flintclient.com/"});
+        // Launcher idling, details on and off.
+        assert_eq!(idle_activity(1, true)["buttons"], json!([website.clone()]));
+        assert_eq!(idle_activity(1, false)["buttons"], json!([website.clone()]));
+        // A game with no report, details on and off (the private activity keeps the button: it names nothing about the player).
+        assert_eq!(activity(&session("p", "26.3", "fabric", 1), true)["buttons"], json!([website.clone()]));
+        assert_eq!(activity(&session("p", "26.3", "fabric", 1), false)["buttons"], json!([website.clone()]));
+        // The player's own buttons from the Discord mod: the first stays, before Website; Discord shows two at most.
+        let own = json!([{"label":"Join us","url":"https://example.com"},{"label":"Shop","url":"https://shop.example.com"}]);
+        assert_eq!(with_website(Some(own)), json!([{"label":"Join us","url":"https://example.com"}, website.clone()]));
+        // A player button that already opens the website isn't shown twice.
+        let dup = json!([{"label":"Flint","url":"https://flintclient.com"},{"label":"Join us","url":"https://example.com"}]);
+        assert_eq!(with_website(Some(dup)), json!([{"label":"Join us","url":"https://example.com"}, website.clone()]));
+        assert_eq!(with_website(None).as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_games_report_keeps_the_website_button_with_its_own() {
+        let dir = std::env::temp_dir().join(format!("flint-presence-buttons-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = session("p", "26.3", "fabric", 1);
+        s.game_dir = Some(dir.clone());
+        std::fs::write(dir.join(REPORT_FILE), r#"{"state":"Singleplayer","buttons":[{"label":"Join us","url":"https://example.com"}]}"#).unwrap();
+        let a = activity(&s, true);
+        assert_eq!(a["buttons"], json!([{"label":"Join us","url":"https://example.com"},{"label":"Website","url":"https://flintclient.com/"}]));
+        // Details off: the report (and the player's own buttons) stay private; Website still shows.
+        assert_eq!(activity(&s, false)["buttons"], json!([{"label":"Website","url":"https://flintclient.com/"}]));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn now_secs_for_test() -> u64 {

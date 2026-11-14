@@ -42,6 +42,7 @@ const MC = "1.8.9";
 const LOADER = "0.20.1";
 const MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const ORNITHE_PROFILE = `https://meta.ornithemc.net/v3/versions/fabric-loader/${MC}/${LOADER}/profile/json`;
+const ORNITHE_LIBRARIES = `https://meta.ornithemc.net/v3/versions/libraries/${MC}`;
 const ASSETS = "https://resources.download.minecraft.net";
 const RUNTIME_JAR = path.join(REPO, "game-runtime", "build", `mc-${MC}`, "libs", `flint-game-runtime-${VERSION}+${MC}.jar`);
 const QA_JAR = path.join(HERE, "build", `mc-${MC}`, "libs", `flint-qa-1.0.0+${MC}.jar`);
@@ -61,10 +62,12 @@ function parseArgs(argv) {
 		if (a === "--reuse") args.reuse = true;
 		else if (a === "--front") args.front = true;
 		else if (a === "--no-runtime") args.noRuntime = true;
-		else if (["--game", "--size", "--gui", "--timeout", "--mods", "--options", "--java"].includes(a)) args[a.slice(2)] = argv[++i];
+		else if (["--game", "--size", "--gui", "--timeout", "--mods", "--options", "--java", "--mc"].includes(a)) args[a.slice(2)] = argv[++i];
 		else args.positional.push(a);
 	}
 	if (args.positional.length !== 2) throw new Error("usage: run_qa_189.mjs SCRIPT RUN [--game NAME] [--reuse] [--size WxH] [--gui N] [--timeout S] [--front] [--no-runtime] [--mods DIR] [--options K:V,K:V] [--java 8|21]");
+	// --mc: what swap-link.mjs passes every line's runner; this one runs 1.8.9 only.
+	if (args.mc !== undefined && args.mc !== MC) throw new Error(`run_qa_189.mjs runs Minecraft ${MC}, not ${args.mc}`);
 	if (args.java !== undefined && !["8", "21", "25"].includes(args.java)) throw new Error("--java takes 8, 21 or 25");
 	return args;
 }
@@ -99,7 +102,7 @@ async function acquireLock(run) {
 			return;
 		}
 		log(`another game holds ${LOCK} (${Math.round(age / 1000)} s old): waiting`);
-		await sleep(20000);
+		await sleep(3000);
 	}
 }
 
@@ -116,11 +119,24 @@ function releaseLock() {
 // ---------- the game's files ----------
 
 /** Fills in the sha1 of a profile library that lists none, from the .sha1 its maven publishes beside the jar. */
-async function librarySha1(lib, url) {
+// When the maven doesn't answer: the sha1 remembered beside the cached jar (<jar>.sha1), else a jar already in the cache (it
+// was checked against the maven's sha1 when it was downloaded) stands; a jar not in the cache still needs the maven.
+async function librarySha1(lib, url, cached) {
 	if (lib.sha1) return lib.sha1;
-	const sha1 = (await fetchBytes(url + ".sha1")).toString("utf8").trim().split(/\s+/)[0];
-	if (!/^[0-9a-f]{40}$/.test(sha1)) throw new Error(`no sha1 for ${lib.name}`);
-	return sha1;
+	const remembered = cached + ".sha1";
+	try {
+		const sha1 = (await fetchBytes(url + ".sha1")).toString("utf8").trim().split(/\s+/)[0];
+		if (!/^[0-9a-f]{40}$/.test(sha1)) throw new Error(`no sha1 for ${lib.name}`);
+		if (fs.existsSync(cached)) fs.writeFileSync(remembered, sha1);
+		return sha1;
+	} catch (e) {
+		if (fs.existsSync(remembered)) return fs.readFileSync(remembered, "utf8").trim();
+		if (fs.existsSync(cached)) {
+			console.log(`[qa] ${lib.name}: its maven doesn't answer; using the cached jar (checked when it was downloaded)`);
+			return sha1Of(cached);
+		}
+		throw e;
+	}
 }
 
 // Mojang's Java runtimes by major version: the app gives Flint's 1.8.9 Java 21 (app/src-tauri/src/runtime.rs JAVA_FOR_LINE).
@@ -148,13 +164,29 @@ async function gameFiles(javaMajor) {
 	}
 	const fabric = JSON.parse(fs.readFileSync(profileFile, "utf8"));
 	if (fabric.inheritsFrom !== `${MC}-vanilla` && fabric.inheritsFrom !== MC) throw new Error(`unexpected inheritsFrom ${fabric.inheritsFrom}`);
+	// Ornithe's library upgrades, as the launcher adds them (game.rs add_library_upgrades): a newer log4j in place of Mojang's
+	// 2.0-beta9, LWJGL left as Mojang's. Kept beside the profile, so a run goes on while Ornithe's meta can't be reached.
+	const upgradesFile = path.join(path.dirname(profileFile), "library-upgrades.json");
+	try {
+		fs.writeFileSync(upgradesFile, (await fetchBytes(ORNITHE_LIBRARIES)).toString("utf8"));
+	} catch (e) {
+		if (!fs.existsSync(upgradesFile)) log(`Ornithe's library upgrades can't be had (${e.message}); running without them`);
+	}
+	if (fs.existsSync(upgradesFile)) {
+		const have = new Set(fabric.libraries.map((l) => libraryKey(l.name)));
+		for (const up of JSON.parse(fs.readFileSync(upgradesFile, "utf8"))) {
+			if (up.name.startsWith("org.lwjgl") || have.has(libraryKey(up.name))) continue;
+			fabric.libraries.push({ name: up.name, url: up.url || "https://libraries.minecraft.net/" });
+			have.add(libraryKey(up.name));
+		}
+	}
 
 	const jars = [];
 	const keys = new Set();
 	for (const lib of fabric.libraries) {
 		const rel = mavenPath(lib.name);
 		const url = lib.url.replace(/\/?$/, "/") + rel;
-		jars.push(await resolve(path.join("libraries", rel), await librarySha1(lib, url), url, roots, log));
+		jars.push(await resolve(path.join("libraries", rel), await librarySha1(lib, url, path.join(CACHE_ROOT, "libraries", rel)), url, roots, log));
 		keys.add(libraryKey(lib.name));
 	}
 	const natives = [];
@@ -208,6 +240,9 @@ function prepare(game, args, files) {
 	if (!fresh && !args.reuse) throw new Error(`game folder exists: ${game} (use --reuse)`);
 	const mods = path.join(game, "mods");
 	fs.mkdirSync(mods, { recursive: true });
+	// FLINTQA_KEEP_MODS=1: the folder as it is (Instant Swap's standby game, swap-link.mjs: the first game runs from it, its
+	// natives loaded and its mods in use, and the Library added mods to it).
+	if (process.env.FLINTQA_KEEP_MODS === "1") return path.join(game, "natives");
 	for (const f of fs.readdirSync(mods)) fs.rmSync(path.join(mods, f));
 	const jars = args.noRuntime ? [[QA_JAR, "flint-qa.jar"]] : [[RUNTIME_JAR, "flint-runtime.jar"], [QA_JAR, "flint-qa.jar"]];
 	if (args.mods) {
@@ -270,7 +305,8 @@ async function main() {
 		log("start-up cache: " + aot.note);
 	}
 	const logPath = path.join(out, "game.log");
-	await acquireLock(run);
+	// FLINTQA_NO_LOCK=1: a second game beside the first (Instant Swap's standby game, started by swap-link.mjs).
+	if (process.env.FLINTQA_NO_LOCK !== "1") await acquireLock(run);
 	for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.on(signal, () => (releaseLock(), process.exit(130)));
 	process.on("exit", releaseLock);
 	const logFd = fs.openSync(logPath, "w");
@@ -278,6 +314,10 @@ async function main() {
 	const proc = spawn(java, javaArgs, { cwd: game, stdio: ["ignore", logFd, logFd], windowsHide: false });
 	let exited = null;
 	proc.on("exit", (code) => (exited = code));
+	// FLINTQA_PRIORITY=idle: a standby game's priority, below normal as the launcher now starts one (swap.rs; idle starved it).
+	if (process.env.FLINTQA_PRIORITY === "idle") {
+		spawnSync("powershell", ["-NoProfile", "-Command", `(Get-Process -Id ${proc.pid}).PriorityClass = "BelowNormal"`], { windowsHide: true });
+	}
 	if (!args.front) {
 		spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", BACKGROUND, String(proc.pid)], { stdio: "ignore", windowsHide: true });
 	}

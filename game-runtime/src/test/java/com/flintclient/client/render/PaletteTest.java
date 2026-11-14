@@ -50,4 +50,24 @@ class PaletteTest {
 		}
 		return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 	}
+
+	@org.junit.jupiter.api.Test
+	void theLightThemesNeutralsReadAndTheDarkOnesComeBackUnchanged() {
+		int darkSurface = Palette.SURFACE;
+		int darkText = Palette.TEXT;
+		try {
+			Palette.useLight(true);
+			int surface = Palette.over(Palette.SURFACE, Palette.BACKGROUND_TOP);
+			assertEquals(true, contrast(Palette.TEXT, surface) >= 7, "Ice Cream: label on the cream glass");
+			assertEquals(true, contrast(Palette.TEXT_DIM, surface) >= 7, "Ice Cream: resting label");
+			assertEquals(true, contrast(Palette.MUTED, Palette.BACKGROUND_TOP) >= 4.5, "Ice Cream: secondary text");
+			assertEquals(true, contrast(Palette.MUTED, Palette.over(Palette.CARD, Palette.BACKGROUND_TOP)) >= 4.5, "Ice Cream: secondary text on a card");
+			assertEquals(true, contrast(Palette.DANGER_TEXT, Palette.over(Palette.DANGER_SURFACE, Palette.BACKGROUND_TOP)) >= 4.5, "Ice Cream: Quit");
+		} finally {
+			Palette.useLight(false);
+		}
+		assertEquals(darkSurface, Palette.SURFACE, "the dark themes keep their surfaces");
+		assertEquals(darkText, Palette.TEXT);
+		assertEquals(0x14FFFFFF, Palette.tint(0x14FFFFFF), "a white tint stays white on the dark themes");
+	}
 }

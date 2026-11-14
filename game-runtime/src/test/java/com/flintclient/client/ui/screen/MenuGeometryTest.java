@@ -350,6 +350,141 @@ class MenuGeometryTest {
 	}
 
 	@Test
+	void theNewPartsKeepClearOfEverythingInEveryWindow() {
+		for (int[] window : WINDOWS) {
+			for (float unit : UNITS) {
+				for (int slots : new int[] {0, 3, 5}) {
+					Input in = input(window[0], window[1], unit, 120, slots);
+					in.buttons = 6;
+					in.discord = true;
+					in.showcase = true;
+					in.externals = 3;
+					Result r = MenuGeometry.compute(in);
+					String at = window[0] + "x" + window[1] + " @" + unit + " slots " + slots;
+					List<Box> placed = new ArrayList<>();
+					for (Box b : r.column) {
+						placed.add(b);
+					}
+					placed.add(r.quit);
+					placed.add(r.logo);
+					placed.add(r.footer);
+					placed.add(r.pill);
+					placed.add(r.toggle);
+					for (Box b : r.icons) {
+						placed.add(b);
+					}
+					for (Box card : new Box[] {r.news, r.rewards}) {
+						if (card != null && card.shown()) {
+							placed.add(card);
+						}
+					}
+					if (r.railVisible) {
+						placed.add(new Box(r.railX, r.railY, r.railW, r.railH, 1, true));
+					}
+					List<Box> added = new ArrayList<>();
+					if (r.discord.shown()) {
+						added.add(r.discord);
+						assertTrue(r.rewards.shown() && r.discord.bottom() <= r.rewards.y(), "the Discord card sits above Daily rewards " + at);
+					}
+					if (r.showcase.shown()) {
+						added.add(r.showcase);
+					}
+					for (Box b : r.externals) {
+						added.add(b);
+					}
+					for (Box a : added) {
+						assertTrue(a.x() >= 0 && a.y() >= 0 && a.right() <= window[0] && a.bottom() <= window[1], "on screen " + at);
+						for (Box b : placed) {
+							assertFalse(a.overlaps(b), a + " overlaps " + b + " " + at);
+						}
+					}
+					for (int i = 0; i < added.size(); i++) {
+						for (int j = i + 1; j < added.size(); j++) {
+							assertFalse(added.get(i).overlaps(added.get(j)), added.get(i) + " overlaps " + added.get(j) + " " + at);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	void theNewPartsShowInAnOrdinaryWindow() {
+		Input in = input(711, 400, 2.7F, 120, 0);
+		in.buttons = 6;
+		in.discord = true;
+		in.showcase = true;
+		in.externals = 2;
+		Result r = MenuGeometry.compute(in);
+		assertTrue(r.discord.shown());
+		assertEquals(MenuGeometry.DISCORD_H, r.discord.h());
+		assertTrue(r.showcase.shown());
+		assertEquals(MenuGeometry.SHOW_W, r.showcase.w());
+		assertEquals(2, r.externals.length);
+		// Other mods' buttons: inside the top-right row, after Settings and before Utilities (still last), as large as its
+		// icons and one gap apart, as if they were its own.
+		Box first = r.externals[0];
+		Box last = r.externals[1];
+		Box settings = r.icons[2];
+		Box utilities = r.icons[3];
+		assertEquals(r.pill.y(), first.y(), "in the top-right row");
+		assertEquals(r.icons[0].w(), first.w());
+		assertEquals(r.icons[0].h(), first.h());
+		int gap = MenuGeometry.scaled(MenuGeometry.TOP_GAP, r.scale(Part.TOP_RIGHT));
+		assertEquals(settings.right() + gap, first.x(), "right after Settings");
+		assertEquals(first.right() + gap, last.x(), "in the order found, left to right");
+		assertEquals(last.right() + gap, utilities.x(), "Utilities right after them");
+		assertTrue(r.pill.x() >= r.toggle.right() + MenuGeometry.CLEAR, "the account clear of the switch");
+		// The showcase keeps the bottom left to itself, where it is without them.
+		Input noExternals = input(711, 400, 2.7F, 120, 0);
+		noExternals.buttons = 6;
+		noExternals.discord = true;
+		noExternals.showcase = true;
+		Result n = MenuGeometry.compute(noExternals);
+		assertEquals(n.showcase, r.showcase);
+		assertEquals(n.icons[3], r.icons[3], "Utilities keeps its corner");
+		assertEquals(r.scale(Part.TOP_RIGHT), n.scale(Part.TOP_RIGHT), 0.0001F, "the row isn't made smaller for them");
+		assertEquals(n.pill.x() - 2 * (first.w() + gap), r.pill.x(), "the rest of the row makes room for them");
+		assertEquals(n.bounds(Part.TOP_RIGHT).right(), r.bounds(Part.TOP_RIGHT).right());
+		// Without the new parts, nothing changes for the rest of the menu.
+		Input plain = input(711, 400, 2.7F, 120, 0);
+		plain.buttons = 6;
+		Result p = MenuGeometry.compute(plain);
+		assertEquals(p.news, r.news);
+		assertEquals(p.rewards, r.rewards);
+		assertEquals(0, p.externals.length);
+		assertEquals(null, p.discord);
+		assertEquals(null, p.showcase);
+	}
+
+	@Test
+	void otherModsButtonsNeverReachTheSwitch() {
+		// A narrow window and many mods: as many as fit stay, the rest are left off; the row keeps its size and Utilities its
+		// corner, and the account pill never comes within CLEAR of the switch.
+		for (int width : new int[] {320, 427, 480, 640, 960}) {
+			Input in = input(width, 240, 2.0F, 60, 0);
+			in.externals = 12;
+			Result r = MenuGeometry.compute(in);
+			Result plain = MenuGeometry.compute(input(width, 240, 2.0F, 60, 0));
+			String at = "width " + width;
+			assertEquals(plain.icons[3], r.icons[3], at);
+			assertEquals(plain.scale(Part.TOP_RIGHT), r.scale(Part.TOP_RIGHT), 0.0001F, at);
+			assertTrue(r.pill.x() >= r.toggle.right() + MenuGeometry.CLEAR || r.externals.length == 0, "the account clear of the switch at " + at);
+			assertTrue(r.externals.length <= 12);
+			for (Box b : r.externals) {
+				assertTrue(b.x() >= r.icons[2].right() && b.right() <= r.icons[3].x(), b + " between Settings and Utilities at " + at);
+			}
+			// One more would have reached the switch.
+			if (r.externals.length < 12) {
+				int step = r.icons[3].x() - r.icons[2].x();
+				assertTrue(r.pill.x() - step < r.toggle.right() + MenuGeometry.CLEAR, "as many as fit at " + at);
+			}
+		}
+		assertEquals(0, MenuGeometry.externalsThatFit(3, 0, 600, 40, 13, 3, 10), "none without the row's own icons");
+		assertEquals(2, MenuGeometry.externalsThatFit(2, 4, 600, 40, 13, 3, 10));
+	}
+
+	@Test
 	void fittingCapsTheLargestPartsFirst() {
 		// Room for a sum of 3.5: the 2.0 and the 1.8 give way to 1.25 together; the 0.5 keeps its size.
 		float[] fitted = MenuGeometry.fit(new float[] {2.0F, 1.8F, 0.5F}, 0.5F, s -> s[0] + s[1] + s[2] <= 3.0F);

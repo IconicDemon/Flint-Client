@@ -37,7 +37,25 @@
     "feature.ModelGapSpriteMixin",
     "feature.ShieldPatternTintMixin",
     "feature.TntRendererMixin",
-    "feature.TotemPopMixin"
+    "feature.TotemPopMixin",
+    "swap.SwapFrameMixin",
+    "swap.SwapPresentMixin",
+    "swap.SwapOptionsMixin",
+    "swap.SwapSoundMixin",
+    "swap.SwapWindowAccess",
+    "swap.SwapWindowMixin",
+    "bridge.OptionsKeysAccessor",
+    "feature.OwnSkinMixin",
+    "cosmetics.AvatarRendererCosmeticsMixin",
+    "cosmetics.PlayerModelEmoteMixin",
+    "cosmetics.CapeLayerCosmeticsMixin",
+    "cosmetics.ShieldSpecialRendererCosmeticsMixin",
+    "cosmetics.ItemInHandLayerCosmeticsMixin",
+    "cosmetics.FirstPersonShieldCosmeticsMixin",
+    "cosmetics.OptionsEmoteKeyMixin",
+    "cosmetics.MinecraftCosmeticsMixin",
+    "cosmetics.DebugScreenCosmeticsMixin",
+    "cosmetics.InventoryScreenCosmeticsMixin"
   ],
   "injectors": {
     "defaultRequire": 0

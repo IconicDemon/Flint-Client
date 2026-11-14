@@ -7,6 +7,7 @@ import { storeFeed, type StoreChanges, type StoreInfo, type StoreOrder, type Sto
 import type { ChatMessage, Me, MyStatus, SearchPlayer, SocialSnapshot } from "./social";
 import type { AttemptView, CommunityCatalog, ConnectionsView, LinkStart, Recheck, RewardsView } from "./community";
 import type { CapeConflict } from "./capeConflict";
+import type { Badges } from "./badges";
 
 export type Account = {
   uuid: string;
@@ -239,6 +240,8 @@ export type PlanItem = {
   message?: string | null;
   /** mods_resolve only: "shaderLoader" marks Iris, the mod that loads shader packs. */
   role?: "shaderLoader" | null;
+  /** A CurseForge file its author lets players download on CurseForge only: its page there. */
+  externalUrl?: string | null;
 };
 
 export type ModPlan = {
@@ -324,6 +327,8 @@ export type ContentUpdate = UpdateVersion & {
   currentVersion?: string | null;
   currentVersionId?: string | null;
   alternatives: UpdateVersion[];
+  /** CurseForge items: the project's page there (the changelog link). */
+  websiteUrl?: string | null;
 };
 
 /** A file the check can't ask Modrinth about: a folder, or a file Modrinth doesn't know by its hash. */
@@ -353,7 +358,8 @@ export type LibraryHit = {
   iconUrl?: string | null;
   author: string;
   downloads: number;
-  follows: number;
+  /** None on CurseForge, which has no follows. */
+  follows: number | null;
   categories?: string[] | null;
   versions?: string[] | null;
   latestVersion?: string | null;
@@ -363,6 +369,9 @@ export type LibraryHit = {
   dateModified?: string;
   gallery?: string | null;
   color?: number | null;
+  /** CurseForge projects: their page there. */
+  websiteUrl?: string | null;
+  source?: "modrinth" | "curseforge";
 };
 
 export type LibrarySearchParams = {
@@ -377,7 +386,19 @@ export type LibrarySearchParams = {
   clientOnly?: boolean;
 };
 
-export type LibraryResults = { hits: LibraryHit[]; offset: number; limit: number; total: number; stale: boolean; staging: boolean; rateLimit: RateLimit };
+export type LibraryResults = {
+  hits: LibraryHit[];
+  offset: number;
+  limit: number;
+  total: number;
+  stale: boolean;
+  staging: boolean;
+  rateLimit: RateLimit;
+  /** CurseForge only: why it can't be searched right now (no proxy yet, offline, rate limited), else null. */
+  unavailable?: "unavailable" | "offline" | "busy" | "ornithe" | null;
+  /** With "busy": seconds until CurseForge takes requests again. */
+  retryIn?: number | null;
+};
 
 export type LibraryProject = {
   id: string;
@@ -406,6 +427,8 @@ export type LibraryProject = {
   author?: string | null;
   members: { username: string; role: string; avatarUrl?: string | null; owner: boolean }[];
   stale: boolean;
+  websiteUrl?: string | null;
+  source?: "modrinth" | "curseforge";
 };
 
 export type LibraryVersion = {
@@ -421,9 +444,12 @@ export type LibraryVersion = {
   changelog: string;
   dependencies: { project_id?: string | null; version_id?: string | null; dependency_type: string }[];
   files: { filename: string; size: number; primary: boolean }[];
+  /** CurseForge: false when its author allows downloads on CurseForge only (Flint links to the file there). */
+  downloadable?: boolean;
 };
 
-export type Category = { name: string; projectType: string; header: string };
+/** `label`: the name shown when `name` is an id (CurseForge's categories). */
+export type Category = { name: string; projectType: string; header: string; label?: string };
 
 export type Job = {
   id: string;
@@ -445,6 +471,8 @@ export type Job = {
 export type LogFile = { name: string; folder: "logs" | "crash-reports"; kind: "log" | "crash"; size: number; modified?: number | null };
 export type ProfileFiles = { path: string; total: number; folders: { id: string; count: number; size: number; exists: boolean }[] };
 export type SkinProfile = { name: string; variant: "classic" | "slim"; capes: { id: string; alias: string; active: boolean; dataUrl: string | null }[]; saved?: boolean };
+/** A skin in the skin changer's list: `id` is its PNG's SHA-256; `origin` the username or address it came from. */
+export type SavedSkin = { id: string; name: string; source: "username" | "url"; origin: string; variant: "classic" | "slim"; legacy: boolean; addedAt: number };
 /** `skin_profile` without asking macOS: the profile, or `locked` when that needs the saved sign-in. */
 export type SkinProfileResult = SkinProfile | { locked: true };
 export type InstallItem = { versionId: string; kind?: ContentKind; source: ModSource; reason?: string | null };
@@ -527,6 +555,22 @@ export type PartnerPlayPreview = { address: string; listed: boolean; listProblem
 export type PartnerListing = { address: string; added: boolean; alreadyListed: boolean; problem: string | null };
 /** The launcher's own status ping of a partner server (never the backend's verified numbers). */
 export type PartnerServerCheck = { reachable: boolean; pingMs: number | null; version: string | null };
+/** Home's sponsored card (src-tauri/src/showcase): Flint Admin's launcher slides, checked by the launcher. */
+export type ShowcaseSlide = {
+  id: string;
+  title: string;
+  alt: string;
+  width: number;
+  height: number;
+  /** The picture's SHA-256: a new picture is a new key. */
+  imageKey: string;
+  /** Where a click goes (`example.com`); null: the slide isn't clickable. */
+  linkHost: string | null;
+  /** When it stops showing (ms since the epoch). */
+  endsAt: number | null;
+  weight: number;
+};
+export type ShowcaseAnswer = { slides: ShowcaseSlide[]; rotateMs: number };
 
 /** A part of a profile a `.flintpack` can carry (src-tauri/src/flintpack.rs `Section`). */
 export type PackSection = "mods" | "resourcepacks" | "shaderpacks" | "config" | "options" | "flint" | "worlds";
@@ -714,6 +758,15 @@ export const api = {
   skinProfile: (uuid: string, interactive: boolean) => call<SkinProfileResult>("skin_profile", { uuid, interactive }),
   skinUpload: (uuid: string, pngBase64: string, variant: "classic" | "slim") => call<SkinProfile>("skin_upload", { uuid, pngBase64, variant }),
   skinReset: (uuid: string) => call<SkinProfile>("skin_reset", { uuid }),
+  /**
+   * The skin changer's list (src-tauri/src/skin_library.rs), kept per account on this computer. Adding never changes the
+   * account's skin; only Apply uploads one (Minecraft's skin API, as the Skins page's upload does).
+   */
+  skinLibraryList: (uuid: string) => call<SavedSkin[]>("skin_library_list", { uuid }),
+  skinLibraryAdd: (uuid: string, source: { from: "username" | "url"; value: string }) => call<SavedSkin>("skin_library_add", { uuid, source }),
+  skinLibraryRemove: (uuid: string, id: string) => call<void>("skin_library_remove", { uuid, id }),
+  skinLibraryPng: (uuid: string, id: string) => call<string>("skin_library_png", { uuid, id }),
+  skinLibraryApply: (uuid: string, id: string, variant: "classic" | "slim") => call<SkinProfile>("skin_library_apply", { uuid, id, variant }),
   capeSet: (uuid: string, capeId: string | null) => call<SkinProfile>("cape_set", { uuid, capeId }),
 
   profiles: () => call<{ selected: string | null; profiles: Profile[] }>("profiles_list"),
@@ -751,6 +804,11 @@ export const api = {
   partnersPlay: (partnerId: string, profileId: string) => call<PartnerListing>("partners_play", { partnerId, profileId }),
   partnersCheckServer: (partnerId: string) => call<PartnerServerCheck>("partners_check_server", { partnerId }),
 
+  /** Home's sponsored card (src-tauri/src/showcase): the slides to show now; a slide's checked picture; opens its link. */
+  showcaseSlides: () => call<ShowcaseAnswer>("showcase_slides"),
+  showcaseImage: (id: string) => call<ArrayBuffer>("showcase_image", { id }),
+  showcaseOpen: (id: string) => call<void>("showcase_open", { id }),
+
   profileStates: () => call<Record<string, ProfileState>>("profile_states"),
   /** `quiet`: a background probe that shows no "Checking" state and never holds the profile. */
   checkProfile: (id: string, opts?: { quiet?: boolean }) => call<{ ready: boolean; missingBytes: number; missingFiles: number }>("profile_check", { id, quiet: !!opts?.quiet }),
@@ -765,15 +823,20 @@ export const api = {
     call<{ versions: LibraryVersion[]; stale: boolean }>("library_versions", { id, kind, gameVersion }),
   libraryTags: () => call<{ categories: Category[] }>("library_tags"),
   libraryStatus: () => call<{ base: string; staging: boolean; userAgent: string; rateLimit: RateLimit }>("library_status"),
+  /** CurseForge through Flint's Store proxy (src-tauri/src/curseforge.rs). Projects and versions open with libraryProject/libraryVersions (`cf:` ids). */
+  curseforgeSearch: (params: LibrarySearchParams) => call<LibraryResults>("curseforge_search", { params }),
+  curseforgeCategories: () => call<{ categories: Category[] }>("curseforge_categories"),
+  /** A CurseForge file's changelog (HTML, sanitized when shown), fetched when it's opened. */
+  curseforgeChangelog: (projectId: string, versionId: string) => call<string>("curseforge_changelog", { projectId, versionId }),
 
   resolveMods: (target: ModTarget, requests: ResolveRequest[]) => call<ModPlan>("mods_resolve", { ...target, requests }),
   installMods: (profileId: string, items: InstallItem[]) =>
     call<{ installed: string[]; failed: { versionId: string; message: string }[] }>("mods_install", { profileId, items }),
   planContent: (profileId: string, requests: { kind: ContentKind; project: string; versionId?: string | null; source?: ModSource }[]) =>
     call<ModPlan>("content_plan", { profileId, requests }),
-  /** `enableLive`: while the profile's game runs, the packs installed are turned on in it at once (the default). */
+  /** `enableLive`: while the profile's game runs, also turn the packs installed on in it (off unless asked). */
   installContent: (profileId: string, title: string, items: InstallItem[], world?: string | null, enableLive?: boolean) =>
-    call<string>("content_install", { profileId, title, items, world: world ?? null, enableLive: enableLive ?? true }),
+    call<string>("content_install", { profileId, title, items, world: world ?? null, enableLive: enableLive ?? false }),
   installModpack: (projectId: string, versionId: string | null, name: string | null, title: string) =>
     call<string>("modpack_install", { projectId, versionId, name, title }),
   content: (profileId: string) => call<ProfileContent>("content_list", { profileId }),
@@ -781,6 +844,8 @@ export const api = {
   setEnabled: (profileId: string, fileNames: string[], enabled: boolean) => call<void>("content_set_enabled", { profileId, fileNames, enabled }),
   removeContent: (profileId: string, items: { kind: ContentKind; fileName: string; world?: string | null }[]) =>
     call<void>("content_remove", { profileId, items }),
+  /** "Show in folder": opens the item's folder with that file selected (or just the folder, if the file is gone). */
+  revealContent: (profileId: string, item: { kind: ContentKind; fileName: string; world?: string | null }) => call<void>("content_reveal", { profileId, item }),
   rollbackContent: (profileId: string, kind: ContentKind, projectId: string, world?: string | null) =>
     call<void>("content_rollback", { profileId, kind, projectId, world: world ?? null }),
   /** Identifies hand-added files first, then checks everything the profile can take. */
@@ -815,6 +880,8 @@ export const api = {
   jobs: () => call<Job[]>("jobs_list"),
   cancelJob: (id: string) => call<void>("job_cancel", { id }),
   dismissJob: (id: string) => call<void>("job_dismiss", { id }),
+  /** The Downloads panel's Clear all: finished entries leave the list (installed files are never touched). */
+  clearFinishedJobs: () => call<void>("jobs_clear_finished"),
 
   systemInfo: () => call<{ totalMemory: number | null; memory: MemoryLimits | null; cpus: number; os: string; arch: string }>("system_info"),
   validateJava: (path: string) => call<{ version: string; major: number | null; summary: string }>("java_validate", { path }),
@@ -869,6 +936,10 @@ export const api = {
   storeSignOut: (uuid: string) => call<void>("store_sign_out", { uuid }).then(() => storeFeed.publish({ kind: "signedOut", uuid })),
   storeChanges: (uuid: string, since: number | null) => call<StoreChanges>("store_changes", { uuid, since }),
   storeEquip: (uuid: string, slot: StoreSlot, cosmeticId: string | null) => call<StoreView>("store_equip", { uuid, slot, cosmeticId }).then(fed),
+  /** The emote wheel (8 places, an emote id or null each): the Store decides, and the answer is shown like an equip. */
+  storeSetEmotes: (uuid: string, slots: (string | null)[]) => call<StoreView>("store_set_emotes", { uuid, slots }).then(fed),
+  /** A file of a 3D cosmetic this account owns, checked against the Store's SHA-256 and size: a data URL (texture, thumbnail) or JSON text. */
+  storeModelFile: (uuid: string, cosmeticId: string, part: "geometry" | "texture" | "animation" | "thumbnail") => call<string>("store_model_file", { uuid, cosmeticId, part }),
   /** The profiles where a mod that shows its own capes is on (src-tauri/src/capemods.rs): they can hide a Flint cape there. */
   capeModConflicts: () => call<CapeConflict[]>("cape_mod_conflicts"),
   /** The texture of an item this account owns, checked against the Store's SHA-256 (a data URL). */
@@ -877,6 +948,10 @@ export const api = {
   storeCapeStrip: (uuid: string, cosmeticId: string, index: number) => call<ArrayBuffer>("store_cape_strip", { uuid, cosmeticId, index }),
   storeWallet: (uuid: string) => call<StoreWallet>("store_wallet", { uuid }),
   storeOrders: (uuid: string) => call<StoreOrder[]>("store_orders", { uuid }),
+  /** The role badges this account owns and the one other players see (src-tauri/src/store/badges.rs; `known: false`: the Store sends none yet). */
+  badgeList: (uuid: string) => call<Badges>("badge_list", { uuid }),
+  /** Shows `tag` (one of the owned badges) to other players: the Store's answer. */
+  badgeSet: (uuid: string, tag: string) => call<Badges>("badge_set", { uuid, tag }),
   /** Signs the browser showing `code` in to the Store as this account. Only after the player confirmed the code. */
   storeApproveLink: (uuid: string, code: string) => call<void>("store_approve_link", { uuid, code }),
 
@@ -906,8 +981,10 @@ export const api = {
    * and sends it as "social:update" and "social:event"; errors are short codes (lib/social.ts `errorKey`).
    */
   socialSnapshot: () => call<SocialSnapshot>("social_snapshot"),
-  /** The chat open on the Friends page (polled every 4 s while one is), or null. */
+  /** The chat open on the Friends page (synced more often while one is), or null. */
   socialFocus: (chat: string | null) => call<void>("social_focus", { chat }),
+  /** The player is typing to a friend: they see "typing…" (sent only while live, at most every 3 s). */
+  socialTyping: (to: string) => call<void>("social_typing", { to }),
   /** Signs in now if needed and syncs; `force` (Retry) also cuts a wait short. */
   socialRefresh: (force = false) => call<void>("social_refresh", { force }),
   socialSettings: (settings: { status?: MyStatus; allowRequests?: boolean }) => call<Me>("social_settings", settings),

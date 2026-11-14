@@ -321,9 +321,8 @@ public final class Mc263Food {
 			int hunger = gain.nutrition();
 			hungerOverlay(graphics, hunger, food, xRight, yLineBase, flashAlpha, rotten(held), shake);
 			if (overlay && state.bool(Saturation.SATURATION_GAIN)) {
-				int newFood = food + hunger;
-				float newSaturation = saturation + gain.saturation();
-				float gained = newSaturation > newFood ? newFood - saturation : gain.saturation();
+				// What eating really adds: food up to 20, saturation up to the new food level (FoodData.add).
+				float gained = FoodRegen.saturationGained(food, saturation, hunger, gain.saturation());
 				saturationOverlay(graphics, gained, saturation, xRight, yLineBase, flashAlpha, state.bool(Saturation.COLOR_GAIN) ? rgb : -1, shake);
 			}
 		} catch (RuntimeException | LinkageError e) {

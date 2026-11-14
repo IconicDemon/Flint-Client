@@ -450,7 +450,7 @@ public final class HudData {
 
 	// ---------- under the crosshair, in hand: not on 1.8.9 ----------
 
-	public static HudLooks.@Nullable Block block(int range) {
+	public static HudLooks.@Nullable Block block() {
 		return null;
 	}
 

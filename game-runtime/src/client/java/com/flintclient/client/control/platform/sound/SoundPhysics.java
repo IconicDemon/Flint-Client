@@ -835,6 +835,10 @@ public final class SoundPhysics {
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
 		ClientLevel level = mc.level;
+		// The debug rays draw where every sound comes from, through walls: your own worlds only (fair play on a server).
+		if (com.flintclient.client.control.feature.ServerRules.fairPlay()) {
+			return;
+		}
 		if (player == null || level == null || player.position().distanceTo(start) > 32 && player.position().distanceTo(end) > 32) {
 			return;
 		}

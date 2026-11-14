@@ -12,6 +12,18 @@ final class MenuMath {
 		return Math.clamp(snapped, min, max);
 	}
 
+	/**
+	 * How many columns of at least {@code minCell} fit {@code inner} with {@code gap} between them: from {@code most} down to 1.
+	 */
+	static int columns(float inner, float gap, float minCell, int most) {
+		for (int cols = most; cols > 1; cols--) {
+			if ((inner - (cols - 1) * gap) / cols >= minCell) {
+				return cols;
+			}
+		}
+		return 1;
+	}
+
 	/** How many decimals a decimal setting's step needs to show (0.05 → 2, 0.5 → 1, 1 → 0; at most 4). */
 	static int decimals(float step) {
 		for (int d = 0; d < 4; d++) {

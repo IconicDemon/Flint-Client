@@ -77,7 +77,7 @@ public final class Flint {
 			menuKey = new KeyBinding("Flint Menu", Keyboard.KEY_RSHIFT, KEY_CATEGORY);
 			zoomKey = new KeyBinding("Zoom", Keyboard.KEY_C, KEY_CATEGORY);
 		}
-		return new KeyBinding[] {menuKey, zoomKey};
+		return new KeyBinding[] {menuKey, zoomKey, com.flintclient.legacy.cosmetics.Emotes189.key()};
 	}
 
 	/**
@@ -121,7 +121,11 @@ public final class Flint {
 
 	/** A mod failed: it is switched off for the session. */
 	public static void fault(Module m, Throwable e) {
-		if (FAULTED.add(m.id)) {
+		// Logged once with its stack by the safety net, which keeps the record the QA crash sweep reads and queues the notice the
+		// next tick shows ("Flint turned off Zoom after an error"); a mod only 1.8.9 has is logged once here.
+		if (com.flintclient.client.control.model.ModuleRegistry.indexOf(m.id) >= 0) {
+			com.flintclient.client.control.feature.Faults.moduleFailed(m.id, "running", e);
+		} else if (FAULTED.add(m.id)) {
 			LOG.error("Flint switched off " + m.name + " after an error", e);
 		}
 		m.setEnabled(false);
@@ -142,6 +146,15 @@ public final class Flint {
 
 	/** Every client tick (before Minecraft handles input). */
 	public static void tick(Minecraft mc) {
+		// What Flint switched off or closed after an error, said once (Faults: one notice for several at once).
+		String fault = com.flintclient.client.control.feature.Faults.takeNotice();
+		if (fault != null) {
+			try {
+				GameFolders.notice(mc, fault);
+			} catch (RuntimeException e) {
+				LOG.debug("Flint: couldn't show a notice", e);
+			}
+		}
 		// Packs and worlds put into the game's folders in a form it can't read (a .rar, a pack a folder down), made readable.
 		try {
 			GameFolders.tick(mc);
@@ -150,12 +163,24 @@ public final class Flint {
 		}
 		// Resource packs the Flint app added while the game runs, shown at once (.flint-packs.json, looked at once a second).
 		LivePacks189.tick(mc);
+		// Instant Swap: nothing unless a swap is going on (the Library closed after a mod changed, or this is a standby game).
+		try {
+			com.flintclient.client.module.social.InstantSwap.tick();
+		} catch (RuntimeException | LinkageError e) {
+			LOG.warn("Flint: Instant Swap failed", e);
+		}
 		if (modules == null) {
 			return;
 		}
 		com.flintclient.client.control.hud.render.HudRenderer.tick();
+		// Smooth screen sharing (the shared switch): the game's GPU work behind a screen capture's while it is in a window (not in
+		// fullscreen, as on every line); a field check unless it changed.
+		com.flintclient.client.perf.GpuPriority.apply(com.flintclient.client.control.ControlState.settings().gameBool(
+			com.flintclient.client.control.model.GameOptions.SMOOTH_SHARING) && !mc.options.fullscreen);
 		Presence.tick(mc);
 		StoreCapes189.tick(mc);
+		// The 3D cosmetics and emotes (they hear the Store capes' lookups).
+		com.flintclient.legacy.cosmetics.Cosmetics189.tick(mc);
 		FriendNotices189.tick(mc);
 		syncKeys(false);
 		// The waypoints of the world or server you are in, whether Waypoints is on or not: the menu's list shows and adds them.

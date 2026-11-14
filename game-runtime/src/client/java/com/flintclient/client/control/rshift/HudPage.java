@@ -257,7 +257,9 @@ final class HudPage extends Node {
 		private static final float RISE_SECONDS = 0.2F;
 		private final Big mods;
 		private final Big widgets;
-		private final List<Tile> tiles = new ArrayList<>();
+		private final List<QuickTile> tiles = new ArrayList<>();
+		/** From one tile to the next, in layout units: the design's, or more when a name needs it (measured as it paints). */
+		private float pitch;
 		private float faded = -1;
 		/** When the page opened, for its fade in. */
 		private final long openedAt = Clock.millis();
@@ -265,24 +267,44 @@ final class HudPage extends Node {
 		Hub() {
 			mods = add(new Big("EDIT FLINT MODS", Glyph.GRID, true, screen::openWindow));
 			widgets = add(new Big("HUDS", Glyph.PLUS, false, HudPage.this::toggleHuds));
-			tiles.add(add(new Tile("MC Settings", Glyph.GEAR, () -> screen.openScreen(MenuHost.optionsScreen(screen)))));
+			for (QuickTile.Entry entry : quickTiles()) {
+				tiles.add(add(new QuickTile(entry)));
+			}
+			// Its pictures and animations load now, so the Cosmetics window opens with them.
+			CosmeticShelf.warmUp();
+		}
+
+		/**
+		 * The shortcut tiles under EDIT FLINT MODS and HUDS, left to right; each is drawn by {@link QuickTile}, so a new one is
+		 * one entry here.
+		 */
+		private List<QuickTile.Entry> quickTiles() {
+			List<QuickTile.Entry> entries = new ArrayList<>();
+			if (MenuHost.libraryOffered()) {
+				// The in-game Library (as the launcher's): mods, resource packs and shaders for this profile, over the game.
+				// Minecraft's own settings stay a click away in the pause menu.
+				entries.add(new QuickTile.Entry("Library", Glyph.BOOK_OPEN, () -> screen.openScreen(new FlintLibraryScreen(screen))));
+			} else {
+				entries.add(new QuickTile.Entry("MC Settings", Glyph.GEAR, () -> screen.openScreen(MenuHost.optionsScreen(screen))));
+			}
 			// Your Flint Store cosmetics, over the game: what you wear changes in game as you pick it, without leaving the world
 			// or the server (the Cosmetics window, as the main menu opens it); closing it comes back here. Resource packs stay one
 			// click away in MC Settings (and in Pack Organizer).
-			tiles.add(add(new Tile("Cosmetics", Glyph.GEM, () -> screen.openScreen(new FlintCosmeticsScreen(screen)))));
-			tiles.add(add(new Tile("Screenshots", Glyph.CAMERA, () -> {
+			entries.add(new QuickTile.Entry("Cosmetics", Glyph.GEM, () -> screen.openScreen(new FlintCosmeticsScreen(screen))));
+			entries.add(new QuickTile.Entry("Screenshots", Glyph.CAMERA, () -> {
 				Object shots = MenuHost.screenshotsScreen(screen);
 				if (shots != null) {
 					screen.openScreen(shots);
 				} else {
 					MenuHost.openFolder("screenshots");
 				}
-			})));
-			tiles.add(add(new Tile("Waypoints", Glyph.FLAG, () -> {
+			}));
+			entries.add(new QuickTile.Entry("Waypoints", Glyph.FLAG, () -> {
 				ModMenuScreen.showWaypoints();
 				screen.openWindow();
-			})));
-			tiles.add(add(new Tile("Minecraft Folder", Glyph.FOLDER, () -> MenuHost.openGameFolder())));
+			}));
+			entries.add(new QuickTile.Entry("Game Folder", Glyph.FOLDER, MenuHost::openGameFolder));
+			return entries;
 		}
 
 		@Override
@@ -293,18 +315,23 @@ final class HudPage extends Node {
 			float bh = r(118);
 			mods.setBounds(cx - bw / 2, cy - bh - r(12), bw, bh);
 			widgets.setBounds(cx - bw / 2, cy + r(12), bw, bh);
-			float tw = r(180);
-			// Room for each name under its tile ("MINECRAFT FOLDER").
-			float gap = r(110);
-			float total = tiles.size() * tw + (tiles.size() - 1) * gap;
+			float tw = r(QuickTile.SIZE);
+			// Room for each name under its tile: the design's gap, or more when a name's longest word needs it.
+			float step = Math.max(tw + r(110), pitch);
+			float total = tiles.size() * tw + (tiles.size() - 1) * (step - tw);
 			float ty = cy + r(12) + bh + r(80);
 			for (int i = 0; i < tiles.size(); i++) {
-				tiles.get(i).setBounds(cx - total / 2 + i * (tw + gap), ty, tw, tw);
+				QuickTile tile = tiles.get(i);
+				tile.setBounds(cx - total / 2 + i * step, ty, tw, tw);
+				// A name too wide for it breaks onto two lines (MINECRAFT / FOLDER).
+				tile.pitch(step);
 			}
 		}
 
 		@Override
 		protected void paint(Canvas c) {
+			CosmeticShelf.pumpShared();
+			measureTiles(c);
 			// Steps back while a mod is dragged or a box drawn, so the HUD under it can be seen.
 			faded = MenuStyle.ease(faded, screen.editor().busy());
 			// A soft dark fall from the top and bottom edges, so the page reads over any world (it leaves the middle clear).
@@ -317,6 +344,22 @@ final class HudPage extends Node {
 			float e = easeOut(Math.clamp(since() / RISE_SECONDS, 0, 1));
 			int rise = Math.round(c.px(MenuStyle.d(8)) * (1 - e));
 			c.mark(c.px(cx) - com.flintclient.client.render.MaskAtlas.markWidth(markH) / 2, c.px(top) + rise, markH, e * (1.0F - 0.8F * faded));
+		}
+
+		/**
+		 * The tiles' distance from the names they hold: every name's longest word fits across its room with a margin, so no name
+		 * is ever cut (Minecraft's font keeps its whole pixel size on a small window while the layout shrinks). Lays the row out
+		 * again when that changes (a new window size or font size).
+		 */
+		private void measureTiles(Canvas c) {
+			float wanted = 0;
+			for (QuickTile tile : tiles) {
+				wanted = Math.max(wanted, tile.neededPitch(c));
+			}
+			if (Math.abs(wanted - pitch) > 0.01F) {
+				pitch = wanted;
+				layout();
+			}
 		}
 
 		/** Seconds since the page opened; far along with animations off or reduced motion, so everything is in place. */
@@ -397,32 +440,6 @@ final class HudPage extends Node {
 		}
 	}
 
-	/** A shortcut tile: a square with an icon, its name under it. */
-	private static final class Tile extends Pressable {
-		private final Label label;
-		private final Glyph icon;
-
-		Tile(String text, Glyph icon, Runnable action) {
-			super(action);
-			this.label = new Label(Type.BADGE, text.toUpperCase(Locale.ROOT));
-			this.icon = icon;
-			name(text);
-			tooltip(text);
-		}
-
-		@Override
-		protected void paint(Canvas c) {
-			float rad = MenuStyle.radius();
-			MenuStyle.block(c, x, y, w, h, rad, hover, 0);
-			icon.draw(c, x + w / 2, y + h / 2, r(56), Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, hover));
-			// On a dark pill, so the name reads over any world (snow, sky).
-			float lw = Math.min(label.width(c), w + r(90)) + r(24);
-			MenuStyle.box(c, x + w / 2 - lw / 2, y + h + r(30) - r(19), lw, r(38), MenuStyle.d(4), Palette.withAlpha(0xFF000000, 0.75F));
-			MenuStyle.centered(c, label, x + w / 2, y + h + r(30), MenuStyle.TAB_TEXT_SELECTED, w + r(90));
-			MenuStyle.focusRing(c, x, y, w, h, rad, focus);
-		}
-	}
-
 	// ---------- "?" ----------
 
 	/** "?" at the bottom left; open, the controls of the HUD page above it (every one of them works). */
@@ -499,6 +516,8 @@ final class HudPage extends Node {
 		private final Column list = new Column();
 		private final ScrollView scroll;
 		private @Nullable FontFace searchFace;
+		/** The menu colours the search box was made with ({@link MenuStyle#version}): a change of theme remakes it. */
+		private int searchLook = -1;
 
 		Huds() {
 			close = add(new Parts.Square(Glyph.CLOSE, "Close", this::close));
@@ -559,7 +578,8 @@ final class HudPage extends Node {
 			close.setBounds(x + w - r(24) - sq, y + r(24), sq, sq);
 			search.setBounds(x + r(24), y + r(24) + sq + r(20), w - 2 * r(24), r(64));
 			FontFace face = Type.SEARCH.face();
-			if (face != searchFace) {
+			if (face != searchFace || searchLook != MenuStyle.version()) {
+				searchLook = MenuStyle.version();
 				searchFace = face;
 				search.look(new TextField.Look(face, MenuStyle.SEARCH, MenuStyle.SEARCH_EDGE, MenuStyle.SEARCH_EDGE_HOVER, MenuStyle.SEARCH_FOCUS,
 					r(15), r(24), r(30), r(18), MenuStyle.SEARCH_TEXT, MenuStyle.SEARCH_HINT, MenuStyle.SEARCH_HINT));

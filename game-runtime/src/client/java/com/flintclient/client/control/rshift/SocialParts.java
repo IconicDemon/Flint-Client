@@ -239,7 +239,7 @@ final class SocialParts {
 	static final class Button extends Pressable {
 		static final float H = 40;
 		private final Label label;
-		private final @Nullable Glyph glyph;
+		private @Nullable Glyph glyph;
 		private PageControls.Look look;
 
 		Button(String text, @Nullable Glyph glyph, PageControls.Look look, Runnable action) {
@@ -260,6 +260,10 @@ final class SocialParts {
 
 		void setLook(PageControls.Look look) {
 			this.look = look;
+		}
+
+		void setGlyph(@Nullable Glyph glyph) {
+			this.glyph = glyph;
 		}
 
 		@Override
@@ -287,7 +291,7 @@ final class SocialParts {
 			} else {
 				boolean accent = look == PageControls.Look.ACCENT;
 				MenuStyle.button(c, x, y, w, h, accent, hover, press);
-				ink = accent ? 0xFFFFFFFF : Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, 0.35F + 0.65F * hover);
+				ink = accent ? MenuStyle.ON_ACCENT : Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, 0.35F + 0.65F * hover);
 			}
 			float total = label.width(c) + (glyph != null ? d(14) + d(8) : 0);
 			float left = x + Math.max(d(8), (w - total) / 2);
@@ -322,7 +326,7 @@ final class SocialParts {
 		protected void paint(Canvas c) {
 			float rad = Math.min(MenuStyle.radius(), h / 2);
 			MenuStyle.button(c, x, y, w, h, accent, hover, press);
-			int ink = accent ? 0xFFFFFFFF : Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, 0.35F + 0.65F * hover);
+			int ink = accent ? MenuStyle.ON_ACCENT : Palette.lerp(MenuStyle.NEUTRAL, MenuStyle.TEXT, 0.35F + 0.65F * hover);
 			glyph.draw(c, x + w / 2, y + h / 2, h * 0.42F, ink);
 			MenuStyle.focusRing(c, x, y, w, h, rad, focus);
 		}

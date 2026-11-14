@@ -13,6 +13,8 @@ include ClassWarmer.java
 # The saved settings and layouts every screen reads, and the quick state lookup over them.
 include control/ControlState.java
 include control/feature/Mods.java
+# What a server's rules keep off (Mods.on asks it).
+include control/feature/ServerRules.java
 # The count of what Flint keeps on the GPU (the mask atlas reports its textures).
 include graphics/GpuResourceTracker.java
 # Canvas, text, the mask atlas, icons, card pictures (FontPreload prepares 26.x's TrueType fonts: engine code).

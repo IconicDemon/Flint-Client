@@ -62,6 +62,12 @@ public final class GameFolders {
 		}
 	}
 
+	/** A short notice: over the game in the action bar, over a screen at its top (1.8.9 has no toasts). */
+	public static void notice(Minecraft mc, String message) {
+		// Flint's one notification style, over the game and over screens alike (FriendNotices189 draws every Flint notice).
+		FriendNotices189.show(message);
+	}
+
 	private static void show(Minecraft mc, Said said) {
 		String message = said.message;
 		Screen screen = mc.screen;
@@ -78,12 +84,7 @@ public final class GameFolders {
 				}
 			}
 		}
-		if (screen == null && mc.world != null) {
-			mc.gui.setOverlayMessage(message, false);
-		} else {
-			notice = message;
-			noticeAt = System.currentTimeMillis();
-		}
+		FriendNotices189.show(message);
 	}
 
 	/** ResourcePacksScreen's own "changed" flag (its only boolean field). */
@@ -116,11 +117,12 @@ public final class GameFolders {
 		int alpha = Math.max(4, Math.round(fade * 255));
 		TextRenderer font = mc.textRenderer;
 		int width = font.getWidth(text);
-		int x = (screen.width - width) / 2;
+		// Centred in GUI units (Flint's main menu and its pages keep their own size in menu units).
+		int x = (com.flintclient.client.platform.Frame.get().guiWidth() - width) / 2;
 		// Above the screen's own title (drawn at y 15 or lower).
 		int y = 3;
 		GuiElement.fill(x - 6, y - 2, x + width + 6, y + font.fontHeight + 1, (Math.round(fade * 0xC0) << 24) | 0x0A0908);
-		GuiElement.fill(x - 6, y + font.fontHeight + 1, x + width + 6, y + font.fontHeight + 2, (alpha << 24) | 0xE07A1F);
+		GuiElement.fill(x - 6, y + font.fontHeight + 1, x + width + 6, y + font.fontHeight + 2, (alpha << 24) | (com.flintclient.client.render.Palette.themed(0xFFE07A1F) & 0xFFFFFF));
 		font.drawWithShadow(text, x, y, (alpha << 24) | 0xFFFFFF);
 	}
 }

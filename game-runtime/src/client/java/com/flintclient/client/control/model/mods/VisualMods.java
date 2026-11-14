@@ -6,6 +6,8 @@ import com.flintclient.client.control.model.BoolSetting;
 import com.flintclient.client.control.model.BoxStyle;
 import com.flintclient.client.control.model.Category;
 import com.flintclient.client.control.model.FloatSetting;
+import com.flintclient.client.control.model.HeldItemsSetting;
+import com.flintclient.client.control.model.HeldTransform;
 import com.flintclient.client.control.model.IconId;
 import com.flintclient.client.control.model.IdKind;
 import com.flintclient.client.control.model.IdListSetting;
@@ -17,6 +19,7 @@ import com.flintclient.client.control.model.OptionSetting;
 import com.flintclient.client.control.model.RgbSetting;
 import com.flintclient.client.control.model.SettingDescriptor;
 import com.flintclient.client.control.model.TextSetting;
+import java.util.List;
 
 /** How the world looks on your screen. Visual only: nothing here changes the world or what the server knows. */
 public final class VisualMods {
@@ -57,8 +60,10 @@ public final class VisualMods {
 		public static final IntSetting DISTANCE = new IntSetting("distance", "Fog distance multiplier", null, 100, 50, 300, 10, "%");
 		public static final BoolSetting OVERRIDE_COLOR = new BoolSetting("overrideColor", "Override fog color", false);
 		public static final RgbSetting COLOR = new RgbSetting("color", "Fog color", null, 0xC0D8FF);
-		public static final BoolSetting CLEAR_WATER = new BoolSetting("clearWater", "Clear water", "See much further under water", false);
-		public static final BoolSetting CLEAR_LAVA = new BoolSetting("clearLava", "Clear lava", "See a little in lava", false);
+		public static final BoolSetting CLEAR_WATER = new BoolSetting("clearWater", "Clear water",
+			"See under water as far as Minecraft ever lets you (96 blocks), at once", false);
+		public static final BoolSetting CLEAR_LAVA = new BoolSetting("clearLava", "Clear lava",
+			"See in lava as far as Fire Resistance lets you (5 blocks)", false);
 
 		/** One of Custom Fog's fog configs. */
 		public record Config(String key, String title, BoolSetting enabled, OptionSetting type, FloatSetting linearStart, FloatSetting linearEnd,
@@ -111,7 +116,8 @@ public final class VisualMods {
 			return b.needs(Requirement.WORLD)
 				.note("Custom Fog's fog: in the open, under water and in powder snow, each config sets its own mode (Linear from a start "
 					+ "to an end share of your render distance; Exponential; Exponential^2; None) where it is enabled. Dimensions without "
-					+ "a config of their own use Default; lava and Blindness keep Minecraft's fog; the sky's fog reaches your render "
+					+ "a config of their own use Default; lava, Blindness and Darkness keep Minecraft's fog, and water and powder snow "
+					+ "never get clearer than Minecraft's best there (96 blocks, 2 blocks); the sky's fog reaches your render "
 					+ "distance. Exponential modes are drawn with Minecraft's own fog ramp between the distances where they reach 5% and "
 					+ "95% (Flint doesn't replace Minecraft's or Sodium's shaders). No fog, the distance multiplier, the color and clear "
 					+ "water and lava are Flint's and apply on top.").build();
@@ -136,7 +142,8 @@ public final class VisualMods {
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Lighting", "Adjust your brightness beyond Minecraft's limit")
 			.keywords("fullbright", "gamma", "brightness", "night vision").icon(IconId.GAUGE).category(Category.VISUAL)
 			.section("Brightness Settings", MODE, BRIGHTNESS)
-			.note("Changes only how bright you see things; light levels (and mob spawning) are unchanged.").build();
+			.note("Changes only how bright you see things; light levels (and mob spawning) are unchanged. The Darkness effect still "
+				+ "darkens everything while it lasts, as in Minecraft.").build();
 	}
 
 	public static final class ChunkBorders {
@@ -334,7 +341,8 @@ public final class VisualMods {
 
 	/**
 	 * Item Physics: Realistic Item Drops' look (CC-BY-SA-4.0; items lie flat from the moment they drop) or Flint's tumble,
-	 * plus every option of Dropped Item Tweaks (LGPL-3.0): no bob, how many copies a stack shows, and item scales.
+	 * plus Dropped Item Tweaks' (LGPL-3.0) no bob and how many copies a stack shows. How big dropped items are is Item Customizer's
+	 * Dropped Item Size (its item scales moved there, ModuleMigrations).
 	 */
 	public static final class ItemPhysics {
 		public static final String ID = "item_physics";
@@ -357,21 +365,16 @@ public final class VisualMods {
 			"Remove the bobbing of items dropped on the ground", false);
 		public static final IntSetting STACK_COUNT = new IntSetting("dropStackCount", "Dropped stack item count",
 			"The max amount of dropped items to render; this does not scale like Minecraft's. 0 turns it off", 0, 0, 64, 1, "");
-		public static final FloatSetting ITEM_SCALE = new FloatSetting("itemScale", "Item scale", "The scale of dropped items", 1, 0, 3, 0.1F, "×");
-		public static final FloatSetting CUSTOM_SCALE = new FloatSetting("uhcOverlay", "Custom item scale",
-			"Custom scale for the items you list (instead of Item scale). 0 turns it off", 0, 0, 3, 0.1F, "×");
-		public static final IdListSetting CUSTOM_ITEMS = new IdListSetting("uhcItemList", "Custom item scale list",
-			"The items the custom scale is for", IdKind.ITEM, java.util.List.of("minecraft:apple", "minecraft:golden_apple",
-				"minecraft:enchanted_golden_apple", "minecraft:gold_ingot", "minecraft:gold_nugget", "minecraft:gold_block", "minecraft:player_head"));
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Item Physics", "Cool item dropping physics")
 			.keywords("items", "drop", "physics", "ground", "realistic", "static", "scale", "uhc").icon(IconId.GAUGE).category(Category.VISUAL)
 			.section("Item Physics", STYLE, ROTATION_SPEED)
 			.section("Realistic", BLOCKS_ON_SIDE, SAME_HEADING, REALISTIC_SIZE, ONE_MODEL, LANDING_PARTICLES)
-			.section("Dropped Item Tweaks", STATIC, STACK_COUNT, ITEM_SCALE, CUSTOM_SCALE, CUSTOM_ITEMS)
+			.section("Dropped Item Tweaks", STATIC, STACK_COUNT)
 			.note("Only how dropped items look changes: where they are, picking them up and despawning stay Minecraft's (Realistic Item "
 				+ "Drops' server-side parts, items that never despawn and a pickup spot beside the item, aren't copied, so each item "
 				+ "lies where it really is). Realistic lays flat items face down and blocks on their side from the moment they drop; "
-				+ "Tumble turns them end over end while they fall and lays them down where they land.").build();
+				+ "Tumble turns them end over end while they fall and lays them down where they land. How big they are is Item Customizer's "
+				+ "Dropped Item Size.").build();
 	}
 
 	public static final class Skins3d {
@@ -642,28 +645,83 @@ public final class VisualMods {
 				+ "experience.").build();
 	}
 
+	/**
+	 * Item Customizer (formerly View Model; the id stays): where held items and the empty hand sit in first person, for every
+	 * item, per category or per item; the swing, eating and re-equip animations of your own hand; and how big dropped items
+	 * are, all of them or a chosen few. Its page is its own panel ({@code rshift/ItemCustomizerPanel}).
+	 */
 	public static final class ViewModel {
 		public static final String ID = "view_model";
-		public static final FloatSetting SHIELD_HEIGHT = new FloatSetting("shieldHeight", "Shield height", "Lower (negative) or raise a held shield",
-			0, -1, 1, 0.1F, "");
-		public static final BoolSetting SCALE = new BoolSetting("scale", "Scale", false);
-		public static final FloatSetting SCALE_X = new FloatSetting("scaleX", "X", null, 1, 0, 3, 0.1F, "×");
-		public static final FloatSetting SCALE_Y = new FloatSetting("scaleY", "Y", null, 1, 0, 3, 0.1F, "×");
-		public static final FloatSetting SCALE_Z = new FloatSetting("scaleZ", "Z", null, 1, 0, 3, 0.1F, "×");
-		public static final BoolSetting POSITION = new BoolSetting("position", "Position", false);
+		// ---------- First Person Items ----------
+		public static final BoolSetting FIRST_PERSON = new BoolSetting("firstPerson", "First Person Items",
+			"Where your held items and your empty hand sit", true);
+		public static final BoolSetting ITEMS = new BoolSetting("items", "Items", "Every item you hold, unless it has its own place below", true);
 		public static final FloatSetting POSITION_X = new FloatSetting("positionX", "X", "Right is positive (mirrored for the other hand)", 0, -2,
-			2, 0.1F, "");
-		public static final FloatSetting POSITION_Y = new FloatSetting("positionY", "Y", "Up is positive", 0, -2, 2, 0.1F, "");
-		public static final FloatSetting POSITION_Z = new FloatSetting("positionZ", "Z", "Toward you is positive", 0, -2, 2, 0.1F, "");
-		public static final BoolSetting ROTATION = new BoolSetting("rotation", "Rotation", false);
+			2, 0.01F, "");
+		public static final FloatSetting POSITION_Y = new FloatSetting("positionY", "Y", "Up is positive", 0, -2, 2, 0.01F, "");
+		public static final FloatSetting POSITION_Z = new FloatSetting("positionZ", "Z", "Toward you is positive", 0, -2, 2, 0.01F, "");
 		public static final FloatSetting ROTATION_X = new FloatSetting("rotationX", "X", null, 0, -180, 180, 1, "°");
 		public static final FloatSetting ROTATION_Y = new FloatSetting("rotationY", "Y", null, 0, -180, 180, 1, "°");
 		public static final FloatSetting ROTATION_Z = new FloatSetting("rotationZ", "Z", null, 0, -180, 180, 1, "°");
-		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "View Model", "Move, scale and rotate the item in your hand")
-			.keywords("viewmodel", "hand", "item", "position", "shield").icon(IconId.GAUGE).category(Category.VISUAL)
-			.section("General", SHIELD_HEIGHT).section("Scale", SCALE, SCALE_X, SCALE_Y, SCALE_Z)
-			.section("Position", POSITION, POSITION_X, POSITION_Y, POSITION_Z).section("Rotation", ROTATION, ROTATION_X, ROTATION_Y, ROTATION_Z)
-			.needs(Requirement.WORLD).note("Only what you see in first person: the item, not your empty hand, and never your reach.").build();
+		public static final FloatSetting SCALE_X = new FloatSetting("scaleX", "X", null, 1, 0, 3, 0.01F, "×");
+		public static final FloatSetting SCALE_Y = new FloatSetting("scaleY", "Y", null, 1, 0, 3, 0.01F, "×");
+		public static final FloatSetting SCALE_Z = new FloatSetting("scaleZ", "Z", null, 1, 0, 3, 0.01F, "×");
+		public static final BoolSetting EMPTY_HANDS = new BoolSetting("emptyHands", "Empty Hands", "Your arm while your hand is empty", true);
+		public static final FloatSetting HAND_X = new FloatSetting("handPositionX", "X", "Right is positive", 0, -2, 2, 0.01F, "");
+		public static final FloatSetting HAND_Y = new FloatSetting("handPositionY", "Y", "Up is positive", 0, -2, 2, 0.01F, "");
+		public static final FloatSetting HAND_Z = new FloatSetting("handPositionZ", "Z", "Toward you is positive", 0, -2, 2, 0.01F, "");
+		public static final FloatSetting HAND_ROTATION_X = new FloatSetting("handRotationX", "X", null, 0, -180, 180, 1, "°");
+		public static final FloatSetting HAND_ROTATION_Y = new FloatSetting("handRotationY", "Y", null, 0, -180, 180, 1, "°");
+		public static final FloatSetting HAND_ROTATION_Z = new FloatSetting("handRotationZ", "Z", null, 0, -180, 180, 1, "°");
+		public static final FloatSetting HAND_SCALE_X = new FloatSetting("handScaleX", "X", null, 1, 0, 3, 0.01F, "×");
+		public static final FloatSetting HAND_SCALE_Y = new FloatSetting("handScaleY", "Y", null, 1, 0, 3, 0.01F, "×");
+		public static final FloatSetting HAND_SCALE_Z = new FloatSetting("handScaleZ", "Z", null, 1, 0, 3, 0.01F, "×");
+		/** Every held item's own place, in the order of {@link HeldTransform}'s components. */
+		public static final List<FloatSetting> ITEM_TRANSFORM = List.of(POSITION_X, POSITION_Y, POSITION_Z, ROTATION_X, ROTATION_Y, ROTATION_Z,
+			SCALE_X, SCALE_Y, SCALE_Z);
+		/** The empty hand's place, the same way. */
+		public static final List<FloatSetting> HAND_TRANSFORM = List.of(HAND_X, HAND_Y, HAND_Z, HAND_ROTATION_X, HAND_ROTATION_Y,
+			HAND_ROTATION_Z, HAND_SCALE_X, HAND_SCALE_Y, HAND_SCALE_Z);
+		public static final HeldItemsSetting HELD = new HeldItemsSetting("heldItems", "Selected items",
+			"Items and kinds of item with a place of their own", POSITION_X, ROTATION_X, SCALE_X);
+		// ---------- Animations ----------
+		public static final BoolSetting ANIMATIONS = new BoolSetting("animations", "Animations", "Your own arm's swing, eating and re-equip",
+			true);
+		public static final BoolSetting SWING_SCALE = new BoolSetting("swingScale", "Swing Scale",
+			"A resized item swings as far as its size; off, it swings Minecraft's full arc", false);
+		public static final BoolSetting IGNORE_HASTE = new BoolSetting("ignoreHaste", "Ignore Haste", "Haste doesn't speed up your swing",
+			false);
+		public static final BoolSetting IGNORE_FATIGUE = new BoolSetting("ignoreMiningFatigue", "Ignore Mining Fatigue",
+			"Mining Fatigue doesn't slow your swing down", false);
+		public static final BoolSetting ROTATIONLESS_EAT = new BoolSetting("rotationlessEating", "Rotationless Eat & Drink",
+			"Food and drinks come up to your mouth without turning", false);
+		public static final BoolSetting CANCEL_REEQUIP = new BoolSetting("cancelReEquip", "Cancel Re-Equip",
+			"Your item doesn't dip out of view when you switch items, when it changes or after an attack", false);
+		public static final BoolSetting SWING_SPEED = new BoolSetting("swingSpeed", "Swing Speed Modifier", "Your own arm swing, faster or slower",
+			false);
+		public static final FloatSetting SWING_SPEED_VALUE = new FloatSetting("swingSpeedMultiplier", "Swing speed",
+			"Above 1 is faster; only how it looks, never how fast you attack", 1, 0.25F, 4, 0.05F, "×");
+		// ---------- Dropped Item Size ----------
+		public static final BoolSetting DROPPED = new BoolSetting("droppedSize", "Dropped Item Size", "How big items on the ground look", true);
+		public static final FloatSetting DROPPED_SCALE = new FloatSetting("droppedScale", "All items", "Every dropped item's size", 1, 0.1F, 4,
+			0.05F, "×");
+		public static final FloatSetting DROPPED_SELECTED_SCALE = new FloatSetting("droppedSelectedScale", "Selected items",
+			"The size of the items you add, instead", 1.5F, 0.1F, 4, 0.05F, "×");
+		public static final IdListSetting DROPPED_ITEMS = new IdListSetting("droppedItems", "Selected items",
+			"The items that take the selected size on the ground", IdKind.ITEM, List.of());
+		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Item Customizer",
+				"Move, size and animate held and dropped items")
+			.keywords("item customizer", "viewmodel", "view model", "hand", "item", "position", "rotation", "scale", "size", "swing", "haste",
+				"fatigue", "eat", "drink", "re-equip", "reequip", "dropped", "shield")
+			.icon(IconId.GAUGE).category(Category.VISUAL)
+			.section("First Person Items", FIRST_PERSON, ITEMS, POSITION_X, POSITION_Y, POSITION_Z, ROTATION_X, ROTATION_Y, ROTATION_Z, SCALE_X,
+				SCALE_Y, SCALE_Z, EMPTY_HANDS, HAND_X, HAND_Y, HAND_Z, HAND_ROTATION_X, HAND_ROTATION_Y, HAND_ROTATION_Z, HAND_SCALE_X,
+				HAND_SCALE_Y, HAND_SCALE_Z, HELD)
+			.section("Animations", ANIMATIONS, SWING_SCALE, IGNORE_HASTE, IGNORE_FATIGUE, ROTATIONLESS_EAT, CANCEL_REEQUIP, SWING_SPEED,
+				SWING_SPEED_VALUE)
+			.section("Dropped Item Size", DROPPED, DROPPED_SCALE, DROPPED_SELECTED_SCALE, DROPPED_ITEMS)
+			.ownPage().needs(Requirement.WORLD)
+			.note("Only what you see: your reach, your attack speed and where items really are stay Minecraft's.").build();
 	}
 
 	public static final class Hotbar {

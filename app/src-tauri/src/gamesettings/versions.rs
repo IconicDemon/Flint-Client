@@ -65,7 +65,7 @@ impl VersionSupport {
 
 /// Versions Flint offers whose settings format hasn't been checked against the game's code yet (no local
 /// jars to check them with). Their settings are shown, never written. Every version Flint offers today is
-/// checked: 1.21.x and 26.x against the generated tables, 1.8.9 by its jar (`legacy189`).
+/// checked: 1.19.x, 1.21.x and 26.x against the generated tables, 1.8.9 by its jar (`legacy189`).
 const UNVERIFIED_VERSIONS: &[(&str, &str)] = &[];
 
 /// The family a version name belongs to and the data version its jar must report.
@@ -325,6 +325,8 @@ mod tests {
     fn an_installed_verified_version_maps_to_its_family() {
         let dir = TestDir::new();
         for (version, data, family) in [
+            ("1.19", 3105, "1.19"),
+            ("1.19.2", 3120, "1.19.2"),
             ("1.21.1", 3955, "1.21.1"),
             ("1.21.10", 4556, "1.21.10"),
             ("1.21.11", 4671, "1.21.11"),
@@ -410,7 +412,7 @@ mod tests {
     #[test]
     fn the_resource_pack_format_comes_from_the_jar() {
         let dir = TestDir::new();
-        for (version, data, format) in [("1.21.1", 3955, (34, 0)), ("1.21.10", 4556, (69, 0)), ("1.21.11", 4671, (75, 0)), ("26.1", 4786, (84, 0)), ("26.2", 4903, (88, 0)), ("26.3", 5023, (97, 1))] {
+        for (version, data, format) in [("1.19", 3105, (9, 0)), ("1.19.2", 3120, (9, 0)), ("1.21.1", 3955, (34, 0)), ("1.21.10", 4556, (69, 0)), ("1.21.11", 4671, (75, 0)), ("26.1", 4786, (84, 0)), ("26.2", 4903, (88, 0)), ("26.3", 5023, (97, 1))] {
             install_version(&dir.0, version, data);
             assert_eq!(resource_format(&dir.0, version), Some(format), "{version}");
         }

@@ -708,6 +708,18 @@ public final class Canvas {
 		frame.blit(texture, x, y, 0, 0, w, h, texW, texH, texW, texH, argb);
 	}
 
+	/**
+	 * The {@code sw × sh} region at ({@code u}, {@code v}) of a {@code texW × texH} texture drawn into the pixel box, tinted by
+	 * {@code argb} and the canvas opacity (one frame of an animated cape's frames side by side).
+	 */
+	public void textureRegion(Texture texture, int x, int y, int w, int h, int u, int v, int sw, int sh, int texW, int texH, int argb) {
+		argb = tint(argb);
+		if ((argb >>> 24) == 0 || w <= 0 || h <= 0) {
+			return;
+		}
+		frame.blit(texture, x, y, u, v, w, h, sw, sh, texW, texH, argb);
+	}
+
 	/** Rounds the corners of a square image by covering them in {@code surroundArgb}. */
 	public void roundCorners(int x, int y, int w, int h, int r, int surroundArgb) {
 		r = Math.min(r, Math.min(w, h) / 2);
@@ -727,6 +739,14 @@ public final class Canvas {
 		argb = tint(argb);
 		if ((argb >>> 24) != 0 && sizePx > 0) {
 			blit(MaskAtlas.get().glyph(codepoint, sizePx), x, y, sizePx, sizePx, false, false, argb);
+		}
+	}
+
+	/** A Font Awesome Solid glyph as {@link #glyph}, its ink centred in the {@code sizePx} square both ways (a tile's lone icon). */
+	public void centredGlyph(int codepoint, int x, int y, int sizePx, int argb) {
+		argb = tint(argb);
+		if ((argb >>> 24) != 0 && sizePx > 0) {
+			blit(MaskAtlas.get().centredGlyph(codepoint, sizePx), x, y, sizePx, sizePx, false, false, argb);
 		}
 	}
 

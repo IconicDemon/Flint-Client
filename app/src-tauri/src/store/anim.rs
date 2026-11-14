@@ -7,8 +7,8 @@
 //!   strips' addresses and hashes stay here, as the poster's do.
 //! - Anything that isn't exactly a version-1 manifest within the Store's limits is dropped (`None`): the cape then shows its
 //!   poster, the asset's own texture, as a static cape, exactly as a launcher that doesn't read animations would.
-//! - Strips are cached per account by SHA-256 next to its textures (cleared with them when the account leaves the Store) and
-//!   rehashed on every read.
+//! - Strips are kept in Flint's shared cache of verified files ([`super::asset_cache`], by SHA-256, with the games') and
+//!   rehashed on every read; Flint's CDN (`cdn_url`) is tried first when the Store names it.
 use super::*;
 
 pub const LAYOUT: &str = "cape-atlas-22x17";
@@ -36,6 +36,9 @@ pub struct Strip {
     #[serde(skip_serializing)]
     pub bytes: u64,
     pub frames: u32,
+    /// The same strip on Flint's CDN (`cdn_url`), tried first; absent until the Store names one.
+    #[serde(skip_serializing)]
+    pub cdn_url: Option<String>,
 }
 
 /// An animated cape's manifest, checked: the 22×17 cape atlas at `scale` pixels per unit, `durations_ms[f]` for frame `f`,
@@ -113,7 +116,8 @@ pub fn parse(value: &Value) -> Option<Animation> {
             return None;
         }
         total += bytes;
-        strips.push(Strip { url, sha256, bytes, frames });
+        let cdn_url = s.get("cdn_url").and_then(Value::as_str).filter(|u| !u.is_empty() && u.len() <= 2048).map(str::to_owned);
+        strips.push(Strip { url, sha256, bytes, frames, cdn_url });
     }
     if total > MAX_TOTAL_STRIP_BYTES {
         return None;
@@ -128,7 +132,17 @@ pub fn manifest(animation: &Animation) -> Option<Value> {
         return None;
     }
     let strips: Vec<Value> =
-        animation.strips.iter().map(|s| json!({ "url": s.url, "sha256": s.sha256, "bytes": s.bytes, "frames": s.frames })).collect();
+        animation
+            .strips
+            .iter()
+            .map(|s| {
+                let mut strip = json!({ "url": s.url, "sha256": s.sha256, "bytes": s.bytes, "frames": s.frames });
+                if let Some(cdn) = &s.cdn_url {
+                    strip["cdn_url"] = json!(cdn);
+                }
+                strip
+            })
+            .collect();
     Some(json!({
         "v": 1, "layout": LAYOUT, "scale": animation.scale, "width": animation.width, "height": animation.height,
         "frame_count": animation.frame_count, "durations_ms": animation.durations_ms, "duration_ms": animation.duration_ms,
@@ -161,8 +175,8 @@ fn checked(animation: &Animation, strip: &Strip, bytes: &[u8]) -> Result<(), &'s
     Ok(())
 }
 
-/// Strip `index` of the animated cape `cosmetic_id` this account owns, as the Store last listed it: from the account's cache
-/// by SHA-256 when it still matches, otherwise downloaded (without the Store session), checked and only then kept.
+/// Strip `index` of the animated cape `cosmetic_id` this account owns, as the Store last listed it: from the shared cache by
+/// SHA-256 when it still matches, otherwise downloaded (without the Store session), checked and only then kept.
 pub async fn strip(state: &AppState, uuid: &str, cosmetic_id: &str, index: usize) -> CmdResult<Vec<u8>> {
     let cached = load_cache(state, uuid).ok_or("Flint has no Store inventory for this account yet.")?;
     let animation = cached
@@ -173,32 +187,15 @@ pub async fn strip(state: &AppState, uuid: &str, cosmetic_id: &str, index: usize
         .and_then(|o| o.asset.as_ref())
         .and_then(|a| a.animation.clone())
         .ok_or("This item isn't animated.")?;
-    verified_strip(state, &animation, index, &account_dir(state, uuid).join("assets").join("strips")).await
+    verified_strip(state, &animation, index).await
 }
 
-/// Strip `index` of `animation`: from `dir` (by SHA-256) when it still matches, otherwise downloaded (without the Store
-/// session), checked against the manifest's hash and size and only then kept in `dir`.
-pub(crate) async fn verified_strip(state: &AppState, animation: &Animation, index: usize, dir: &std::path::Path) -> CmdResult<Vec<u8>> {
+/// Strip `index` of `animation`: from the shared cache (by SHA-256) when it still matches, otherwise downloaded (without the
+/// Store session; Flint's CDN first when the Store names it), checked against the manifest's hash and size and only then kept.
+pub(crate) async fn verified_strip(state: &AppState, animation: &Animation, index: usize) -> CmdResult<Vec<u8>> {
     let strip = animation.strips.get(index).ok_or("This animation has no such part.")?;
-    let path = dir.join(format!("{}.png", strip.sha256));
-    if let Ok(bytes) = std::fs::read(&path) {
-        if checked(animation, strip, &bytes).is_ok() {
-            return Ok(bytes);
-        }
-        // Changed on disk since it was checked: fetch it again.
-        let _ = std::fs::remove_file(&path);
-    }
-    let url = asset_url(&state.store.endpoints, &strip.url).ok_or("The Flint Store listed this animation at an address Flint doesn't download from.")?;
-    let response = state.http.get(url).timeout(REQUEST_TIMEOUT).send().await.map_err(|_| OFFLINE.to_owned())?;
-    if !response.status().is_success() {
-        return Err(format!("The animation couldn't be downloaded (HTTP {}).", response.status().as_u16()));
-    }
-    let bytes = read_capped(response, strip.bytes as usize).await.map_err(|_| "The animation couldn't be downloaded completely.".to_owned())?;
-    checked(animation, strip, &bytes)?;
-    if let Err(error) = write_atomic(&path, &bytes) {
-        eprintln!("[flint] couldn't keep a Store animation: {error}");
-    }
-    Ok(bytes)
+    let check = |bytes: &[u8]| checked(animation, strip, bytes).map_err(str::to_owned);
+    super::asset_cache::fetch(state, &strip.sha256, strip.cdn_url.as_deref(), &strip.url, strip.bytes as usize, "animation", check).await
 }
 
 /// Strip `index` of an animated cape the account owns, as raw PNG bytes (an `ArrayBuffer` in the interface).

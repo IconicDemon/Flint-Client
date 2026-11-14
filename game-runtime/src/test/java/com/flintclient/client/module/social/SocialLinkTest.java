@@ -27,6 +27,14 @@ class SocialLinkTest {
 	}
 
 	@Test
+	void friendsTypingNowAreRead() {
+		Friends f = SocialLink.readFriends(json("{\"phase\":\"ready\",\"typing\":[\"" + ALEX + "\",\"ec561538-f3fd-461d-aff5-086b22154bce\",\"not a uuid\",7]}"), null);
+		org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(ALEX), f.typing(), "canonical, once, nothing else");
+		org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(), SocialLink.readFriends(json("{\"phase\":\"ready\"}"), null).typing(),
+			"an app before typing sends none");
+	}
+
+	@Test
 	void theFriendsPagesStateIsRead() {
 		Friends f = SocialLink.readFriends(json("""
 			{"ok":true,"configured":true,"phase":"ready","me":{"uuid":"%s","name":"Steve","status":"busy","allowRequests":false},
@@ -107,6 +115,17 @@ class SocialLinkTest {
 	}
 
 	@Test
+	void badgesAreReadAsPlainNamesAndNoListIsNull() {
+		SocialLink.Badges b = SocialLink.readBadges(json("{\"badges\":[\"default\",\"staff\",\"<x>\",7],\"badge\":\"staff\"}"));
+		assertEquals(java.util.List.of("default", "staff"), b.badges());
+		assertEquals("staff", b.badge());
+		SocialLink.Badges none = SocialLink.readBadges(json("{\"badges\":null,\"badge\":null}"));
+		assertNull(none.badges(), "the Store has no badges yet: the game works its marks out");
+		assertNull(SocialLink.readBadges(json("{}")).badges());
+		assertNull(SocialLink.readBadges(json("{\"badges\":[\"default\"],\"badge\":\"Evil!\"}")).badge());
+	}
+
+	@Test
 	void cosmeticsAreReadWithTheirSlotsAndPictures() {
 		Cosmetics c = SocialLink.readCosmetics(json("""
 			{"storeUrl":"https://store.flintclient.com","name":"Steve","items":[
@@ -115,10 +134,18 @@ class SocialLinkTest {
 			 {"id":"00000000-0000-4000-8000-000000000003","kind":"head","name":"Halo","art":null}],
 			 "equipped":{"cape":"%s","boots":"%s","head":"x"},"stale":false,"problem":null}
 			""".formatted(CAPE, CAPE, CAPE)));
-		assertEquals(2, c.items().size());
+		assertEquals(3, c.items().size(), "a kind this game doesn't know yet (a newer Store's) is kept, to show under More");
 		assertEquals(3, c.items().get(0).art());
-		assertEquals(-1, c.items().get(1).art(), "no picture");
+		assertEquals("boots", c.items().get(1).kind());
+		assertNull(c.items().get(1).slot(), "but never worn");
+		assertEquals("headwear", c.items().get(2).kind(), "the Store's older name reads as today's");
+		assertEquals("head", c.items().get(2).slot());
+		assertEquals(-1, c.items().get(2).art(), "no picture");
+		assertTrue(c.items().get(0).owned());
+		assertNull(c.emotes(), "a Flint app without the emote wheel");
 		assertEquals("Alex", c.items().get(0).giftFrom());
+		assertEquals("ember", c.items().get(0).slug(), "the Store's slug: the item's page (/cosmetics/ember/)");
+		assertNull(c.items().get(1).slug(), "no slug: the Store link opens the catalog");
 		assertEquals(CAPE, c.worn("cape"));
 		assertNull(c.worn("head"));
 		assertEquals(1, c.equipped().size(), "only known slots");
@@ -138,5 +165,42 @@ class SocialLinkTest {
 		assertThrows(LinkException.class, () -> SocialLink.readArt(reply));
 		reply.addProperty("png", "A".repeat(SocialLink.MAX_ART_BYTES * 2));
 		assertThrows(LinkException.class, () -> SocialLink.readArt(reply));
+	}
+
+	@Test
+	void theShopTheEmoteWheelAndNewKindsAreRead() {
+		String emote = "00000000-0000-4000-8000-0000000000e1";
+		String wings = "00000000-0000-4000-8000-0000000000b1";
+		Cosmetics c = SocialLink.readCosmetics(json("""
+			{"items":[{"id":"%s","kind":"emote","name":"Wave"},{"id":"%s","kind":"wings","name":"Ember Wings","priceCoins":400,
+			  "grantedAt":"2026-11-10T12:00:00Z","model":{"attach":{"anchor":"anchor_body"}}}],
+			 "shop":[{"id":"00000000-0000-4000-8000-0000000000c1","kind":"pet","name":"Fox","priceCoins":900},{"id":"%s","kind":"wings","name":"twice"}],
+			 "equipped":{"back":"%s","pet":"x"},"emotes":["%s",null,"00000000-0000-4000-8000-0000000000c1"]}
+			""".formatted(emote, wings, wings, wings, emote)));
+		assertEquals(wings, c.worn("back"));
+		assertEquals("back", c.items().get(1).slot());
+		assertEquals(400, c.items().get(1).price());
+		assertEquals(java.time.Instant.parse("2026-11-10T12:00:00Z").toEpochMilli(), c.items().get(1).addedAt());
+		assertEquals("anchor_body", c.items().get(1).model().getAsJsonObject("attach").get("anchor").getAsString());
+		assertEquals(2, c.shop().size());
+		assertFalse(c.shop().get(0).owned());
+		assertEquals(900, c.shop().get(0).price());
+		assertEquals(8, c.emotes().size(), "always the wheel's 8 places");
+		assertEquals(emote, c.emotes().get(0));
+		assertEquals("", c.emotes().get(1));
+		assertEquals("", c.emotes().get(2), "only an owned emote stays on the wheel");
+	}
+
+	@Test
+	void skinsAreReadCheckedAndCapped() {
+		String id = "a".repeat(64);
+		java.util.List<SocialLink.Skin> skins = SocialLink.readSkins(json("""
+			{"skins":[{"id":"%s","name":"Notch","source":"username","origin":"Notch","variant":"slim","legacy":false,"addedAt":5},
+			 {"id":"../x","name":"bad"},{"id":"%s","name":"Odd","source":"ftp","variant":"wide"}]}
+			""".formatted(id, "b".repeat(64))));
+		assertEquals(2, skins.size());
+		assertEquals("slim", skins.get(0).variant());
+		assertEquals("url", skins.get(1).source(), "an unknown source reads as an address");
+		assertEquals("classic", skins.get(1).variant());
 	}
 }

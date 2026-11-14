@@ -212,7 +212,7 @@ class StoreCosmeticsClientTest {
 
 	@Test
 	void aDownloadReadsAtMostTheAssetLimit() throws Exception {
-		Asset ember = new Asset(ASSET_ID, 1, URI.create(EMBER), SHA, 64, 32);
+		Asset ember = new Asset(ASSET_ID, 1, URI.create(EMBER), AssetCache.sha256(new byte[] {1, 2, 3}), 64, 32);
 		Fake fake = new Fake(uri -> CompletableFuture.completedFuture(new Response(200, new byte[] {1, 2, 3}, null, null)));
 		assertArrayEquals(new byte[] {1, 2, 3}, client(fake).download(ember).get());
 		assertEquals(StoreCosmeticsClient.MAX_ASSET_BYTES, fake.caps.get(0));
@@ -294,9 +294,96 @@ class StoreCosmeticsClientTest {
 	void aStripIsReadUpToTheSizeTheStoreGave() throws Exception {
 		CapeAnimation animation = CapeAnimation.parse(CapeAnimationTest.manifest(16, AnimatedCapeFixture.STANDARD), StoreEndpoint.defaults());
 		Fake fake = new Fake(uri -> CompletableFuture.completedFuture(new Response(200, new byte[] {1, 2, 3}, null, null)));
-		assertArrayEquals(new byte[] {1, 2, 3}, client(fake).download(animation.strips().get(0)).get());
+		// Made-up hashes: the bytes are refused (checked here too), after the read capped at the strip's own size.
+		assertInstanceOf(StoreCosmeticsClient.Refused.class, assertThrows(ExecutionException.class, () -> client(fake).download(animation.strips().get(0)).get()).getCause());
 		assertEquals(100_000, fake.caps.get(0), "the strip's own size");
 		assertEquals(animation.strips().get(0).url(), fake.uris.get(0));
 		assertEquals(2 * 1024 * 1024, StoreCosmeticsClient.MAX_ASSET_BYTES, "a poster may take the Store's 2 MiB");
+	}
+
+	// ---------- Flint's CDN (cdn_url) first, the Store's url when it fails ----------
+
+	private static final String CDN = "https://assets.flintclient.com/cosmetic-assets/ember.png";
+	private static final byte[] FILE = "the cape's bytes".getBytes(StandardCharsets.UTF_8);
+
+	private static Asset withCdn(String cdn) {
+		return new Asset(ASSET_ID, 1, URI.create(EMBER), AssetCache.sha256(FILE), 64, 32, null, cdn == null ? null : URI.create(cdn));
+	}
+
+	@Test
+	void theCdnIsAskedFirst() throws Exception {
+		Fake fake = new Fake(uri -> CompletableFuture.completedFuture(new Response(200, FILE, null, null)));
+		StoreCosmeticsClient client = client(fake);
+		assertArrayEquals(FILE, client.download(withCdn(CDN)).get());
+		assertEquals(List.of(URI.create(CDN)), fake.uris, "only the CDN: the Store's storage isn't touched");
+		assertEquals(0, client.cdnFallbacks());
+	}
+
+	@Test
+	void aCdn404FallsBackToTheStoresUrl() throws Exception {
+		Fake fake = new Fake(uri -> uri.getHost().equals("assets.flintclient.com") ? reply(404, "", null, null)
+			: CompletableFuture.completedFuture(new Response(200, FILE, null, null)));
+		StoreCosmeticsClient client = client(fake);
+		assertArrayEquals(FILE, client.download(withCdn(CDN)).get());
+		assertEquals(List.of(URI.create(CDN), URI.create(EMBER)), fake.uris);
+		assertEquals(1, client.cdnFallbacks());
+	}
+
+	@Test
+	void aCdnFileThatIsntTheStoresHashFallsBackToTheUrl() throws Exception {
+		Fake fake = new Fake(uri -> CompletableFuture.completedFuture(new Response(200,
+			uri.getHost().equals("assets.flintclient.com") ? "swapped".getBytes(StandardCharsets.UTF_8) : FILE, null, null)));
+		assertArrayEquals(FILE, client(fake).download(withCdn(CDN)).get());
+		assertEquals(List.of(URI.create(CDN), URI.create(EMBER)), fake.uris);
+	}
+
+	@Test
+	void aCdnThatCantBeReachedOrIsTooLargeFallsBackToo() throws Exception {
+		Fake offline = new Fake(uri -> uri.getHost().equals("assets.flintclient.com") ? CompletableFuture.failedFuture(new ConnectException("no route"))
+			: CompletableFuture.completedFuture(new Response(200, FILE, null, null)));
+		assertArrayEquals(FILE, client(offline).download(withCdn(CDN)).get());
+		Fake thrown = new Fake(uri -> {
+			if (uri.getHost().equals("assets.flintclient.com")) {
+				throw new IllegalStateException("the client is closed");
+			}
+			return CompletableFuture.completedFuture(new Response(200, FILE, null, null));
+		});
+		assertArrayEquals(FILE, client(thrown).download(withCdn(CDN)).get());
+		Fake large = new Fake(uri -> uri.getHost().equals("assets.flintclient.com")
+			? CompletableFuture.completedFuture(new Response(200, new byte[StoreCosmeticsClient.MAX_ASSET_BYTES + 1], null, null))
+			: CompletableFuture.completedFuture(new Response(200, FILE, null, null)));
+		assertArrayEquals(FILE, client(large).download(withCdn(CDN)).get());
+	}
+
+	@Test
+	void withoutACdnAddressTheUrlIsUsed() throws Exception {
+		Fake fake = new Fake(uri -> CompletableFuture.completedFuture(new Response(200, FILE, null, null)));
+		assertArrayEquals(FILE, client(fake).download(withCdn(null)).get());
+		assertEquals(List.of(URI.create(EMBER)), fake.uris);
+	}
+
+	@Test
+	void bothFailingIsACleanFailure() {
+		Fake missing = new Fake(uri -> reply(404, "", null, null));
+		ExecutionException e = assertThrows(ExecutionException.class, () -> client(missing).download(withCdn(CDN)).get());
+		assertInstanceOf(StoreCosmeticsClient.Refused.class, e.getCause(), "the url's own answer");
+		Fake offline = new Fake(uri -> CompletableFuture.failedFuture(new ConnectException("no route")));
+		ExecutionException o = assertThrows(ExecutionException.class, () -> client(offline).download(withCdn(CDN)).get());
+		assertTrue(StoreCosmeticsClient.offline(o), "offline: retried soon, like any download");
+		Fake swapped = new Fake(uri -> CompletableFuture.completedFuture(new Response(200, "swapped".getBytes(StandardCharsets.UTF_8), null, null)));
+		ExecutionException m = assertThrows(ExecutionException.class, () -> client(swapped).download(withCdn(CDN)).get());
+		assertInstanceOf(StoreCosmeticsClient.Refused.class, m.getCause(), "neither is the Store's file: refused");
+	}
+
+	@Test
+	void aCdnAddressIsReadFromTheLookupOnlyWhereFlintDownloads() {
+		String sha = AssetCache.sha256(FILE);
+		String good = cape(STEVE, EMBER, sha, 64, 32).replace("\"url\":", "\"cdn_url\":\"" + CDN + "\",\"url\":");
+		String evil = cape(ALEX, EMBER, sha, 64, 32).replace("\"url\":", "\"cdn_url\":\"https://evil.example/x.png\",\"url\":");
+		Fake fake = new Fake(uri -> json("{\"players\":{" + good + "," + evil + "}}"));
+		Lookup lookup = client(fake).lookup(List.of(STEVE, ALEX)).join();
+		assertEquals(URI.create(CDN), lookup.capes().get(STEVE).cdnUrl());
+		assertNull(lookup.capes().get(ALEX).cdnUrl(), "dropped: the cape keeps its url");
+		assertEquals(URI.create(EMBER), lookup.capes().get(ALEX).url());
 	}
 }

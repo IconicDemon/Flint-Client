@@ -26,6 +26,12 @@ import com.flintclient.client.ui.UiFit;
 import com.flintclient.client.ui.widget.AccountPill;
 import com.flintclient.client.ui.widget.CardChip;
 import com.flintclient.client.ui.widget.CardRow;
+import com.flintclient.client.ui.widget.DiscordCard;
+import com.flintclient.client.ui.widget.ExternalButton;
+import com.flintclient.client.ui.widget.ShowcaseCard;
+import com.flintclient.client.module.social.MenuFeeds;
+import com.flintclient.client.module.social.MenuLink;
+import com.mojang.blaze3d.platform.Window;
 import com.flintclient.client.ui.widget.FlintButton;
 import com.flintclient.client.ui.widget.IconButton;
 import com.flintclient.client.ui.widget.MenuButton;
@@ -119,6 +125,19 @@ public final class FlintTitleScreen extends TitleScreen {
 	private MenuToggle menuSwitch;
 	/** Kept while this menu dissolves over Minecraft's title screen: its server icons are freed once that is over. */
 	private boolean iconsKept;
+
+	/** What the Flint app gives the menu (partners for Discover, the showcase, the Discord rewards), and what was laid out for it. */
+	private final MenuFeeds feeds = MenuFeeds.get();
+	private int feedsSeen = -1;
+	private boolean discoverShown;
+	private boolean discordShown;
+	private boolean showcaseShown;
+	private @Nullable ShowcaseCard showcase;
+	/** Other mods' title-screen buttons, found once for this menu ({@link ExternalButtons}). */
+	private @Nullable List<ExternalButtons.Entry> externals;
+	/** Where the account pill was laid out, to notice another mod moving the menu's widgets after init. */
+	private int laidOutX;
+	private int laidOutY;
 
 	/** The account card under the account pill: its rows (accounts, Add account, Skin layers), rebuilt as they change. */
 	private boolean accountOpen;
@@ -271,6 +290,14 @@ public final class FlintTitleScreen extends TitleScreen {
 			multiplayer.active = false;
 			multiplayer.tooltip(multiplayerBlocked);
 		}
+		// Discover: the servers and communities Flint partners with (the Flint app's partner feed), with how many servers.
+		discoverShown = !feeds.partners().partners().isEmpty();
+		if (discoverShown) {
+			MenuButton discover = addColumnButton(Component.translatable("flintclient.menu.discover"), Icon.COMPASS, MenuButton.Style.NEUTRAL,
+				() -> minecraft.gui.setScreen(new com.flintclient.client.control.rshift.FlintDiscoverScreen(this)));
+			discover.count(() -> feeds.partners().servers());
+			discover.tooltip(Component.translatable("flintclient.menu.discover.tooltip"));
+		}
 		addColumnButton(Component.translatable("flintclient.menu.cosmetics"), Icon.GEM, MenuButton.Style.NEUTRAL,
 			() -> minecraft.gui.setScreen(new com.flintclient.client.control.rshift.FlintCosmeticsScreen(this)));
 		addColumnButton(Component.translatable("flintclient.menu.screenshots"), Icon.CAMERA, MenuButton.Style.NEUTRAL,
@@ -293,16 +320,13 @@ public final class FlintTitleScreen extends TitleScreen {
 		friends = addRenderableWidget(new IconButton(Component.translatable("flintclient.friends.open"), Icon.USERS, () -> friendRequests,
 			this::openFriends));
 		friends.tooltip(Component.translatable("flintclient.friends.tooltip"));
-		IconButton messages = addRenderableWidget(new IconButton(Component.translatable("flintclient.menu.messages"), Icon.MESSAGE,
-			() -> minecraft.gui.setScreen(com.flintclient.client.control.rshift.FlintFriendsScreen.messages(this))));
-		messages.tooltip(Component.translatable("flintclient.menu.messages"));
 		IconButton settings = addRenderableWidget(new IconButton(Component.translatable("flintclient.menu.settings"), Icon.GEAR,
 			() -> minecraft.gui.setScreen(com.flintclient.client.compat.McCompat.optionsScreen(this, minecraft.options))));
 		settings.tooltip(Component.translatable("flintclient.menu.settings"));
 		IconButton utilities = addRenderableWidget(new IconButton(Component.translatable("flintclient.menu.utilities"), Icon.GRID,
 			() -> minecraft.gui.setScreen(new UtilitiesScreen(this))));
 		utilities.tooltip(Component.translatable("flintclient.menu.utilities"));
-		layout.topIcons = List.of(friends, messages, settings, utilities);
+		layout.topIcons = List.of(friends, settings, utilities);
 
 		// Quick Play: one shortcut per pinned server; none pinned, no rail.
 		List<QuickPlay.Entry> pinned = pins();
@@ -322,12 +346,23 @@ public final class FlintTitleScreen extends TitleScreen {
 		rewards = addRenderableWidget(new com.flintclient.client.ui.widget.RewardsCard(
 			() -> minecraft.gui.setScreen(new com.flintclient.client.control.rshift.DailyRewardsScreen(this))));
 		layout.rewards = rewards;
+		try {
+			addFeedParts();
+		} catch (RuntimeException | LinkageError e) {
+			// The Discord card, the showcase and other mods' buttons are extras: the menu stands without them.
+			FlintClient.LOGGER.warn("Flint: the main menu's Discord card, showcase or other mods' buttons are left out", e);
+			layout.discord = null;
+			layout.showcase = null;
+			layout.externals = List.of();
+		}
 
 		footer.set(Component.translatable("flintclient.menu.footer", FlintInfo.flintVersion(), FlintInfo.minecraftVersion(), FlintInfo.loader()).getString());
 		layout.account = account;
 		layout.wordmark = wordmark;
 		layout.footer = footer;
 		layout.apply(width, height);
+		laidOutX = account.getX();
+		laidOutY = account.getY();
 		toastTop = (int) Math.ceil((layout.topBarBottom + 4) * MenuScale.pixels() / (double) Math.max(1, minecraft.getWindow().getGuiScale()));
 		placeAccountCard();
 		showAccountRows(accountOpen);
@@ -346,6 +381,122 @@ public final class FlintTitleScreen extends TitleScreen {
 		placeStoreDialog();
 		WidgetVisibility.set(storeClose, storeOpen);
 		WidgetVisibility.set(storeVisit, storeOpen);
+	}
+
+	/**
+	 * The "Join our Discord" card (while the Store lists a Discord reward for this account), the showcase (while there are slides)
+	 * and other mods' title-screen buttons, each only when there is something to show: never an empty card.
+	 */
+	private void addFeedParts() {
+		long now = System.currentTimeMillis();
+		MenuLink.Community community = feeds.community(com.flintclient.client.control.rshift.FlintFriendsScreen.playing());
+		discordShown = DiscordCard.shows(community);
+		layout.discord = null;
+		if (discordShown) {
+			layout.discord = addRenderableWidget(new DiscordCard(() -> feeds.community(com.flintclient.client.control.rshift.FlintFriendsScreen.playing()),
+				this::discordPressed));
+		}
+		List<MenuLink.Slide> slides = feeds.slides(now);
+		showcaseShown = !slides.isEmpty();
+		showcase = null;
+		layout.showcase = null;
+		if (showcaseShown) {
+			showcase = addRenderableWidget(new ShowcaseCard(feeds, this::openLink));
+			showcase.slides(slides);
+			showcase.active = showcase.showable();
+			layout.showcase = showcase;
+		}
+		if (externals == null) {
+			Window window = minecraft.getWindow();
+			externals = ExternalButtons.find(window.getGuiScaledWidth(), window.getGuiScaledHeight());
+		}
+		List<ExternalButton> buttons = new ArrayList<>();
+		for (ExternalButtons.Entry entry : externals) {
+			ExternalButtons.Icon icon = entry.icon();
+			buttons.add(addRenderableWidget(new ExternalButton(entry.name(), icon == null ? null : icon.texture(), icon == null ? 0 : icon.width(),
+				icon == null ? 0 : icon.height(), entry::press)));
+		}
+		layout.externals = buttons;
+	}
+
+	/** The Discord card: Flint's Discord server's invite (after Minecraft's link confirmation), or, once in, the Cosmetics window. */
+	private void discordPressed() {
+		MenuLink.Community community = feeds.community(com.flintclient.client.control.rshift.FlintFriendsScreen.playing());
+		if (DiscordCard.joined(community)) {
+			minecraft.gui.setScreen(new com.flintclient.client.control.rshift.FlintCosmeticsScreen(this));
+		} else {
+			openLink(community == null ? MenuLink.DEFAULT_INVITE : community.invite());
+		}
+	}
+
+	/** A link from the menu (a showcase slide, the Discord invite), after Minecraft's link confirmation, which comes back here. */
+	private void openLink(String url) {
+		try {
+			net.minecraft.client.gui.screens.ConfirmLinkScreen.confirmLinkNow(this, java.net.URI.create(url));
+		} catch (RuntimeException e) {
+			FlintClient.LOGGER.warn("Flint: couldn't open a link from the main menu", e);
+		}
+	}
+
+	/**
+	 * Asks the Flint app for what is due and takes its answers: the menu is laid out again only when a part comes or goes (the
+	 * showcase takes new slides in place).
+	 */
+	private void followFeeds() {
+		long now = System.currentTimeMillis();
+		String playing = com.flintclient.client.control.rshift.FlintFriendsScreen.playing();
+		feeds.version(FlintInfo.minecraftVersion());
+		feeds.want(MenuFeeds.Feed.PARTNERS, null, now);
+		feeds.want(MenuFeeds.Feed.SHOWCASE, null, now);
+		feeds.want(MenuFeeds.Feed.COMMUNITY, playing, now);
+		feeds.tick();
+		if (showcase != null) {
+			showcase.active = showcase.showable();
+		}
+		if (feeds.revision() == feedsSeen) {
+			return;
+		}
+		feedsSeen = feeds.revision();
+		boolean discover = !feeds.partners().partners().isEmpty();
+		boolean discord = DiscordCard.shows(feeds.community(playing));
+		List<MenuLink.Slide> slides = feeds.slides(now);
+		if (discover != discoverShown || discord != discordShown || slides.isEmpty() == showcaseShown) {
+			boolean refocus = getFocused() != null;
+			rebuildWidgets();
+			if (refocus) {
+				setFocused(null);
+			}
+		} else if (showcase != null) {
+			showcase.slides(slides);
+		}
+	}
+
+	/**
+	 * Controls other mods put on this screen through Fabric API's screen events (meant for Minecraft's title screen, which this
+	 * replaces): never drawn here, so they would take clicks unseen. They are taken off; their mod's buttons are on this menu
+	 * as {@link ExternalButton}s, found on Minecraft's own title screen.
+	 */
+	private void dropForeignWidgets() {
+		// Another mod moved the menu's widgets after it laid them out (Mod Menu 4 on 1.19.x shifts a title screen's buttons
+		// up to make room for its own): put them back.
+		boolean moved = account != null && (account.getX() != laidOutX || account.getY() != laidOutY);
+		boolean any = false;
+		for (var child : children()) {
+			any |= !(child instanceof FlintButton);
+		}
+		if (any) {
+			// A copy: the list changes as they go (each engine's own element type, so this reads the same on every line).
+			for (var child : List.copyOf(children())) {
+				if (!(child instanceof FlintButton)) {
+					removeWidget(child);
+				}
+			}
+		}
+		if (moved) {
+			layout.apply(width, height);
+			laidOutX = account.getX();
+			laidOutY = account.getY();
+		}
 	}
 
 	/** The pinned servers (with servers.dat read once per visit for their current names and icons). */
@@ -404,7 +555,9 @@ public final class FlintTitleScreen extends TitleScreen {
 	private static final int CARD_W = 150;
 	private static final int CARD_PAD = 4;
 	private static final int HEADING_H = 9;
-	private static final int CARD_FILL = 0xF5111216;
+	private static int cardFill() {
+		return Palette.CARD;
+	}
 	/** The card's corner radius (the dropdown's too): a step rounder than its rows' ({@link CardRow#RADIUS}). */
 	private static final float CARD_RADIUS = 4.6F;
 	private static final float NOTE_LINE = FlintFonts.SMALL.size * 1.5F;
@@ -548,7 +701,7 @@ public final class FlintTitleScreen extends TitleScreen {
 		}
 		for (CardRow row : accountRows) {
 			addRenderableWidget(row);
-			row.surface(CARD_FILL);
+			row.surface(cardFill());
 		}
 		accountParts.addAll(accountRows);
 		for (Chip chip : accountChips) {
@@ -721,7 +874,7 @@ public final class FlintTitleScreen extends TitleScreen {
 				int spread = c.px(1.2F * i);
 				c.roundRect(x - spread, y - spread + c.px(1.5F), w + 2 * spread, h + 2 * spread, radius + spread, 0x14000000);
 			}
-			c.panel(x, y, w, h, radius, border, Palette.BORDER_HOVER, CARD_FILL);
+			c.panel(x, y, w, h, radius, border, Palette.BORDER_HOVER, cardFill());
 			if (extra != null) {
 				extra.accept(c);
 			}
@@ -792,7 +945,7 @@ public final class FlintTitleScreen extends TitleScreen {
 					}
 				}
 				int line = Math.max(1, Math.round(c.scale() / 4.0F));
-				c.fill(c.px(popX + CARD_PAD), c.px(separatorY), c.px(popX + popW - CARD_PAD), c.px(separatorY) + line, 0x14FFFFFF);
+				c.fill(c.px(popX + CARD_PAD), c.px(separatorY), c.px(popX + popW - CARD_PAD), c.px(separatorY) + line, Palette.tint(0x14FFFFFF));
 			});
 	}
 
@@ -989,11 +1142,16 @@ public final class FlintTitleScreen extends TitleScreen {
 
 	@Override
 	public void tick() {
+		dropForeignWidgets();
+		followFeeds();
 		ServerShortcuts.tick();
 		AccountSwitcher.tick();
 		syncAccountCard();
 		ticks++;
 		refreshFriendRequests();
+		// The Cosmetics window's pictures and animations load while the title screen shows, so it opens with them.
+		com.flintclient.client.control.rshift.CosmeticShelf.warmUp();
+		com.flintclient.client.control.rshift.CosmeticShelf.pumpShared();
 	}
 
 	// Gui.setScreen calls removed() on the screen being replaced, whatever replaces it (a page, a
@@ -1053,6 +1211,8 @@ public final class FlintTitleScreen extends TitleScreen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int guiMouseX, int guiMouseY, float partialTick) {
+		// The Flint app's theme, if it changed: the menu's accent follows it.
+		com.flintclient.client.control.ThemeSync.tick();
 		// Everything below draws in menu units, inside one frame at the menu's scale; nested canvases follow it.
 		Canvas frame = Canvas.beginAtGuiScale(Frame.of(graphics), MenuScale.pixels());
 		try {
@@ -1065,6 +1225,7 @@ public final class FlintTitleScreen extends TitleScreen {
 	}
 
 	private void drawMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+		dropForeignWidgets();
 		if (openedAt == 0) {
 			openedAt = Util.getMillis();
 		}
@@ -1196,13 +1357,13 @@ public final class FlintTitleScreen extends TitleScreen {
 			int h = c.px(cardH);
 			int border = Math.max(1, Math.round(c.scale() / 4.0F));
 			c.setOpacity(t);
-			c.panel(x, y, w, h, c.px(4.0F), border, Palette.BORDER, 0xF2111216);
+			c.panel(x, y, w, h, c.px(4.0F), border, Palette.BORDER, Palette.CARD);
 			// A short ember line at the top: the only accent.
 			c.roundRect(x + w / 2 - c.px(12), y + border, c.px(24), Math.max(1, c.px(0.8F)), c.px(0.4F), Palette.ACCENT);
 			int badge = c.px(14);
 			int bx = x + (w - badge) / 2;
 			int by = y + c.px(8);
-			c.roundRect(bx, by, badge, badge, badge / 2, 0xFF1D1610);
+			c.roundRect(bx, by, badge, badge, badge / 2, Palette.over(Palette.withAlpha(Palette.ACCENT, 0.14F), Palette.CARD));
 			int iconPx = c.px(6.5F);
 			c.icon(Icon.BAG, bx + (badge - iconPx) / 2, by + (badge - iconPx) / 2, iconPx, Palette.ACCENT_TEXT);
 			int titleBase = by + badge + c.px(10);

@@ -30,6 +30,7 @@ import { Icon } from "../../ui/Icon";
 import { MemorySlider } from "../../ui/MemorySlider";
 import { Dropdown, Menu, Modal, Popover, Tooltip, useToast } from "../../ui/overlays";
 import { InstallDialog, PERFORMANCE_PRESET, ProjectIcon, type InstallTarget } from "../library/InstallDialog";
+import { SourceTag } from "../library/SourceTag";
 import type { Navigate } from "../shell/Shell";
 import { STATE_LABEL, type ProfileActions } from "./ProfilesPage";
 import { UpdateDialog } from "./UpdateDialog";
@@ -737,7 +738,7 @@ function ContentTab({ profile, navigate }: { profile: Profile; navigate: Navigat
                 }, t("workspace.toast.rolledBack", { name: item.title }))
               }
               onRemove={() => setRemoving([item])}
-              onReveal={() => void api.revealFolder(item.kind === "mod" ? "mods" : item.kind === "resourcepack" ? "resourcepacks" : item.kind === "shader" ? "shaderpacks" : "saves", profile.id)}
+              onReveal={() => void api.revealContent(profile.id, { kind: item.kind, fileName: item.fileName, world: item.world }).catch((e) => toast({ tone: "danger", title: t("workspace.toast.failed"), body: errorText(e) }))}
             />
           ))}
         </div>
@@ -910,7 +911,10 @@ function ContentRow({
       <span role="cell" className="ct-name">
         <ProjectIcon src={item.iconUrl} fallback={item.localIcon} title={item.title} kind={item.kind} size={36} />
         <span>
-          <strong title={item.title}>{item.title}</strong>
+          <span className="ct-title">
+            <strong title={item.title}>{item.title}</strong>
+            <SourceTag projectId={item.projectId} />
+          </span>
           <span className="faint" title={item.fileName}>
             {item.kind !== "mod" ? `${t(KIND_NAME[item.kind])}${item.world ? ` · ${item.world}` : ""} · ` : ""}
             {item.fileName}

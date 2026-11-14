@@ -904,7 +904,10 @@ fn verified_data_versions_name_their_release() {
     assert_eq!(crate::gamesettings::release_of_data_version(4790), Some("26.1.2"));
     assert_eq!(crate::gamesettings::release_of_data_version(3955), Some("1.21.1"));
     assert_eq!(crate::gamesettings::release_of_data_version(3953), None, "1.21 isn't offered");
-    for (_, data) in [("26.3", 5023), ("26.2", 4903), ("26.1", 4786), ("1.21.11", 4671), ("1.21.10", 4556), ("1.21.1", 3955)] {
+    assert_eq!(crate::gamesettings::release_of_data_version(3120), Some("1.19.2"));
+    assert_eq!(crate::gamesettings::release_of_data_version(3105), Some("1.19"));
+    assert_eq!(crate::gamesettings::release_of_data_version(3117), None, "1.19.1 isn't offered");
+    for (_, data) in [("26.3", 5023), ("26.2", 4903), ("26.1", 4786), ("1.21.11", 4671), ("1.21.10", 4556), ("1.21.1", 3955), ("1.19.2", 3120), ("1.19", 3105)] {
         assert!(SUPPORTED_VERSIONS.contains(&crate::gamesettings::release_of_data_version(data).unwrap()));
     }
 }

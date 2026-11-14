@@ -49,6 +49,9 @@ final class FriendsChat extends Node {
 	private static final float HEAD = 72;
 	private static final float COMPOSER = 48;
 	private static final float PAD = 20;
+	/** The typing strip's height, and how long a friend shows as typing after they were last seen typing (the app's TYPING_SHOWN). */
+	private static final float TYPING = 24;
+	static final long TYPING_MILLIS = 5000;
 	/** Messages close together from one person form a group; the time shows once, under the last of them. */
 	private static final long GROUP_MILLIS = 5 * 60_000;
 
@@ -76,6 +79,13 @@ final class FriendsChat extends Node {
 	private final Label emptyTitle = new Label(Type.EMPTY, "Pick a friend to chat");
 	private final Lines emptyBody = new Lines(Type.EMPTY_NOTE, "Your conversations show up here.");
 	private final Label privateTitle = new Label(Type.ROW_LABEL, "This looks private");
+	/** "Alex is typing…": a strip above the composer (room kept for it, so nothing moves when it shows), as the Flint app's. */
+	private final Label typingLabel = new Label(Type.ROW_NOTE, "");
+	/** When the shown friend was last in an answer's typing list (ms), and the answer that was read from. */
+	private long typingSeenAt = Long.MIN_VALUE / 2;
+	private @Nullable Friends typingFrom;
+	/** How much of the strip shows (eased). */
+	private float typingShown;
 	private final Lines privateBody = new Lines(Type.ROW_NOTE,
 		"Never send passwords, emails, usernames for other sites or card details, not even to friends. Flint staff will never ask for them.");
 	private final Parts.Square pin;
@@ -151,6 +161,9 @@ final class FriendsChat extends Node {
 		firstScroll = true;
 		field.setText("");
 		column.clearChildren();
+		typingFrom = null;
+		typingSeenAt = Long.MIN_VALUE / 2;
+		typingShown = 0;
 		invalidate();
 	}
 
@@ -449,6 +462,8 @@ final class FriendsChat extends Node {
 		sendAnyway.setBounds(right - aw, composerY, aw, d(COMPOSER));
 		dontSend.setBounds(right - aw - d(10) - dw, composerY, dw, d(COMPOSER));
 		float listY = y + d(HEAD) + d(8);
+		// The typing strip's room above the composer.
+		composerY -= d(TYPING);
 		laidOutAsking = privateDraft != null;
 		warningH = d(38) + privateBody.height(measure(), w - 2 * d(PAD) - d(60)) + d(14);
 		float warning = privateDraft != null ? warningH + d(12) : 0;
@@ -527,6 +542,35 @@ final class FriendsChat extends Node {
 		if (asking != laidOutAsking) {
 			invalidate();
 		}
+		paintTyping(c, f);
+	}
+
+	/** "Name is typing…" in the strip above the composer while the friend types (faded in and out), as the Flint app shows it. */
+	private void paintTyping(Canvas c, Friend f) {
+		Friends now = page.friends();
+		long clock = System.currentTimeMillis();
+		if (now != null && now != typingFrom) {
+			typingFrom = now;
+			if (now.typing().contains(f.uuid())) {
+				typingSeenAt = clock;
+			} else {
+				typingSeenAt = Long.MIN_VALUE / 2;
+			}
+		}
+		boolean on = typingOn(typingSeenAt, clock) && privateDraft == null;
+		typingShown = MenuStyle.ease(typingShown, on);
+		if (typingShown <= 0.01F) {
+			return;
+		}
+		typingLabel.set(f.name() + " is typing…");
+		float ty = field.y() - d(TYPING) / 2 - d(4);
+		MenuStyle.fitted(c, typingLabel, x + d(PAD) + d(4), ty, Palette.withAlpha(MenuStyle.NEUTRAL, Math.clamp(typingShown, 0, 1)),
+			w - 2 * d(PAD));
+	}
+
+	/** Whether a friend last seen typing at {@code seenAt} still shows as typing at {@code now} (ms). Pure. */
+	static boolean typingOn(long seenAt, long now) {
+		return now - seenAt < TYPING_MILLIS;
 	}
 
 	private static void setShown(Node node, boolean shown) {

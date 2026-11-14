@@ -3,7 +3,7 @@
  * with (releaseNotes.json) always show. Flint's public release feed (src-tauri/src/data.rs `news_feed`, the same file
  * flintclient.com builds its changelog from) adds the releases this build doesn't know, so news of an update shows before
  * it installs. A release opens its own page on flintclient.com and only that version's page (`page_url`, which must be
- * exactly https://flintclient.com/releases/<version>/); anything else isn't clickable.
+ * exactly https://flintclient.com/releases/<version>/) and opens the changelog; anything else isn't clickable.
  */
 
 /** One release in Home's news. `cover`: its row picture from the feed (see {@link coverThumbnail}), when it has one. */
@@ -15,11 +15,16 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** The one address flintclient.com serves a version's page at. */
 export const flintReleasePage = (version: string) => `https://flintclient.com/releases/${version}/`;
 
-/** A Flint release item's page: its `page_url` when that is exactly its own version's page, else null. */
+/**
+ * Where a release row opens: flintclient.com's changelog (one page, the newest release in full; the site 301s each
+ * /releases/<version>/ there, so opening it directly skips that hop, which also matters for link previews). Only a release
+ * whose `page_url` is exactly its own version's page is clickable; anything else: null.
+ */
+export const FLINT_CHANGELOG = "https://flintclient.com/changelog/";
+
 export function releasePage(note: { version: string; page_url?: unknown }): string | null {
   if (!VERSION.test(note.version)) return null;
-  const page = flintReleasePage(note.version);
-  return note.page_url === page ? page : null;
+  return note.page_url === flintReleasePage(note.version) ? FLINT_CHANGELOG : null;
 }
 
 /**
@@ -34,13 +39,22 @@ export function coverThumbnail(version: string, image: unknown): string | null {
   return url === `${base}.webp` || url === `${base}.png` ? `${base}-960.webp` : null;
 }
 
+/**
+ * The oldest release Home's news lists (owner, 1.0.4): from 1.0.3 on, the same releases flintclient.com's changelog shows.
+ * Older notes stay in the app (What's new) and on the site's release pages; they just aren't news any more.
+ */
+export const NEWS_SINCE = "1.0.3";
+
 /** Newest first by version number (1.0.10 comes before 1.0.9). */
-function newestFirst(a: NewsRelease, b: NewsRelease): number {
+function newestFirst(a: Pick<NewsRelease, "version">, b: Pick<NewsRelease, "version">): number {
   const x = a.version.split(".").map(Number);
   const y = b.version.split(".").map(Number);
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] - x[i];
   return 0;
 }
+
+/** Whether a release is {@link NEWS_SINCE} or newer. */
+const isNews = (n: Pick<NewsRelease, "version">) => newestFirst(n, { version: NEWS_SINCE }) <= 0;
 
 /**
  * The releases Home's news shows, newest first, `count` at most: this build's own notes, plus each release from Flint's
@@ -60,5 +74,5 @@ export function newsReleases(bundled: readonly NewsRelease[], feed: readonly unk
     known.add(r.version);
     extra.push({ version: r.version, date: r.date, title: r.title, summary: r.summary ?? "", page_url: typeof r.page_url === "string" ? r.page_url : null, cover: coverThumbnail(r.version, r.image) });
   }
-  return [...bundled.filter((n) => VERSION.test(n.version)), ...extra].sort(newestFirst).slice(0, count);
+  return [...bundled.filter((n) => VERSION.test(n.version)), ...extra].filter(isNews).sort(newestFirst).slice(0, count);
 }

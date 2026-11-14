@@ -22,8 +22,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * View Model on Minecraft 1.21.1: the held item is moved where Minecraft starts placing a hand (in view space, before its
- * swing and bob), and rotated and scaled about itself just before it is drawn. The empty hand is left alone. Nothing is
+ * Item Customizer (View Model) on Minecraft 1.21.1: the held item is moved where Minecraft starts placing a hand (in view space, before its
+ * swing and bob), and rotated and scaled about itself just before it is drawn. The empty hand is placed where its pose starts. Nothing is
  * allocated. 1.21.1 draws the held item through ItemInHandRenderer.renderItem (ItemRenderer.renderStatic), so the hand
  * being drawn is remembered from renderArmWithItem. Totem's held size and Shield Status's tint are applied there too.
  */
@@ -74,5 +74,12 @@ abstract class FirstPersonItemMixin {
 			pose.popPose();
 			Mc263LookMods.endHeld(tint);
 		}
+	}
+
+	/** Item Customizer's Rotationless Eat & Drink: food and drinks rise to your mouth without turning. */
+	@com.llamalad7.mixinextras.injector.v2.WrapWithCondition(method = "applyEatTransform", at = @At(value = "INVOKE",
+		target = "Lcom/mojang/blaze3d/vertex/PoseStack;mulPose(Lorg/joml/Quaternionf;)V"))
+	private boolean flint$eatTurn(PoseStack pose, org.joml.Quaternionf rotation) {
+		return Mc263ViewModel.eatRotation();
 	}
 }

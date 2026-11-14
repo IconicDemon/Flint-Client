@@ -133,6 +133,8 @@ pub struct AppState {
     pub running: Mutex<HashMap<String, RunningGame>>,
     pub ai_cancel: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     pub modrinth: crate::modrinth::Modrinth,
+    /// CurseForge through Flint's Store proxy (curseforge.rs).
+    pub curseforge: crate::curseforge::CurseForge,
     pub jobs: crate::jobs::Jobs,
     /// The channel to the games Flint started (their account card).
     pub game_link: crate::gamelink::GameLink,
@@ -396,6 +398,8 @@ pub const DOWNLOAD_REDIRECT_HOSTS: &[&str] = &[
     "resources.download.minecraft.net",
     "maven.fabricmc.net",
     "cdn.modrinth.com",
+    "edge.forgecdn.net",
+    "mediafilez.forgecdn.net",
     "github.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
@@ -403,8 +407,28 @@ pub const DOWNLOAD_REDIRECT_HOSTS: &[&str] = &[
     "gitlab.com",
 ];
 
+/// The TLS of every connection Flint makes itself (both HTTP clients and the Friends socket): rustls with ring and the
+/// webpki roots, TLS 1.2 and 1.3, HTTP/1.1. It is what reqwest 0.12's `rustls-tls` built for these clients before the
+/// app moved to the updater's reqwest 0.13, given to 0.13 whole (its own choice would be the system's verifier).
+pub fn tls_config() -> rustls::ClientConfig {
+    static CONFIG: std::sync::OnceLock<rustls::ClientConfig> = std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+            let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .expect("ring has the default TLS versions")
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
+            config
+        })
+        .clone()
+}
+
 pub fn build_clients() -> (Client, Client) {
     let http = Client::builder()
+        .tls_backend_preconfigured(tls_config())
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(45))
         .user_agent(USER_AGENT)
@@ -412,6 +436,7 @@ pub fn build_clients() -> (Client, Client) {
         .build()
         .expect("HTTP client configuration is valid");
     let stream_http = Client::builder()
+        .tls_backend_preconfigured(tls_config())
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(Duration::from_secs(60))
         .user_agent(USER_AGENT)
@@ -419,6 +444,12 @@ pub fn build_clients() -> (Client, Client) {
         .build()
         .expect("HTTP client configuration is valid");
     (http, stream_http)
+}
+
+/// Tests: a plain client (no timeouts, user agent or redirect rules) with the app's TLS.
+#[cfg(test)]
+pub fn test_client() -> Client {
+    Client::builder().tls_backend_preconfigured(tls_config()).build().expect("HTTP client configuration is valid")
 }
 
 pub fn mojang_os() -> &'static str {
@@ -455,6 +486,7 @@ impl AppState {
             running: Mutex::new(HashMap::new()),
             ai_cancel: Mutex::new(HashMap::new()),
             modrinth: crate::modrinth::Modrinth::new(false),
+            curseforge: crate::curseforge::CurseForge::production(),
             jobs: crate::jobs::Jobs::default(),
             game_link: Default::default(),
             store: crate::store::StoreState::new(crate::store::Endpoints::production()),

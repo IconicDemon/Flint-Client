@@ -20,13 +20,16 @@ use tauri::AppHandle;
 /// source (github.com/modmuss50/OptiFabric); OptiFine shows OptiFine capes the same way. Cloaks+ has no mod of its own:
 /// the Capes mod shows its capes.
 ///
+/// Not listed since Flint 1.0.4: the Capes mod (`capes`). It sets its cape in `PlayerInfo.getSkin`, which the game now wraps
+/// whole and decides after (game-runtime `PlayerInfoMixin`): a Flint cape's wearer shows only the Flint cape, anyone else the
+/// Capes mod's, so it never hides a Flint cape.
+///
 /// Not listed, as the Flint cape still shows with them: mods that only animate or restyle the skin's own cape (Wavey Capes,
 /// Legacy WaveyCapes, Elytra Physics, Cloth Cloaks, Cape Tweaks, the transparent-cape and jitter fixes), and mods that
 /// change the textures Minecraft downloads, which Flint's cape goes on top of (skin overrides, CustomSkinLoader,
 /// StraySkins, Fabric Tailor, Cape Command).
 pub const CAPE_MODS: &[(&str, &[&str])] = &[
     ("Essential", &["essential", "essential-container"]),
-    ("Capes", &["capes"]),
     ("Cape Provider", &["cape-provider"]),
     ("Better Capes", &["bettercapes"]),
     ("Cosmetica", &["cosmetica", "cosmetica-core"]),
@@ -116,15 +119,19 @@ mod tests {
         test_jar(&mods, "sodium.jar", r#"{"id":"sodium","version":"0.9.2"}"#);
         assert!(conflicts(&state).is_empty(), "no cape mod");
 
+        // The Capes mod gives way to a Flint cape (the game decides after it), so it never counts.
         test_jar(&mods, "capes-1.5.10+1.21.11.jar", r#"{"schemaVersion":1,"id":"capes","name":"Capes","environment":"client"}"#);
+        assert!(conflicts(&state).is_empty(), "the Capes mod doesn't count");
+
+        test_jar(&mods, "cosmetica-1.21.11.jar", r#"{"schemaVersion":1,"id":"cosmetica","name":"Cosmetica","environment":"client"}"#);
         let found = conflicts(&state);
         assert_eq!(
             found,
-            [CapeConflict { profile_id: "survival0001".into(), profile_name: "Survival 1.21.11".into(), game_version: "1.21.11".into(), mods: vec!["Capes".into()] }]
+            [CapeConflict { profile_id: "survival0001".into(), profile_name: "Survival 1.21.11".into(), game_version: "1.21.11".into(), mods: vec!["Cosmetica".into()] }]
         );
 
         // Switched off in the profile's Mods tab: Fabric doesn't load it, so the Flint cape shows.
-        std::fs::rename(mods.join("capes-1.5.10+1.21.11.jar"), mods.join("capes-1.5.10+1.21.11.jar.disabled")).unwrap();
+        std::fs::rename(mods.join("cosmetica-1.21.11.jar"), mods.join("cosmetica-1.21.11.jar.disabled")).unwrap();
         assert!(conflicts(&state).is_empty(), "a disabled mod doesn't count");
     }
 
@@ -145,11 +152,12 @@ mod tests {
     fn a_cape_mod_is_found_by_its_id_what_it_provides_or_a_jar_bundled_in_it() {
         let jar = |id: &str| ModJar { id: id.into(), ..Default::default() };
         assert_eq!(cape_mods_in(&[jar("essential-container")]), ["Essential"], "Essential's mods-folder jar");
-        assert_eq!(cape_mods_in(&[ModJar { provides: vec!["capes".into()], ..jar("capes-fork") }]), ["Capes"]);
+        assert_eq!(cape_mods_in(&[ModJar { provides: vec!["minecraftcapes".into()], ..jar("minecraftcapes-fork") }]), ["MinecraftCapes"]);
         assert_eq!(cape_mods_in(&[ModJar { nested: vec!["cosmetica-core".into()], ..jar("some-pack") }]), ["Cosmetica"]);
         // Several, in the list's order, each once (two jars of the same mod, or two mods of one name).
-        let several = [jar("minecraftcapes"), jar("capes"), jar("cosmetica"), jar("cosmetica-core"), jar("capesmod"), jar("ep-custom-capes")];
-        assert_eq!(cape_mods_in(&several), ["Capes", "Cosmetica", "MinecraftCapes", "Custom Capes"]);
+        let several = [jar("minecraftcapes"), jar("essential"), jar("cosmetica"), jar("cosmetica-core"), jar("capesmod"), jar("ep-custom-capes")];
+        assert_eq!(cape_mods_in(&several), ["Essential", "Cosmetica", "MinecraftCapes", "Custom Capes"]);
+        assert!(cape_mods_in(&[jar("capes"), jar("fabric-language-kotlin")]).is_empty(), "the Capes mod gives way to a Flint cape");
         assert!(cape_mods_in(&[jar("capes-addon"), jar("essentials"), jar("sodium")]).is_empty(), "ids match whole");
     }
 
@@ -166,16 +174,17 @@ mod tests {
         crate::data::save_profiles(&state, &file).unwrap();
         let mods = |p: &Profile| state.paths.profile_dir(&p.id).join("mods");
         test_jar(&mods(&old), "essential.jar", r#"{"id":"essential-container","jars":[{"file":"essential-loader.jar"}]}"#);
-        test_jar(&mods(&recent), "capes.jar", r#"{"id":"capes"}"#);
+        test_jar(&mods(&recent), "cosmetica.jar", r#"{"id":"cosmetica"}"#);
         test_jar(&mods(&recent), "mcc.jar", r#"{"id":"minecraftcapes"}"#);
-        test_jar(&mods(&chosen), "capes.jar", r#"{"id":"capes"}"#);
+        test_jar(&mods(&chosen), "cosmetica.jar", r#"{"id":"cosmetica"}"#);
+        test_jar(&mods(&clean), "capes.jar", r#"{"id":"capes"}"#);
         test_jar(&mods(&clean), "waveycapes.jar", r#"{"id":"waveycapes"}"#);
         // A vanilla profile's mods folder isn't loaded.
-        test_jar(&mods(&vanilla), "capes.jar", r#"{"id":"capes"}"#);
+        test_jar(&mods(&vanilla), "cosmetica.jar", r#"{"id":"cosmetica"}"#);
 
         let found = conflicts(&state);
         let rows: Vec<(&str, Vec<&str>)> = found.iter().map(|c| (c.profile_name.as_str(), c.mods.iter().map(String::as_str).collect())).collect();
-        assert_eq!(rows, [("Survival", vec!["Capes"]), ("PvP", vec!["Capes", "MinecraftCapes"]), ("Old SMP", vec!["Essential"])]);
+        assert_eq!(rows, [("Survival", vec!["Cosmetica"]), ("PvP", vec!["Cosmetica", "MinecraftCapes"]), ("Old SMP", vec!["Essential"])]);
     }
 
     #[test]

@@ -71,6 +71,26 @@ public final class McCompat {
 	public static final boolean SHAPED_NAMETAGS = false;
 	/** Whether Minecraft has a friends list (26.2 added it). */
 	public static final boolean FRIENDS = false;
+	/** Whether the Right Shift menu shows the HUD live around a frosted panel (only the panel blurred, control/fx/PanelBlur), as on 26.3. */
+	public static final boolean MENU_PREVIEW = true;
+
+	/** The effects the HUD preview shows while the player has none (made once; never applied to anyone). */
+	private static Object @org.jspecify.annotations.Nullable [] sampleEffects;
+
+	/** Representative effects for the Effects preview into {@code out} (fixed times, never ticking); returns how many. */
+	public static int sampleEffects(Object[] out) {
+		Object[] samples = sampleEffects;
+		if (samples == null) {
+			samples = new Object[] {new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.MOVEMENT_SPEED, 95 * 20, 1),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.DAMAGE_BOOST, 48 * 20, 0),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 170 * 20, 0),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.WEAKNESS, 26 * 20, 0)};
+			sampleEffects = samples;
+		}
+		int n = Math.min(out.length, samples.length);
+		System.arraycopy(samples, 0, out, 0, n);
+		return n;
+	}
 	public static final InputConstants.Type KEYBOARD = InputConstants.Type.KEYSYM;
 	/** 26.x's GPU pipeline type's internal name, for mixin descriptors (1.21.1 has none; kept for the shared constants). */
 	public static final String RENDER_PIPELINE = "com/mojang/blaze3d/pipeline/RenderPipeline";
@@ -624,5 +644,152 @@ public final class McCompat {
 	/** A Realms client for the signed-in user (1.21.1 makes a new one for each use). */
 	public static com.mojang.realmsclient.client.RealmsClient realmsClient(Minecraft minecraft) {
 		return com.mojang.realmsclient.client.RealmsClient.create(minecraft);
+	}
+
+	// ---------- Flint's main menu: other mods' title-screen buttons, the Discord card's player ----------
+
+	/** Lays {@code screen} out at {@code width} × {@code height} GUI units without showing it (its init, and other mods' hooks on it). */
+	public static void initScreen(Screen screen, int width, int height) {
+		screen.init(Minecraft.getInstance(), width, height);
+	}
+
+	/** A left click in the middle of {@code widget} (another mod's title-screen button, pressed from Flint's menu); true when it took it. */
+	public static boolean clickWidget(net.minecraft.client.gui.components.AbstractWidget widget) {
+		double x = widget.getX() + widget.getWidth() / 2.0;
+		double y = widget.getY() + widget.getHeight() / 2.0;
+		boolean clicked = widget.mouseClicked(x, y, 0);
+		widget.mouseReleased(x, y, 0);
+		return clicked;
+	}
+
+	/** 1.21.1 draws players only from a living entity: the Discord card shows the cape's front instead. */
+	public static boolean previewPlayer(com.flintclient.client.platform.Frame frame, com.flintclient.client.platform.Texture cape, int x, int y,
+		int w, int h, float yaw, float capeLean) {
+		return false;
+	}
+	/** The two player models the wardrobe's preview player is drawn with (baked once). */
+	private static net.minecraft.client.model.@org.jspecify.annotations.Nullable PlayerModel<net.minecraft.client.player.AbstractClientPlayer> previewWide;
+	private static net.minecraft.client.model.@org.jspecify.annotations.Nullable PlayerModel<net.minecraft.client.player.AbstractClientPlayer> previewSlim;
+	private static com.flintclient.client.cosmetics.platform.@org.jspecify.annotations.Nullable CosmeticsLayer previewLayer;
+	private static boolean previewLayerSlim;
+
+	/**
+	 * The wardrobe's player ({@code control/rshift/WardrobeScreen}), as 26.3 draws it: wearing {@code skin} (a skin to try on,
+	 * {@code slim} its arm model; null: the account's own) and {@code cape} (null: none), turned {@code yaw} degrees, with the 3D
+	 * cosmetics the wardrobe has on (and the emote playing). 1.21.1 has no entity-free player drawing, so the player model is drawn
+	 * here as its player renderer draws it (the same transforms, lighting and cape pose), in the box (window pixels).
+	 */
+	public static boolean previewAvatar(com.flintclient.client.platform.Frame frame, com.flintclient.client.platform.@org.jspecify.annotations.Nullable Texture skin,
+		boolean slim, com.flintclient.client.platform.@org.jspecify.annotations.Nullable Texture cape, int x, int y, int w, int h, float yaw, float capeLean) {
+		int gui = com.flintclient.client.platform.Frame.windowGuiScale();
+		float x0 = x / (float) gui;
+		float y0 = y / (float) gui;
+		float x1 = (x + w) / (float) gui;
+		float y1 = (y + h) / (float) gui;
+		if (x1 - x0 < 4 || y1 - y0 < 8) {
+			return false;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		net.minecraft.client.resources.PlayerSkin own = com.flintclient.client.module.account.AccountSkin.current();
+		ResourceLocation body = skin == null ? own.texture() : skin.id();
+		boolean slimArms = skin == null ? own.model() == net.minecraft.client.resources.PlayerSkin.Model.SLIM : slim;
+		net.minecraft.client.model.PlayerModel<net.minecraft.client.player.AbstractClientPlayer> model = slimArms ? previewSlim : previewWide;
+		if (model == null) {
+			model = new net.minecraft.client.model.PlayerModel<>(mc.getEntityModels().bakeLayer(slimArms
+				? net.minecraft.client.model.geom.ModelLayers.PLAYER_SLIM : net.minecraft.client.model.geom.ModelLayers.PLAYER), slimArms);
+			if (slimArms) {
+				previewSlim = model;
+			} else {
+				previewWide = model;
+			}
+		}
+		// Standing still, everything shown (the model is the preview's own: nothing else poses it).
+		for (net.minecraft.client.model.geom.ModelPart part : new net.minecraft.client.model.geom.ModelPart[] {model.head, model.hat, model.body, model.rightArm,
+			model.leftArm, model.rightLeg, model.leftLeg, model.jacket, model.leftSleeve, model.rightSleeve, model.leftPants, model.rightPants}) {
+			part.resetPose();
+		}
+		model.setAllVisible(true);
+		model.crouching = false;
+		model.young = false;
+		model.riding = false;
+		model.attackTime = 0;
+		model.swimAmount = 0;
+		model.leftArmPose = net.minecraft.client.model.HumanoidModel.ArmPose.EMPTY;
+		model.rightArmPose = net.minecraft.client.model.HumanoidModel.ArmPose.EMPTY;
+		// What the wardrobe has on, and your emote, on a state made for this frame (as 26.3's preview player).
+		com.flintclient.client.compat.state.AvatarRenderState state = new com.flintclient.client.compat.state.AvatarRenderState();
+		com.flintclient.client.cosmetics.platform.Mc263Cosmetics.preview(state);
+		com.flintclient.client.cosmetics.platform.EmoteModel.apply(model, state);
+		frame.pushPlace(0, 0, gui);
+		GuiGraphics graphics = frame.graphics();
+		PoseStack pose = graphics.pose();
+		pose.pushPose();
+		try {
+			float scale = (y1 - y0) / 2.1F;
+			pose.translate((x0 + x1) / 2.0F, (y0 + y1) / 2.0F, 50.0F);
+			pose.mulPose(new org.joml.Matrix4f().scaling(scale, scale, -scale));
+			pose.translate(0.0F, 0.95F, 0.0F);
+			org.joml.Quaternionf tilt = new org.joml.Quaternionf().rotateX((float) Math.toRadians(-6.0));
+			pose.mulPose(new org.joml.Quaternionf().rotateZ((float) Math.PI).mul(tilt));
+			com.mojang.blaze3d.platform.Lighting.setupForEntityInInventory(tilt);
+			// The player renderer's own transforms: turned by the body, flipped, its 0.9375 scale, feet on the ground.
+			pose.mulPose(Axis.YP.rotationDegrees(-yaw));
+			pose.scale(-1.0F, -1.0F, 1.0F);
+			pose.scale(0.9375F, 0.9375F, 0.9375F);
+			pose.translate(0.0F, -1.501F, 0.0F);
+			net.minecraft.client.renderer.MultiBufferSource.BufferSource buffers = graphics.bufferSource();
+			int light = 15728880;
+			int overlay = net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY;
+			model.renderToBuffer(pose, buffers.getBuffer(net.minecraft.client.renderer.RenderType.entityTranslucent(body)), light, overlay);
+			if (cape != null && !com.flintclient.client.cosmetics.platform.Mc263Cosmetics.hidesCape(state)) {
+				// As 1.21.1's cape layer, standing still: leaning back by capeLean.
+				pose.pushPose();
+				pose.translate(0.0F, 0.0F, 0.125F);
+				pose.mulPose(Axis.XP.rotationDegrees(6.0F + capeLean / 2.0F));
+				pose.mulPose(Axis.YP.rotationDegrees(180.0F));
+				model.renderCloak(pose, buffers.getBuffer(net.minecraft.client.renderer.RenderType.entitySolid(cape.id())), light, overlay);
+				pose.popPose();
+			}
+			if (state.flint$worn() != null) {
+				com.flintclient.client.cosmetics.platform.CosmeticsLayer layer = previewLayer;
+				if (layer == null || previewLayerSlim != slimArms) {
+					net.minecraft.client.model.PlayerModel<net.minecraft.client.player.AbstractClientPlayer> drawn = model;
+					layer = new com.flintclient.client.cosmetics.platform.CosmeticsLayer(
+						new net.minecraft.client.renderer.entity.RenderLayerParent<net.minecraft.client.player.AbstractClientPlayer, net.minecraft.client.model.PlayerModel<net.minecraft.client.player.AbstractClientPlayer>>() {
+							@Override
+							public net.minecraft.client.model.PlayerModel<net.minecraft.client.player.AbstractClientPlayer> getModel() {
+								return drawn;
+							}
+
+							@Override
+							public ResourceLocation getTextureLocation(net.minecraft.client.player.AbstractClientPlayer player) {
+								return body;
+							}
+						});
+					previewLayer = layer;
+					previewLayerSlim = slimArms;
+				}
+				layer.draw(pose, new com.flintclient.client.compat.state.SubmitNodeCollector(buffers), light, state);
+			}
+			graphics.flush();
+		} finally {
+			com.mojang.blaze3d.platform.Lighting.setupFor3DItems();
+			pose.popPose();
+			frame.pop();
+		}
+		return true;
+	}
+
+	/**
+	 * The wardrobe's Apply: {@code skin} (a 64 × 64 texture) on the player's own model at once, first and third person, until
+	 * the next join looks it up anew ({@link OwnSkin}). True when it is on.
+	 */
+	public static boolean wearOwnSkin(com.flintclient.client.platform.Texture skin, boolean slim) {
+		java.util.UUID me = Minecraft.getInstance().getUser().getProfileId();
+		if (me == null) {
+			return false;
+		}
+		OwnSkin.wear(skin.id(), slim, me);
+		return true;
 	}
 }

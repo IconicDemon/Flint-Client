@@ -330,9 +330,9 @@ public final class HudData {
 
 	// ---------- under the crosshair, in hand ----------
 
-	/** The block looked at within {@code range} blocks, or null. */
-	public static HudLooks.@Nullable Block block(int range) {
-		Mc263HudExtras.BlockLook look = Mc263HudExtras.block(range);
+	/** The block Minecraft outlines (within your reach, never through a wall), or null. */
+	public static HudLooks.@Nullable Block block() {
+		Mc263HudExtras.BlockLook look = Mc263HudExtras.block();
 		if (look == null) {
 			return null;
 		}

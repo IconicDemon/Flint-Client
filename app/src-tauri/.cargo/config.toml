@@ -2,3 +2,11 @@
 # copies of Flint next to the installed app (macOS ignores .metadata_never_index for this).
 [build]
 target-dir = "target.noindex"
+
+[env]
+# The SQLite in the app (rusqlite's bundled one) only reads the Modrinth App's and Lunar Client's profile lists
+# (src/import/adapters): ordinary tables and plain SELECTs. Its full-text search (FTS3/4/5), R-tree, dbstat, STAT4 and
+# soundex extensions, which libsqlite3-sys turns on, are left out: about 430 KB of the exe. A database that has such
+# tables still opens and its other tables read as before, since SQLite only looks a virtual table's module up when that
+# table itself is used (tested in import/adapters/mod.rs).
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_ENABLE_STAT4 -USQLITE_SOUNDEX"

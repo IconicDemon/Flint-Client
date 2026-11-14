@@ -13,6 +13,8 @@ public final class FlintClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		LOGGER.info("{} loaded successfully.", NAME);
+		// Instant Swap's standby game steps back before it loads anything (the player's game keeps its frames).
+		com.flintclient.client.module.social.InstantSwap.standbyStarting();
 		long began = StartupTrace.begin();
 		PerformanceCore.init();
 		StartupTrace.end("performance core", began);
@@ -27,6 +29,16 @@ public final class FlintClient implements ClientModInitializer {
 			com.flintclient.client.control.platform.Mc263GameFolders.start(net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir());
 		} catch (RuntimeException | LinkageError e) {
 			LOGGER.warn("Flint: couldn't start looking after the game's folders", e);
+		}
+		try {
+			// The main menu's partner listings and showcase, asked of the Flint app now, so the menu opens with them.
+			com.flintclient.client.module.social.MenuFeeds feeds = com.flintclient.client.module.social.MenuFeeds.get();
+			feeds.version(com.flintclient.client.util.FlintInfo.minecraftVersion());
+			long now = System.currentTimeMillis();
+			feeds.want(com.flintclient.client.module.social.MenuFeeds.Feed.PARTNERS, null, now);
+			feeds.want(com.flintclient.client.module.social.MenuFeeds.Feed.SHOWCASE, null, now);
+		} catch (RuntimeException | LinkageError e) {
+			LOGGER.warn("Flint: couldn't ask the Flint app for the main menu's listings", e);
 		}
 	}
 }

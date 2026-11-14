@@ -6,6 +6,7 @@ import com.flintclient.client.control.feature.CapeChoices;
 import com.flintclient.client.control.feature.CapeFrames;
 import com.flintclient.client.control.feature.StoreCapes;
 import com.flintclient.client.control.model.GameOptions;
+import com.flintclient.client.control.store.AssetCache;
 import com.flintclient.client.control.store.StoreCosmeticsClient;
 import com.flintclient.client.control.store.StoreEndpoint;
 import com.flintclient.client.control.store.StoreHandoff;
@@ -45,6 +46,11 @@ import org.jspecify.annotations.Nullable;
  * own "Cape" skin-customization switch still hides every cape, Nick Hider's hidden skins stay default (no Store cape either),
  * an elytra texture of Minecraft's stays, and with the option off only Minecraft's capes are drawn. A player Flint doesn't
  * know as wearing one keeps exactly the skin Minecraft gave.
+ *
+ * <p>Cape mods (the Capes mod's OptiFine, LabyMod and MinecraftCapes capes, among others): Flint decides after them
+ * ({@code PlayerInfoMixin} wraps the whole skin lookup). A Store cape's wearer gets the Store cape, with Minecraft's elytra
+ * texture rather than a cape mod's, so that mod's cape shows nowhere on them; anyone else keeps the skin as the mods made it, and
+ * the mod's cape is back the moment the Store cape is taken off. One cape at a time.
  *
  * <p>Elytras: with "Cape design on elytra" on, a Store cape's wearer has wings made of that cape, static or animated
  * ({@link Mc263CapeElytra}, which finds the cape by the skin: {@link #storeCape}). Otherwise elytras follow Minecraft's rule (an
@@ -96,10 +102,11 @@ public final class Mc263StoreCapes {
 	}
 
 	/**
-	 * A player's skin with a Store cape, kept until either changes (so drawing allocates nothing); {@code wings}: the cape has
+	 * A player's skin with a Store cape, kept until any of them changes (so drawing allocates nothing): {@code given}, the skin as
+	 * Minecraft and the cape mods made it; {@code vanilla}, Minecraft's own (before any cape mod); {@code wings}: the cape has
 	 * elytra art ({@link StoreCapes#wings}).
 	 */
-	private record Skinned(PlayerSkin vanilla, Texture texture, PlayerSkin skin, boolean wings) {
+	private record Skinned(PlayerSkin given, PlayerSkin vanilla, Texture texture, PlayerSkin skin, boolean wings) {
 	}
 
 	/** The engine's textures for {@link StoreCapes}: Flint's own, registered with Minecraft's texture manager. */
@@ -137,7 +144,8 @@ public final class Mc263StoreCapes {
 			}
 			StoreEndpoint endpoint = h.endpoint();
 			Path cache = Minecraft.getInstance().gameDirectory.toPath().resolve("flint").resolve("cache").resolve("cosmetics");
-			service = new StoreCapes<>(new StoreCosmeticsClient(endpoint, StoreCosmeticsClient.http()), cache, TEXTURES,
+			AssetCache files = AssetCache.forGame(h.assetCacheDir(), cache);
+			service = new StoreCapes<>(new StoreCosmeticsClient(endpoint, StoreCosmeticsClient.http()), files, TEXTURES,
 				StoreCapes.loaderThread());
 			FlintClient.LOGGER.info("Flint Store capes: using {}", endpoint);
 			capes = service;
@@ -186,7 +194,7 @@ public final class Mc263StoreCapes {
 				NEAR.clear();
 			}
 			service = handoff(service, self);
-			service.update(System.nanoTime(), ControlState.settings().gameBool(GameOptions.STORE_CAPES), WANTED);
+			service.update(System.nanoTime(), ControlState.settings().gameBool(GameOptions.STORE_CAPES), WANTED, self);
 			SKINS.keySet().removeIf(id -> capes == null || !capes.wears(id));
 		} catch (RuntimeException | LinkageError e) {
 			failed(e);
@@ -257,8 +265,12 @@ public final class Mc263StoreCapes {
 		return service;
 	}
 
-	/** {@code info}'s skin with the cape they equipped in the Flint Store, if they wear one; otherwise {@code skin} as it is. */
-	public static PlayerSkin skin(PlayerInfo info, PlayerSkin skin) {
+	/**
+	 * {@code info}'s skin with the cape they equipped in the Flint Store, if they wear one; otherwise {@code skin} as it is.
+	 * {@code skin}: as Minecraft and every cape mod made it; {@code vanilla}: Minecraft's own, before the cape mods (the same skin
+	 * when there are none). A Store cape takes the place of any of their capes, and the wings keep Minecraft's elytra texture.
+	 */
+	public static PlayerSkin skin(PlayerInfo info, PlayerSkin skin, PlayerSkin vanilla) {
 		StoreCapes<Texture> service = capes;
 		if (service == null || !GUARD.on()) {
 			return skin;
@@ -270,14 +282,14 @@ public final class Mc263StoreCapes {
 				return skin;
 			}
 			if (!Minecraft.getInstance().isSameThread()) {
-				return withCape(skin, texture.id());
+				return withCape(skin, texture.id(), vanilla);
 			}
 			Skinned s = SKINS.get(id);
-			if (s == null || s.vanilla() != skin || s.texture() != texture) {
+			if (s == null || !sameBody(s.given(), skin) || !same(s.vanilla(), vanilla) || s.texture() != texture) {
 				if (s != null) {
 					BY_SKIN.remove(s.skin());
 				}
-				s = new Skinned(skin, texture, withCape(skin, texture.id()), service.wings(id));
+				s = new Skinned(skin, vanilla, texture, withCape(skin, texture.id(), vanilla), service.wings(id));
 				SKINS.put(id, s);
 				BY_SKIN.put(s.skin(), s);
 			}
@@ -327,9 +339,25 @@ public final class Mc263StoreCapes {
 		}
 	}
 
-	/** {@code skin} with {@code cape} as its cape; body, model, elytra and the secure flag as they were. */
-	private static PlayerSkin withCape(PlayerSkin skin, Identifier cape) {
-		return new PlayerSkin(skin.body(), new ClientAsset.ResourceTexture(cape, cape), skin.elytra(), skin.model(), skin.secure());
+	/** Whether two skins are the same (a cape mod makes a new, equal one on every call). */
+	private static boolean same(PlayerSkin a, PlayerSkin b) {
+		return a == b || a.equals(b);
+	}
+
+	/**
+	 * Whether two skins have the same body (texture, model and secure flag), whatever their capes: the Store cape replaces those,
+	 * and a cape mod's animated cape is another texture every frame of its own.
+	 */
+	private static boolean sameBody(PlayerSkin a, PlayerSkin b) {
+		return a == b || a.body().equals(b.body()) && a.model() == b.model() && a.secure() == b.secure();
+	}
+
+	/**
+	 * {@code skin} with {@code cape} as its cape and {@code vanilla}'s elytra texture (Minecraft's, not a cape mod's); body, model
+	 * and the secure flag as they were.
+	 */
+	private static PlayerSkin withCape(PlayerSkin skin, Identifier cape, PlayerSkin vanilla) {
+		return new PlayerSkin(skin.body(), new ClientAsset.ResourceTexture(cape, cape), vanilla.elytra(), skin.model(), skin.secure());
 	}
 
 	/** One line for the dev tour: what the Store capes know and show. */

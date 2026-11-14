@@ -57,10 +57,10 @@ abstract class LivingEntityMixin {
 		}
 	}
 
-	/** Animations' swing duration: how long your own arm swing takes (the method's name depends on the Minecraft version). */
+	/** Item Customizer's swing speed, Haste and Mining Fatigue: how long your own arm swing takes (the method's name depends on the version). */
 	@com.llamalad7.mixinextras.injector.ModifyReturnValue(method = com.flintclient.client.compat.McCompat.SWING_DURATION, at = @At("RETURN"))
 	private int flint$swing(int ticks) {
-		return com.flintclient.client.control.platform.Mc263Tools.swing((LivingEntity) (Object) this, ticks);
+		return com.flintclient.client.control.platform.Mc263ViewModel.swingTicks((LivingEntity) (Object) this, ticks);
 	}
 
 	/** Animations' Hide own potion particles: your own effect swirls aren't made while you're in first person. */

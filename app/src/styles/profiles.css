@@ -1411,6 +1411,40 @@
   color: var(--fg);
 }
 
+/* The name and, for content from CurseForge, its small source label. */
+.ct-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.source-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 1px 4px;
+  border-radius: 999px;
+  background: rgba(241, 100, 54, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(241, 100, 54, 0.32);
+  color: #f58a62;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* CurseForge orange deepened to read on Ice Cream's cream. */
+[data-theme="icecream"] .source-tag {
+  color: #b8461e;
+}
+
+.source-tag img {
+  width: 11px;
+  height: 11px;
+}
+
 .ct-name .faint {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2835,7 +2869,7 @@
 }
 
 .ep-cell.is-on {
-  background: rgba(var(--accent-rgb, 255, 129, 57), 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 

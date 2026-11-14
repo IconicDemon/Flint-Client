@@ -66,11 +66,9 @@ public final class HudDev {
 		if (setting == null) {
 			return "no setting " + settingId + " in " + moduleId;
 		}
-		JsonPrimitive json = switch (value) {
-			case Boolean b -> new JsonPrimitive(b);
-			case Number n -> new JsonPrimitive(n);
-			default -> new JsonPrimitive(String.valueOf(value));
-		};
+		// (no switch patterns: the shared sources build for Java 17 too, Minecraft 1.19.x)
+		JsonPrimitive json = value instanceof Boolean b ? new JsonPrimitive(b)
+			: value instanceof Number n ? new JsonPrimitive(n) : new JsonPrimitive(String.valueOf(value));
 		module.setFromJson(setting, json);
 		return module.id() + "." + setting.id() + " = " + module.get(setting);
 	}

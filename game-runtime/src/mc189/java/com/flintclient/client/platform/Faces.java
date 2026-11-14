@@ -72,6 +72,16 @@ public final class Faces {
 		face(frame, id == null ? DefaultSkinUtils.getDefaultSkin() : skin(mc, id), x, y, size);
 	}
 
+	/** The signed-in player's whole skin texture (their default skin's until theirs has loaded): the main menu's Discord card. */
+	public static Identifier ownSkin() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player != null) {
+			return mc.player.getSkinTextureLocation();
+		}
+		UUID id = ownUuid();
+		return id == null ? DefaultSkinUtils.getDefaultSkin() : skin(mc, id);
+	}
+
 	/** Another player's face by UUID (either spelling); their default skin's until theirs has loaded. */
 	public static void of(Frame frame, String uuid, int x, int y, int size) {
 		UUID id = parse(uuid);

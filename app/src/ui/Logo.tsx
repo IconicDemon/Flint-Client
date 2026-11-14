@@ -8,9 +8,10 @@ export function FlintMark({ size = 28, className }: { size?: number; className?:
       role="img"
       aria-label="Flint Client"
     >
-      <polygon points="256,60 351,228 256,312 161,228" fill="#B45309" />
-      <polygon points="256,60 351,228 256,186" fill="#D97706" />
-      <polygon points="239,172 318,284 239,410 194,284" fill="#FEF3E2" />
+      {/* The theme's colours (tokens.css --logo-*): Flint's own amber on Ember, the chosen accent on the others. */}
+      <polygon points="256,60 351,228 256,312 161,228" fill="var(--logo-dark)" />
+      <polygon points="256,60 351,228 256,186" fill="var(--logo-light)" />
+      <polygon points="239,172 318,284 239,410 194,284" fill="var(--logo-core)" />
     </svg>
   );
 }

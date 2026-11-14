@@ -25,8 +25,8 @@ import org.jspecify.annotations.Nullable;
  */
 final class PingView extends TextModuleView {
 	private static final int BARS = 4;
-	/** Good, fair, slow, bad. */
-	private static final int[] TINTS = {Tokens.SUCCESS, 0xFFE3C58F, Tokens.ACCENT_TEXT, Tokens.DANGER};
+	/** Good, fair, slow, bad: fixed meanings (slow is orange in every theme, not the theme's accent). */
+	private static final int[] TINTS = {Tokens.SUCCESS, 0xFFE3C58F, Palette.EMBER_ACCENT_TEXT, Tokens.DANGER};
 
 	private final TextOut o = new TextOut();
 	private boolean showBars;

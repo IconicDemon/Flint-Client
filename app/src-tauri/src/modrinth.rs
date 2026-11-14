@@ -199,6 +199,27 @@ pub fn loaders_for(kind: &str) -> &'static [&'static str] {
     }
 }
 
+/// The loader tags a version must carry for `kind` content on `game_version`. Mods for 1.8.9 must be Ornithe builds:
+/// Modrinth's `fabric` builds for 1.8.9 are Legacy Fabric ones, which Flint's 1.8.9 can't load (see `ornithe.rs`).
+pub fn loaders_on(kind: &str, game_version: &str) -> &'static [&'static str] {
+    if kind == "mod" && crate::ornithe::on_ornithe(game_version) {
+        &[crate::ornithe::LOADER]
+    } else {
+        loaders_for(kind)
+    }
+}
+
+/// Which of a project's versions fit `kind` content on `game_version`: the loader tags (one of them) and the Minecraft
+/// version they must list. On 1.8.9, the libraries Ornithe mods require that are published as plain Fabric builds for no
+/// Minecraft version in particular (`ornithe::SHARED_LIBRARIES`) fit by their Fabric builds, for any version.
+pub fn version_filter<'a>(project_id: &str, kind: &str, game_version: &'a str) -> (&'static [&'static str], Option<&'a str>) {
+    if kind == "mod" && crate::ornithe::on_ornithe(game_version) && crate::ornithe::shared_library(project_id) {
+        (&["fabric"], None)
+    } else {
+        (loaders_on(kind, game_version), Some(game_version))
+    }
+}
+
 pub fn content_dir(kind: &str) -> Option<&'static str> {
     match kind {
         "mod" => Some("mods"),
@@ -237,7 +258,7 @@ pub fn pick_version(list: &[Value]) -> Option<Value> {
         .cloned()
 }
 
-fn trim_version(v: &Value) -> Value {
+pub(crate) fn trim_version(v: &Value) -> Value {
     let changelog: String = v["changelog"].as_str().unwrap_or_default().chars().take(4000).collect();
     json!({
         "id": v["id"],
@@ -264,23 +285,23 @@ fn trim_version(v: &Value) -> Value {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySearch {
-    kind: String,
+    pub(crate) kind: String,
     #[serde(default)]
-    query: String,
+    pub(crate) query: String,
     #[serde(default)]
-    index: Option<String>,
+    pub(crate) index: Option<String>,
     #[serde(default)]
-    offset: u32,
+    pub(crate) offset: u32,
     #[serde(default)]
-    limit: Option<u32>,
+    pub(crate) limit: Option<u32>,
     #[serde(default)]
-    game_version: Option<String>,
+    pub(crate) game_version: Option<String>,
     #[serde(default)]
-    loader: Option<String>,
+    pub(crate) loader: Option<String>,
     #[serde(default)]
-    categories: Vec<String>,
+    pub(crate) categories: Vec<String>,
     #[serde(default)]
-    client_only: bool,
+    pub(crate) client_only: bool,
 }
 
 pub fn search_path(params: &LibrarySearch) -> CmdResult<String> {
@@ -293,12 +314,16 @@ pub fn search_path(params: &LibrarySearch) -> CmdResult<String> {
         "datapack" => facets.push(json!(["all_project_types:datapack"])),
         _ => return Err("Unknown content type".into()),
     }
+    let game = params.game_version.as_deref().filter(|v| valid_game_version(v));
     match (params.kind.as_str(), params.loader.as_deref()) {
+        // A 1.8.9 Fabric profile runs Fabric from Ornithe: Ornithe builds only (Modrinth's 1.8.9 `fabric` ones are Legacy
+        // Fabric's). A project tagged `ornithe` for another version only is still listed; its versions decide at install.
+        ("mod", Some("fabric")) if game.is_some_and(crate::ornithe::on_ornithe) => facets.push(json!([format!("categories:{}", crate::ornithe::LOADER)])),
         ("mod" | "modpack", Some("fabric")) => facets.push(json!(["categories:fabric"])),
         ("shader", Some("fabric")) => facets.push(json!(["categories:iris"])),
         _ => {}
     }
-    if let Some(version) = params.game_version.as_deref().filter(|v| valid_game_version(v)) {
+    if let Some(version) = game {
         facets.push(json!([format!("versions:{version}")]));
     }
     if params.client_only && params.kind == "mod" {
@@ -320,7 +345,12 @@ pub fn search_path(params: &LibrarySearch) -> CmdResult<String> {
 
 #[tauri::command]
 pub async fn library_search(state: State<'_, AppState>, params: LibrarySearch) -> CmdResult<Value> {
-    let path = search_path(&params)?;
+    search(&state, &params).await
+}
+
+/// A Library search on Modrinth (the Library's page, and the in-game Library through the game link).
+pub async fn search(state: &AppState, params: &LibrarySearch) -> CmdResult<Value> {
+    let path = search_path(params)?;
     let (value, stale) = state.modrinth.get(&state.http, &path, SEARCH_TTL, "Modrinth search failed").await?;
     let hits: Vec<Value> = value["hits"]
         .as_array()
@@ -363,6 +393,10 @@ pub async fn library_search(state: State<'_, AppState>, params: LibrarySearch) -
 
 #[tauri::command]
 pub async fn library_project(state: State<'_, AppState>, id: String) -> CmdResult<Value> {
+    // A CurseForge project (`cf:<modId>`) opens in the same drawer.
+    if let Some(mod_id) = crate::curseforge::parse_ref(&id) {
+        return crate::curseforge::library_project(&state, mod_id).await;
+    }
     if !valid_id(&id) {
         return Err("Invalid project".into());
     }
@@ -429,11 +463,18 @@ pub async fn library_versions(
     kind: String,
     game_version: Option<String>,
 ) -> CmdResult<Value> {
+    let game_version = game_version.filter(|v| valid_game_version(v));
+    if let Some(mod_id) = crate::curseforge::parse_ref(&id) {
+        return crate::curseforge::library_versions(&state, mod_id, &kind, game_version.as_deref()).await;
+    }
     if !valid_id(&id) {
         return Err("Invalid project".into());
     }
-    let game_version = game_version.filter(|v| valid_game_version(v));
-    let path = format!("/project/{id}/version{}", version_query(loaders_for(&kind), game_version.as_deref()));
+    let (loaders, game) = match game_version.as_deref() {
+        Some(game) => version_filter(&id, &kind, game),
+        None => (loaders_for(&kind), None),
+    };
+    let path = format!("/project/{id}/version{}", version_query(loaders, game));
     let (list, stale) = state.modrinth.get(&state.http, &path, VERSIONS_TTL, "Couldn't load versions").await?;
     let versions: Vec<Value> = list.as_array().map(|l| l.iter().take(60).map(trim_version).collect()).unwrap_or_default();
     Ok(json!({ "versions": versions, "stale": stale }))
@@ -470,6 +511,51 @@ pub fn library_status(state: State<'_, AppState>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn search(kind: &str, game: Option<&str>, loader: Option<&str>) -> String {
+        let params = LibrarySearch {
+            kind: kind.into(),
+            query: "sprint".into(),
+            index: None,
+            offset: 0,
+            limit: None,
+            game_version: game.map(str::to_owned),
+            loader: loader.map(str::to_owned),
+            categories: Vec::new(),
+            client_only: kind == "mod",
+        };
+        let path = search_path(&params).unwrap();
+        let facets = path.split("facets=").nth(1).unwrap();
+        url::form_urlencoded::parse(format!("f={facets}").as_bytes()).next().unwrap().1.into_owned()
+    }
+
+    #[test]
+    fn a_1_8_9_fabric_profile_searches_ornithe_builds_only() {
+        let facets = search("mod", Some("1.8.9"), Some("fabric"));
+        assert!(facets.contains(r#"["categories:ornithe"]"#) && facets.contains(r#"["versions:1.8.9"]"#), "{facets}");
+        assert!(!facets.contains("categories:fabric") && !facets.contains("legacy-fabric"), "{facets}");
+        // Every other version, and what isn't a mod, is as it was.
+        for game in ["26.3", "1.21.11", "1.21.1", "1.19.2"] {
+            let facets = search("mod", Some(game), Some("fabric"));
+            assert!(facets.contains(r#"["categories:fabric"]"#) && !facets.contains("ornithe"), "{game}: {facets}");
+        }
+        assert!(search("resourcepack", Some("1.8.9"), Some("fabric")).contains(r#"["project_type:resourcepack"]"#));
+        assert!(!search("resourcepack", Some("1.8.9"), Some("fabric")).contains("ornithe"));
+        assert!(!search("mod", Some("1.8.9"), Some("vanilla")).contains("categories:"), "a vanilla profile names no loader");
+    }
+
+    #[test]
+    fn versions_for_1_8_9_mods_are_ornithe_ones() {
+        assert_eq!(loaders_on("mod", "1.8.9"), ["ornithe"]);
+        assert_eq!(loaders_on("mod", "26.3"), ["fabric"]);
+        assert_eq!(loaders_on("resourcepack", "1.8.9"), ["minecraft"]);
+        assert_eq!(loaders_on("shader", "1.8.9"), ["iris"]);
+        assert_eq!(version_filter("AANobbMI", "mod", "1.8.9"), (&["ornithe"][..], Some("1.8.9")));
+        // Fabric Language Kotlin lists no Minecraft version for 1.8.9; its Fabric builds hold no Minecraft code.
+        assert_eq!(version_filter("Ha28R6CL", "mod", "1.8.9"), (&["fabric"][..], None));
+        assert_eq!(version_filter("Ha28R6CL", "mod", "1.21.11"), (&["fabric"][..], Some("1.21.11")), "elsewhere as before");
+        assert_eq!(version_query(loaders_on("mod", "1.8.9"), Some("1.8.9")), "?loaders=%5B%22ornithe%22%5D&game_versions=%5B%221.8.9%22%5D");
+    }
 
     #[test]
     fn game_versions_are_plain_names() {

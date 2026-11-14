@@ -62,7 +62,7 @@
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
@@ -71,7 +71,7 @@
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.2),
     inset 0 -1px 0 rgba(0, 0, 0, 0.14),
@@ -80,7 +80,7 @@
 }
 
 .btn-primary:active:not(:disabled) {
-  background: var(--accent-press);
+  background: var(--accent-fill-press);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.22),
     0 1px 1px rgba(0, 0, 0, 0.25);
@@ -497,6 +497,7 @@
 }
 
 .slider-value {
+  flex: none;
   min-width: 56px;
   text-align: right;
   white-space: nowrap;
@@ -1376,8 +1377,26 @@
   width: 100%;
 }
 
+/* Six themes in one row, or two rows of three (two columns when narrow): never a lone card on a row of its own. */
+.pick-themes {
+  width: 100%;
+  container-type: inline-size;
+}
+
 .pick-grid.themes {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 124px), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@container (min-width: 400px) {
+  .pick-grid.themes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 780px) {
+  .pick-grid.themes {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 .pick-grid.fonts {
@@ -1444,11 +1463,6 @@
   color: var(--fg);
 }
 
-.pick-brand {
-  font-weight: 450;
-  color: var(--text-3);
-}
-
 .pick-note {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1491,7 +1505,7 @@
 }
 
 .tp-rail i:first-child {
-  background: rgb(var(--accent-rgb));
+  background: var(--accent-fill, rgb(var(--accent-rgb)));
 }
 
 .tp-scene {
@@ -1527,7 +1541,7 @@
   height: 11px;
   margin-top: 2px;
   border-radius: 4px;
-  background: rgb(var(--accent-rgb));
+  background: var(--accent-fill, rgb(var(--accent-rgb)));
 }
 
 /* Typography specimen in the option's own fonts (data-font-preview sets them). */

@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import process from "node:process";
 // @ts-expect-error type error without @types/node package
 import { readdirSync, readFileSync } from "node:fs";
-import { coverageOf, type Messages } from "./src/lib/i18nCatalog.ts";
+import { compactCatalog, coverageOf, type Messages } from "./src/lib/i18nCatalog.ts";
 // Development only: stand-in partner pictures for the browser mock (never in a build).
 import { partnerMediaPlugin } from "./scripts/dev-partner-media.mjs";
 const host = process.env.TAURI_DEV_HOST;
@@ -40,8 +40,41 @@ function i18nCoverage(): Plugin {
   };
 }
 
+/**
+ * Builds only: each language's chunk without its keys (src/lib/i18nCatalog.ts `compactCatalog`). Every catalog has
+ * English's dotted keys over again, about two fifths of each file; lib/i18n.ts puts a catalog back together with
+ * English's keys as it loads it. The development server serves the catalog files as they are.
+ */
+function compactCatalogs(): Plugin {
+  // A module of its own (not the .json file, which the JSON plugin would take), named so its chunk is `de-….js`.
+  const prefix = "\0flint-catalog/";
+  let dir = "src/locales";
+  let englishKeys: string[] = [];
+  return {
+    name: "flint-compact-catalogs",
+    apply: "build",
+    enforce: "pre",
+    configResolved(config) {
+      dir = `${config.root}/src/locales`;
+    },
+    buildStart() {
+      englishKeys = Object.keys(JSON.parse(readFileSync(`${dir}/en.json`, "utf8")) as Messages);
+    },
+    resolveId(source) {
+      const locale = /(?:^|\/)locales\/([\w-]+)\.json$/.exec(source)?.[1];
+      return locale && locale !== "en" ? `${prefix}${locale}` : undefined;
+    },
+    load(id) {
+      if (!id.startsWith(prefix)) return;
+      const file = `${dir}/${id.slice(prefix.length)}.json`;
+      this.addWatchFile(file);
+      return `export default ${JSON.stringify(compactCatalog(englishKeys, JSON.parse(readFileSync(file, "utf8")) as Messages))};`;
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), i18nCoverage(), partnerMediaPlugin("src/lib/partnerFixtures.json")],
+  plugins: [react(), i18nCoverage(), compactCatalogs(), partnerMediaPlugin("src/lib/partnerFixtures.json")],
   // `--mode perf`: a production build with React's profiling build, so src/lib/perf.ts can time
   // commits. Normal builds never include it.
   resolve: mode === "perf" ? { alias: [{ find: /^react-dom\/client$/, replacement: "react-dom/profiling" }] } : undefined,

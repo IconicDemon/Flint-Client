@@ -125,10 +125,36 @@ public final class Mc263OriginalHud {
 
 	// ---------- Playtime ----------
 
-	/** Your Play Time statistic in ticks, as the server last sent it; -1 without a player. */
+	/**
+	 * How often Playtime asks for the statistic, in ticks: every second in your own world, once a minute on a server
+	 * (Minecraft asks only when its Statistics screen opens; asking every second would flood a server with requests).
+	 */
+	static final int ASK_LOCAL = 20;
+	static final int ASK_SERVER = 1200;
+	private static int statValue = Integer.MIN_VALUE;
+	private static long statAt;
+
+	/**
+	 * Your Play Time statistic in ticks, as the server last sent it; on a server, counted on from there between its answers
+	 * (a tick played is a tick of playtime). -1 without a player.
+	 */
 	public static int playTimeTicks() {
-		LocalPlayer player = mc().player;
-		return player == null ? -1 : player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAY_TIME, StatFormatter.TIME));
+		Minecraft mc = mc();
+		LocalPlayer player = mc.player;
+		if (player == null) {
+			return -1;
+		}
+		int value = player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAY_TIME, StatFormatter.TIME));
+		long now = com.flintclient.client.control.feature.Features.nowMs();
+		if (value != statValue) {
+			statValue = value;
+			statAt = now;
+		}
+		if (mc.hasSingleplayerServer()) {
+			return value;
+		}
+		long since = Math.clamp((now - statAt) / 50, 0, ASK_SERVER * 2L);
+		return (int) Math.min(Integer.MAX_VALUE, value + since);
 	}
 
 	/** {@code ticks} in Minecraft's statistics format (like "1.25 h"). */
@@ -255,14 +281,19 @@ public final class Mc263OriginalHud {
 
 	private static boolean hadPack;
 
-	/** Each client tick: Playtime's statistic asked for once a second; Pack Display switches off when your last pack goes. */
+	/**
+	 * Each client tick: Playtime's statistic asked for a second after you arrive, then every {@link #ASK_LOCAL} or
+	 * {@link #ASK_SERVER} ticks; Pack Display switches off when your last pack goes.
+	 */
 	public static void tick() {
 		if (!GUARD.on()) {
 			return;
 		}
 		try {
 			Minecraft mc = mc();
-			if (Mods.on(PLAYTIME) && mc.getConnection() != null && mc.player != null && mc.player.tickCount % 20 == 0) {
+			int every = mc.hasSingleplayerServer() ? ASK_LOCAL : ASK_SERVER;
+			if (Mods.on(PLAYTIME) && mc.getConnection() != null && mc.player != null
+				&& (mc.player.tickCount == ASK_LOCAL || mc.player.tickCount % every == 0)) {
 				mc.getConnection().send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.REQUEST_STATS));
 			}
 			tickPacks(mc);

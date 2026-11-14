@@ -28,6 +28,8 @@ public final class Features {
 	private static final long LAUNCHED_AT = launchTime();
 	/** When the current world was joined (monotonic ms), or -1 outside a world. */
 	private static long worldJoinedAt = -1;
+	/** Flint's folder in the game's config folder (null before start-up finished). */
+	private static java.nio.file.@org.jspecify.annotations.Nullable Path flintDir;
 
 	private Features() {
 	}
@@ -42,8 +44,14 @@ public final class Features {
 
 	/** Reads where Flint keeps per-world data (once, at start-up). */
 	public static void init(java.nio.file.Path configDir) {
+		flintDir = configDir.resolve("flintclient");
 		waypoints = new WaypointStore(configDir.resolve("flintclient").resolve("waypoints"));
 		packFolders = new PackFolders(configDir.resolve("flintclient").resolve("pack-folders.json"));
+	}
+
+	/** Flint's folder in the game's config folder, or null before start-up finished (keep things in memory then). */
+	public static java.nio.file.@org.jspecify.annotations.Nullable Path flintDir() {
+		return flintDir;
 	}
 
 	/** Pack Organizer's folders (kept in memory only before start-up finished). */

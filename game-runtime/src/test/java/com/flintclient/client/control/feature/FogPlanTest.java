@@ -210,13 +210,65 @@ class FogPlanTest {
 		assertSane(d);
 
 		s.set(FogCustomizer.CLEAR_WATER, true);
-		FogPlan.Distances clear = vanilla().set(-8, 96);
+		FogPlan.Distances clear = vanilla().set(-8, 24);
 		FogPlan.adjust(clear, FogPlan.Medium.WATER, false, null, VIEW, s, false);
+		// Clear water: Minecraft's clearest water (eyes used to it, 96 blocks) at once, and never further.
 		assertEquals(32, clear.environmentalStart);
-		assertEquals(256, clear.environmentalEnd);
-		assertEquals(256, clear.skyEnd, "the sky as far as the clear water");
-		assertEquals(256, clear.cloudEnd);
+		assertEquals(FogPlan.WATER_CLEAR, clear.environmentalEnd);
+		assertEquals(FogPlan.WATER_CLEAR, clear.skyEnd, "the sky as far as the clear water");
+		assertEquals(FogPlan.WATER_CLEAR, clear.cloudEnd);
 		assertSane(clear);
+	}
+
+	@Test
+	void waterAndPowderSnowNeverClearerThanMinecraftsBest() {
+		// A config set to see everything (None, or Linear to twice the render distance) stops at Minecraft's best.
+		ModuleState none = settings();
+		none.set(FogCustomizer.WATER.type(), 3);
+		FogPlan.Distances water = vanilla().set(-8, 24);
+		FogPlan.adjust(water, FogPlan.Medium.WATER, false, null, VIEW, none, false);
+		assertEquals(FogPlan.WATER_CLEAR, water.environmentalEnd);
+		assertTrue(water.environmentalStart <= water.environmentalEnd);
+		assertSane(water);
+
+		ModuleState linear = settings();
+		linear.set(FogCustomizer.WATER.type(), 0);
+		linear.set(FogCustomizer.WATER.linearEnd(), 200F);
+		FogPlan.Distances far = vanilla().set(-8, 24);
+		FogPlan.adjust(far, FogPlan.Medium.WATER, false, null, VIEW, linear, false);
+		assertEquals(FogPlan.WATER_CLEAR, far.environmentalEnd);
+
+		// Powder snow: its default config (Linear to 140% of the render distance) keeps Minecraft's 2 blocks.
+		FogPlan.Distances snow = vanilla().set(0, 2);
+		FogPlan.adjust(snow, FogPlan.Medium.POWDER_SNOW, false, null, VIEW, settings(), false);
+		assertEquals(0, snow.environmentalStart);
+		assertEquals(FogPlan.POWDER_SNOW_CLEAR, snow.environmentalEnd);
+		// It may still be made thicker.
+		ModuleState thick = settings();
+		thick.set(FogCustomizer.SNOW.linearEnd(), 0.5F);
+		FogPlan.Distances thicker = vanilla().set(0, 2);
+		FogPlan.adjust(thicker, FogPlan.Medium.POWDER_SNOW, false, null, VIEW, thick, false);
+		assertEquals(VIEW * 0.005F, thicker.environmentalEnd, 1e-3F);
+
+		// What Minecraft itself shows further (a spectator's view) is left as it is.
+		FogPlan.Distances spectator = vanilla().set(-8, VIEW / 2);
+		FogPlan.adjust(spectator, FogPlan.Medium.POWDER_SNOW, false, null, VIEW, settings(), false);
+		assertEquals(VIEW / 2, spectator.environmentalEnd);
+	}
+
+	@Test
+	void blindnessAndDarknessKeepFluidFogToo() {
+		ModuleState s = settings();
+		s.set(FogCustomizer.CLEAR_WATER, true);
+		s.set(FogCustomizer.CLEAR_LAVA, true);
+		FogPlan.Distances water = vanilla().set(0, 5);
+		FogPlan.adjust(water, FogPlan.Medium.WATER, true, null, VIEW, s, false);
+		assertEquals(0, water.environmentalStart, "Clear water doesn't lift Blindness");
+		assertEquals(5, water.environmentalEnd);
+		FogPlan.Distances lava = vanilla().set(0.25F, 1);
+		FogPlan.adjust(lava, FogPlan.Medium.LAVA, true, null, VIEW, s, false);
+		assertEquals(0.25F, lava.environmentalStart, "Clear lava doesn't lift Blindness");
+		assertEquals(1, lava.environmentalEnd);
 	}
 
 	@Test
@@ -228,8 +280,9 @@ class FogPlanTest {
 		assertEquals(1, lava.environmentalEnd);
 		s.set(FogCustomizer.CLEAR_LAVA, true);
 		FogPlan.adjust(lava, FogPlan.Medium.LAVA, false, null, VIEW, s, false);
+		// Clear lava: as far as Fire Resistance lets you see (5 blocks), no further.
 		assertEquals(0, lava.environmentalStart);
-		assertEquals(12, lava.environmentalEnd);
+		assertEquals(FogPlan.LAVA_CLEAR, lava.environmentalEnd);
 
 		FogPlan.Distances blind = vanilla().set(5, 8);
 		FogPlan.adjust(blind, FogPlan.Medium.AIR, true, null, VIEW, settings(), false);

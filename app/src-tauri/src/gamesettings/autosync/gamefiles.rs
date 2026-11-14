@@ -12,8 +12,8 @@
 //!   Minecraft upgrades an older file as it loads it (`DataFixTypes.HOTBAR`) but can't read a newer version's
 //!   items, and 1.20.5 moved items to components; so the file goes only to a profile of the same or a newer
 //!   version, both from 1.20.5 on.
-//! - Command history, `command_history.txt` (1.19.3+, none in 1.8.9): the last 50 commands, one per line in
-//!   UTF-8 (`CommandHistory`), written with the computer's line endings. Server login commands carry passwords
+//! - Command history, `command_history.txt` (1.19.3+, none in 1.19, 1.19.2 or 1.8.9): the last 50 commands, one per
+//!   line in UTF-8 (`CommandHistory`), written with the computer's line endings. Server login commands carry passwords
 //!   (`/login <password>`, `/register ...`): they are left out of what is stored and copied, and each profile keeps
 //!   its own.
 
@@ -29,6 +29,8 @@ pub const MAX_FILE: u64 = 4 * 1024 * 1024;
 pub const MAX_LEGACY_SERVERS: usize = 1024 * 1024;
 /// Minecraft 1.20.5's data version: items are stored as components from there on.
 pub const COMPONENT_ITEMS: u32 = 3837;
+/// Minecraft 1.19.3's data version: the first to keep a command history.
+pub const COMMAND_HISTORY: u32 = 3218;
 /// The data version Minecraft assumes for a hotbar file that has none (`HotbarManager`: 1343, 1.12.2).
 const UNVERSIONED_HOTBAR: i32 = 1343;
 
@@ -148,6 +150,15 @@ pub fn hotbar_fits(saved: i32, target: Option<u32>) -> Result<(), &'static str> 
         return Err("saved by a newer Minecraft version, whose items this one can't read");
     }
     Ok(())
+}
+
+/// Whether Minecraft at data version `target` keeps a command history (1.19 and 1.19.2 don't, so it isn't written there).
+pub fn commands_fit(target: Option<u32>) -> Result<(), &'static str> {
+    match target {
+        None => Err("this profile's Minecraft version isn't known yet"),
+        Some(target) if target < COMMAND_HISTORY => Err("Minecraft before 1.19.3 keeps no command history"),
+        Some(_) => Ok(()),
+    }
 }
 
 /// The command history's comparison form: its lines, whatever line endings the computer writes.
@@ -270,6 +281,15 @@ mod tests {
         assert!(hotbar_fits(3465, Some(5023)).is_err(), "1.20.1's items predate components");
         assert!(hotbar_fits(4671, None).is_err(), "1.8.9 and versions not installed");
         assert_eq!(commands_fp(b"/gamemode creative\r\n/time set day\r\n"), commands_fp(b"/gamemode creative\n/time set day\n"));
+    }
+
+    #[test]
+    fn command_history_goes_only_where_minecraft_keeps_one() {
+        assert_eq!(commands_fit(Some(3955)), Ok(()), "1.21.1");
+        assert_eq!(commands_fit(Some(COMMAND_HISTORY)), Ok(()), "1.19.3");
+        assert!(commands_fit(Some(3120)).is_err(), "1.19.2");
+        assert!(commands_fit(Some(3105)).is_err(), "1.19");
+        assert!(commands_fit(None).is_err(), "versions not installed");
     }
 
     #[test]

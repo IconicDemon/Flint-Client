@@ -117,6 +117,9 @@ final class EffectsView extends ModuleView {
 	/** On the HUD while a screen lists the effects itself. */
 	private boolean hidden;
 	private boolean placeholder;
+	/** The rows are the sample effects ({@link #showSamples}), made in this language. */
+	private boolean samples;
+	private @Nullable Object samplesLanguage;
 	private boolean horizontal;
 	private boolean showIcons;
 	/** This frame's settings, for Status Effect Bars on the icons. */
@@ -208,6 +211,15 @@ final class EffectsView extends ModuleView {
 			placeholder = true;
 			return;
 		}
+		if (mode == SAMPLE && showSamples(sort)) {
+			placeholder = false;
+			return;
+		}
+		if (samples) {
+			// Back from the samples: the player's own list is read afresh.
+			samples = false;
+			forget();
+		}
 		Object player = HudData.player();
 		if (player == null) {
 			forget();
@@ -239,17 +251,44 @@ final class EffectsView extends ModuleView {
 		readFrom = null;
 	}
 
+	/**
+	 * The rows as representative effects ({@link HudEffects#samples}: the menu's preview and the settings page), kept while they
+	 * are shown; false on a line without them (the mode then reads the player's, as before). Never the player's own effects, and
+	 * no chime for them.
+	 */
+	private boolean showSamples(EffectSort sort) {
+		Object language = HudData.language();
+		if (samples && sort == sortedBy && language == samplesLanguage) {
+			return true;
+		}
+		int n = HudEffects.samples(effects);
+		if (n <= 0) {
+			return false;
+		}
+		samples = true;
+		samplesLanguage = language;
+		readFrom = null;
+		fill(n, sort, language);
+		return true;
+	}
+
 	/** Rebuilds the rows from the player's effects (the iterator is the one allocation, four times a second). */
 	private void refresh(EffectSort sort) {
 		Object language = HudData.language();
-		if (language != infiniteLanguage) {
-			infiniteLanguage = language;
-			INFINITE.set(HudData.translate("effect.duration.infinite", "∞"));
-		}
 		int n = HudEffects.read(effects);
 		while (n > effects.length) {
 			grow();
 			n = HudEffects.read(effects);
+		}
+		fill(n, sort, language);
+		noticeEnded(n);
+	}
+
+	/** Makes the rows for the {@code n} effects read into {@link #effects}, in {@code sort}'s order. */
+	private void fill(int n, EffectSort sort, Object language) {
+		if (language != infiniteLanguage) {
+			infiniteLanguage = language;
+			INFINITE.set(HudData.translate("effect.duration.infinite", "∞"));
 		}
 		for (int i = 0; i < n; i++) {
 			Object effect = effects[i];
@@ -267,7 +306,6 @@ final class EffectsView extends ModuleView {
 		}
 		count = n;
 		sortedBy = sort;
-		noticeEnded(n);
 		if (sort == EffectSort.NAME) {
 			EffectOrder.sortByName(names, tieBreak, n, order);
 		} else {
@@ -1021,7 +1059,8 @@ final class EffectsView extends ModuleView {
 		}
 
 		HudText shortTime(int ticks, float tickrate) {
-			int seconds = (int) Math.ceil(ticks / Math.max(1.0F, tickrate));
+			// Whole seconds, rounded down as Minecraft's own effect timers are (StringUtil.formatTickDuration).
+			int seconds = HudFormat.wholeSeconds(ticks, Math.max(1.0F, tickrate));
 			if (seconds != shortSeconds) {
 				shortSeconds = seconds;
 				shortTime.set(seconds >= 3600 ? seconds / 3600 + "h " + seconds / 60 % 60 + "m" : seconds >= 60 ? seconds / 60 + "m " + seconds % 60 + "s"

@@ -32,7 +32,11 @@ public final class QaFrames {
 	}
 
 	/** From the head of {@code Minecraft.runTick}: one frame. */
+	/** Frames rendered so far (the crash sweep waits a few after each change). */
+	public static long frames;
+
 	public static void frame(Minecraft mc) {
+		frames++;
 		long now = System.nanoTime();
 		if (turnLast != 0 && turning != 0 && mc.player != null) {
 			// Entity.turn takes mouse units (0.15° each), as MouseHandler.turnPlayer passes them.
@@ -150,7 +154,8 @@ public final class QaFrames {
 	private static long allocated() {
 		java.lang.management.ThreadMXBean bean = ManagementFactory.getThreadMXBean();
 		if (bean instanceof com.sun.management.ThreadMXBean sun) {
-			return sun.getThreadAllocatedBytes(Thread.currentThread().threadId());
+			// This thread's (Java 14's form, so the 1.19.x build on Java 17 shares this file).
+			return sun.getCurrentThreadAllocatedBytes();
 		}
 		return 0;
 	}

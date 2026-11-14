@@ -256,6 +256,7 @@ public final class Mc263Features {
 	}
 
 	private static void tickWorld() {
+		Mc263ServerRules.tick();
 		Minecraft mc = mc();
 		ClientLevel level = mc.level;
 		if (level != seenLevel) {
@@ -302,7 +303,7 @@ public final class Mc263Features {
 			Features.SPEED.reset();
 			return;
 		}
-		Features.SPEED.sample(player.getX(), player.getY(), player.getZ());
+		Features.SPEED.sample(player.getX(), player.getY(), player.getZ(), Mc263HudData.tickrate());
 	}
 
 	/** Modules that set one of Minecraft's own switches: applied when they change, put back when turned off. */
@@ -740,9 +741,16 @@ public final class Mc263Features {
 	// ---------- how the world looks ----------
 
 
-	/** From the lightmap: the brightness the Lighting module sets, or vanilla's. */
+	/**
+	 * From the lightmap: the brightness the Lighting module sets, or vanilla's. The Darkness effect (the Warden, sculk
+	 * shriekers, a server's debuff) keeps Minecraft's own dimming: lifting it would be an unfair advantage.
+	 */
 	public static float brightness(float vanilla) {
 		if (!RENDER.on() || !Mods.on(LIGHTING)) {
+			return vanilla;
+		}
+		if (mc().getCameraEntity() instanceof net.minecraft.world.entity.LivingEntity living
+			&& living.hasEffect(net.minecraft.world.effect.MobEffects.DARKNESS)) {
 			return vanilla;
 		}
 		ModuleState state = Mods.state(LIGHTING);
@@ -751,12 +759,25 @@ public final class Mc263Features {
 
 	/** {@code Options.getMenuBackgroundBlurriness}: the Menu Blur module's amount while on. */
 	public static int menuBlur(int vanilla) {
+		// The Right Shift menu's own strength while it shows (its blur is kept to its panels).
+		int menu = com.flintclient.client.control.ControlState.menuBlurOverride();
+		if (menu >= 0) {
+			return menu;
+		}
 		return Mods.on(MENU_BLUR) ? Mods.state(MENU_BLUR).integer(VisualMods.MenuBlur.AMOUNT) : vanilla;
 	}
 
 	/** The GUI scale Minecraft computes the window's scale from: the module's while on (0 = Auto). */
 	public static int guiScale(int vanilla) {
 		return Mods.on(GUI_SCALE) ? Mods.state(GUI_SCALE).option(VisualMods.GuiScale.SCALE) : vanilla;
+	}
+
+	/**
+	 * Whether the Fog Customizer changes anything this frame: the fog hooks ask first, so with the module off they don't work out
+	 * the fluid at the camera again (Minecraft just did; it samples the blocks around the eye and allocates as it goes).
+	 */
+	public static boolean fogOn() {
+		return RENDER.on() && Mods.on(FOG);
 	}
 
 	/** From {@code FogRenderer.setupFog}: the Fog Customizer's changes to the fog just computed. */

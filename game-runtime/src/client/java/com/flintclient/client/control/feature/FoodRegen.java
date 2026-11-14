@@ -57,4 +57,15 @@ public final class FoodRegen {
 		}
 		return estimate(foodLevel, Math.min(saturation + saturationGain, foodLevel), exhaustion);
 	}
+
+	/**
+	 * The saturation eating a food ({@code nutrition}, {@code saturationGain}) really adds at {@code food} and
+	 * {@code saturation}, as Minecraft's FoodData adds it: the food level goes up to at most 20, and saturation up to at most
+	 * that new food level.
+	 */
+	public static float saturationGained(int food, float saturation, int nutrition, float saturationGain) {
+		int foodLevel = Math.max(0, Math.min(food + nutrition, 20));
+		float after = Math.max(0, Math.min(saturation + saturationGain, foodLevel));
+		return Math.max(0, after - saturation);
+	}
 }

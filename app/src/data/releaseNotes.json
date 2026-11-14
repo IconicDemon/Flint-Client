@@ -1,5 +1,118 @@
 [
   {
+    "version": "1.0.4",
+    "date": "2026-11-12",
+    "page_url": "https://flintclient.com/releases/1.0.4/",
+    "title": "Install mods in game, Cosmetics v2, new themes and CurseForge",
+    "summary": "Find and install mods, resource packs and shaders from inside the game, with no restart. Cosmetics get a new look with wings, hats, auras, pets, shields, gloves and emotes, six new themes arrive, and CurseForge, Minecraft 1.19, real-time Friends and smooth screen sharing join in.",
+    "image": { "url": "https://flintclient.com/releases/covers/1.0.4.webp", "width": 1920, "height": 1080, "alt": "Flint Client 1.0.4 update." },
+    "points": [
+      "The Library in game: press Right Shift, open Library, and install mods, resource packs and shaders from Modrinth or CurseForge. Small mods work at once; for others, Flint prepares a fresh game in the background and switches you over in seconds, back in the same world, settings kept.",
+      "Cosmetics v2: capes, wings, hats, auras, pets, shields, gloves and emotes, in a new wardrobe in the launcher and in game, with outfits, an emote wheel and a Skin Changer.",
+      "Six themes everywhere: Orange, Ice Cream (light), Mint, Cherry, Passion Fruit and Blueberry, in the launcher, the main menu and Right Shift.",
+      "A lighter Right Shift menu: a see-through look with the game live around it, blur only behind the menu, and new Menu size, Menu transparency and Menu blur settings.",
+      "CurseForge in the Library, Minecraft 1.19.2 and 1.19, Friends in real time, and smooth screen sharing with Borderless fullscreen.",
+      "Flint protects your game: if one of its mods or menus runs into an error, Flint switches that part off with a short note instead of crashing Minecraft."
+    ],
+    "sections": [
+      {
+        "heading": "Library and launcher",
+        "points": [
+          "CurseForge as a second source in the Library, for every content type, Fabric profiles only. Items from CurseForge carry a CurseForge tag.",
+          "Library tabs have clearer icons and switch instantly.",
+          "Show in folder opens the folder with that exact mod, pack or shader selected.",
+          "Settings, Minecraft: Flint FPS mods. On, new profiles start with Sodium, Lithium, FerriteCore, ImmediatelyFast, Entity Culling and Dynamic FPS where the version supports them. Off, new profiles start empty.",
+          "A cleaner Update button: just the version and its name, then one click to update.",
+          "A new sign-in card on Home, and News lists 1.0.3 and newer.",
+          "Discord: Rich Presence has a Website button, and the community invite is discord.gg/flintclient.",
+          "A smaller download.",
+          "Downloads: a Clear all button empties the download history (your files stay).",
+          "On 1.8.9 the Library shows only mods made for Flint's 1.8.9 (Ornithe) and adds the libraries they need."
+        ]
+      },
+      {
+        "heading": "Library in game",
+        "points": [
+          "A Library tile in Right Shift and a Library row in Utilities: Mods, Resource Packs, Shaders and Your mods, with Modrinth or CurseForge and counts of what you have.",
+          "Resource packs and shaders land in their folders, ready to turn on, with no reload and no restart. Flint never turns them on by itself.",
+          "Small mods start working the moment they install. Other mods: Flint starts a fresh game in the background, then switches you over when you close the menu, back in the same world or server. Your last picture stays on screen during the switch, and your settings stay as they were.",
+          "Uninstalling a mod that another one needs asks first, for example Iris needs Sodium."
+        ]
+      },
+      {
+        "heading": "Cosmetics",
+        "points": [
+          "A new wardrobe in the launcher and in game: Capes, Wings, Hats, Auras, Pets, Shields, Gloves and Emotes, with search, sorting and room for hundreds of items.",
+          "Outfits, an emote wheel, and other players' emotes in real time.",
+          "Skin Changer: add a skin by username or link, then pick it and press Apply. It changes in game at once.",
+          "Badges show only the roles you have, and you choose which one others see.",
+          "The Flint Bound and Overcharged capes show how to unlock them: join or boost the Flint Discord.",
+          "Built to stay light: cosmetics on many players cost a tiny fraction of a frame.",
+          "Store links go to the exact page: an item you don't own opens its own Store page, an empty category's Shop button opens that kind, and News opens the changelog.",
+          "Share a Store item, a creator's storefront or a creator's referral link, and the preview shows that item or storefront."
+        ]
+      },
+      {
+        "heading": "Menus and themes",
+        "points": [
+          "Themes: Orange, Ice Cream (light vanilla), Mint, Cherry, Passion Fruit and Blueberry, with a picker in Right Shift, General, Menu.",
+          "Right Shift: the game and your HUD stay live and sharp around the menu, with sample values in the HUD preview. Menu size (Small, Medium, Large), Menu transparency and Menu blur are new settings.",
+          "Tidier quick tiles with bigger labels, including Game Folder, and the Mod Menu button next to Settings.",
+          "In-game Friends shows when a friend is typing. The duplicate chat button on the main menu is gone.",
+          "The launcher's Cosmetics and Store pages are more compact."
+        ]
+      },
+      {
+        "heading": "Main menu",
+        "points": [
+          "Discover: partner servers and communities, with Join for servers that take your version.",
+          "A news slideshow from the Flint team, and a Join our Discord card that shows your own skin wearing the Discord reward cape.",
+          "Other mods' buttons, such as Mod Menu, Flashback and Replay Mod, as clean icons in the top-right row.",
+          "Friends settings: who can send you requests, who sees when you were last online, who can send you gifts, and your linked Discord account. On 26.2 and newer, a button opens Minecraft's own friends list.",
+          "On 1.8.9, Flint's own main menu with everything the newer versions have."
+        ]
+      },
+      {
+        "heading": "Mods",
+        "points": [
+          "Item Customizer replaces View Model: position, rotation and size for items and empty hands, per item or category, swing and eating animations, and dropped item size. Your old settings carry over.",
+          "Crosshair: a live preview on a dark, light or scene background, 12 one-click presets, a drawing pad with brush sizes 1 to 3, and thickness and outline on every style.",
+          "Block Overlay and Block Indicator only show the block you can reach, and trapped chests and infested blocks look like normal blocks.",
+          "The Capes mod and Flint capes work together: a player with a Flint cape shows only the Flint cape, and other players keep their Capes mod cape.",
+          "New notifications: a slim, smooth style that always fits the screen."
+        ]
+      },
+      {
+        "heading": "Fair play",
+        "points": [
+          "On Hypixel, Freelook, Camera, Minimap, World Map, Health Indicators and Team Tracker switch off, following Hypixel's allowed modifications, and the mod's card says why.",
+          "On every server, maps show no player or mob radar and no caves.",
+          "Settings have hard limits, such as zoom up to 50x, that also apply to edited config files."
+        ]
+      },
+      {
+        "heading": "Performance and streaming",
+        "points": [
+          "Smooth screen sharing and Borderless fullscreen on every version.",
+          "Settings, Java: Memory cleaner. Official keeps Minecraft's own settings. Smooth, for 1.21.x with 4 GB or more, removes the small stutters from memory cleanup and uses more memory.",
+          "Dynamic FPS keeps a game in the background at 60 FPS instead of 1, so recordings and streams don't freeze.",
+          "Lighter per-frame work in game, faster checks before Play, and resource packs reload about three times faster."
+        ]
+      },
+      {
+        "heading": "Fixes",
+        "points": [
+          "Elytra flight time counts Unbreaking on every version.",
+          "Shader packs start again on Minecraft 26.1 and 26.1.1.",
+          "Missing chunks on 1.8.9 are fixed.",
+          "1.8.9 mods built on Ornithe's libraries, such as Mod Menu, start correctly.",
+          "Opening Minecraft's friends list from Flint no longer crashes the game.",
+          "Flint's menus fit every screen, from small windows to 4K, and tooltips stay on the screen."
+        ]
+      }
+    ]
+  },
+  {
     "version": "1.0.3",
     "date": "2026-11-07",
     "page_url": "https://flintclient.com/releases/1.0.3/",

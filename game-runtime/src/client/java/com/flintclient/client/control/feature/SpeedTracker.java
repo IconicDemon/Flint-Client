@@ -11,7 +11,7 @@ public final class SpeedTracker {
 	public static final int WINDOW = 10;
 	/** More than this many blocks in one tick is a teleport, not movement. */
 	static final double TELEPORT = 12;
-	private static final int TICKS_PER_SECOND = 20;
+	private static final float TICKS_PER_SECOND = 20;
 
 	private final double[] horizontal = new double[WINDOW];
 	private final double[] full = new double[WINDOW];
@@ -22,8 +22,17 @@ public final class SpeedTracker {
 	private double lastY;
 	private double lastZ;
 
-	/** Where you are at the end of a tick. */
+	/** Where you are at the end of a tick, at 20 ticks a second. */
 	public void sample(double x, double y, double z) {
+		sample(x, y, z, TICKS_PER_SECOND);
+	}
+
+	/**
+	 * Where you are at the end of a tick, with the world's ticks a second ({@code tickRate}: 20 unless a server changed it; the
+	 * client ticks at that rate too, so a tick's distance times it is blocks per second).
+	 */
+	public void sample(double x, double y, double z, float tickRate) {
+		float perSecond = tickRate > 0 && Float.isFinite(tickRate) ? tickRate : TICKS_PER_SECOND;
 		if (!have) {
 			remember(x, y, z);
 			return;
@@ -39,8 +48,8 @@ public final class SpeedTracker {
 			next = 0;
 			return;
 		}
-		horizontal[next] = flat * TICKS_PER_SECOND;
-		full[next] = all * TICKS_PER_SECOND;
+		horizontal[next] = flat * perSecond;
+		full[next] = all * perSecond;
 		next = (next + 1) % WINDOW;
 		count = Math.min(WINDOW, count + 1);
 	}

@@ -36,10 +36,6 @@ public final class ToolMods {
 			"The flash a player or mob gets when hit, in your color", false);
 		public static final RgbSetting DAMAGE_COLOR = new RgbSetting("damageColor", "Damage color", null, 0xA00000);
 		public static final IntSetting DAMAGE_STRENGTH = new IntSetting("damageColorStrength", "Damage color strength", null, 30, 5, 100, 5, "%");
-		public static final BoolSetting SWING = new BoolSetting("modifySwingDuration", "Change swing duration",
-			"How long your own arm swing takes on your screen", false);
-		public static final FloatSetting SWING_MULTIPLIER = new FloatSetting("swingDurationMultiplier", "Swing duration", null, 1, 0.25F, 3, 0.05F,
-			"×");
 		public static final BoolSetting NO_POTION_PARTICLES = new BoolSetting("disableCameraPotionParticles", "Hide own potion particles",
 			"Your own effect swirls (potions, golden apples) stay out of your view in first person; in third person you still see them", true);
 		public static final KeySetting POTION_KEY = new KeySetting("potionParticlesKeybind", "Potion particles key", "Turns the hiding on and off",
@@ -153,7 +149,7 @@ public final class ToolMods {
 			.keywords("animation", "hurt", "swing", "damage color", "particles", "flash", "notenoughanimations", "nea", "ladder", "eat", "map",
 				"boat", "horse", "crawl", "lantern", "rotation lock").icon(IconId.GAUGE).category(Category.VISUAL)
 			.section("Hurt Animation", NO_HIT_DIRECTION).section("Damage Color", CUSTOM_DAMAGE, DAMAGE_COLOR, DAMAGE_STRENGTH)
-			.section("Swing Duration", SWING, SWING_MULTIPLIER).section("General", NO_POTION_PARTICLES, POTION_KEY, ARMOR_HURT, ARMOR_KEY, NO_HEALTH_FLASH)
+			.section("General", NO_POTION_PARTICLES, POTION_KEY, ARMOR_HURT, ARMOR_KEY, NO_HEALTH_FLASH)
 			.section("Animations", MAP, LADDER, LADDER_ROTATE, LADDER_AMPLIFIER, LADDER_HEIGHT, LADDER_SPEED, CRAWLING, EAT_DRINK, BOAT, HORSE,
 				HORSE_LEGS, ITEM_SWAP, PET, FREEZING, BOW, BOW_LOCK, CROSSBOW_CLAMP, BURNING)
 			.section("Smoothing", SMOOTHING, NO_LEG_SMOOTHING, SMOOTHING_SPEED)
@@ -163,7 +159,8 @@ public final class ToolMods {
 				LANTERN_ITEMS)
 			.section("Fixes", ELYTRA, NO_SLEEP_ITEMS, NO_SLEEP_MOVEMENT, OFFHAND_HIDING, MAP_ITEMS, BOW_ITEMS)
 			.section("Fun", NARUTO, HUGGING).section("Unfinished", FALLING)
-			.needs(Requirement.WORLD).note("The hurt camera, the damage vignette and flat items are their own mods: Hurt Cam, Damage Tint and 2D Items. "
+			.needs(Requirement.WORLD).note("The hurt camera, the damage vignette and flat items are their own mods: Hurt Cam, Damage Tint and 2D Items; "
+				+ "your swing speed, eating and re-equip are Item Customizer's. "
 				+ "The player animations are Not Enough Animations': on every player you see, you in third person and in the inventory.")
 			.build();
 	}

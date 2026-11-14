@@ -98,7 +98,9 @@ public final class ControlCenter {
 	private static final HookGuard OVERLAY_TICK = new HookGuard("overlay tick", ControlCenter::turnedOff);
 	private static final HookGuard FOLDERS_TICK = new HookGuard("game folders tick", ControlCenter::turnedOff);
 	private static final HookGuard PACKS_TICK = new HookGuard("live packs tick", ControlCenter::turnedOff);
+	private static final HookGuard SWAP_TICK = new HookGuard("instant swap tick", ControlCenter::turnedOff);
 	private static final HookGuard HINT_TICK = new HookGuard("hint tick", ControlCenter::turnedOff);
+	private static final HookGuard FAULT_NOTICES = new HookGuard("error notices", ControlCenter::turnedOff);
 
 	/** Runs {@code step} while its guard is on; a failure (or a Minecraft change it can't link against) turns the guard off. */
 	private static void guarded(HookGuard guard, Runnable step) {
@@ -141,6 +143,8 @@ public final class ControlCenter {
 		guarded(FOLDERS_TICK, () -> com.flintclient.client.control.platform.Mc263GameFolders.tick());
 		// Packs the Flint app added while the game runs, shown at once (.flint-packs.json, looked at once a second).
 		guarded(PACKS_TICK, () -> com.flintclient.client.control.platform.Mc263LivePacks.tick());
+		// Instant Swap (a mod the in-game Library changed): nothing unless a swap is going on.
+		guarded(SWAP_TICK, () -> com.flintclient.client.module.social.InstantSwap.tick());
 		// Lets the HUD stop recording frame times soon after nothing shows FPS any more (F1, title screen).
 		if (HUD.on()) {
 			try {
@@ -150,6 +154,13 @@ public final class ControlCenter {
 			}
 		}
 		guarded(HINT_TICK, () -> tickHint());
+		// What Flint switched off or closed after an error (feature.Faults), said once in a toast.
+		guarded(FAULT_NOTICES, () -> {
+			String notice = com.flintclient.client.control.feature.Faults.takeNotice();
+			if (notice != null) {
+				com.flintclient.client.control.platform.Mc263NoticeToast.show(notice);
+			}
+		});
 		ControlKeys mappings = keys;
 		if (mappings == null || !KEYBINDS.on()) {
 			return;

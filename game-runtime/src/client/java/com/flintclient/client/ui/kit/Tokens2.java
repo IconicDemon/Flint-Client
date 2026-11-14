@@ -36,24 +36,49 @@ public final class Tokens2 {
 	public static final int FAINT = 0xFF5B5650;
 
 	/** Ember fills (switches, sliders, primary buttons, the underline). */
-	public static final int EMBER = Palette.ACCENT;
-	public static final int EMBER_HOVER = Palette.ACCENT_HOVER;
-	public static final int EMBER_PRESS = Palette.ACCENT_PRESS;
+	public static int EMBER = Palette.ACCENT;
+	public static int EMBER_HOVER = Palette.ACCENT_HOVER;
+	public static int EMBER_PRESS = Palette.ACCENT_PRESS;
 	/** Ember for icons and text on the dark deck. */
-	public static final int EMBER_TEXT = 0xFFEC9A3C;
+	public static int EMBER_TEXT = emberText();
 	/** Ember at 14%: subtle fills. */
-	public static final int EMBER_SOFT = Palette.withAlpha(Palette.ACCENT, 0.14F);
+	public static int EMBER_SOFT = Palette.withAlpha(Palette.ACCENT, 0.14F);
 	/** Text on an ember fill. */
-	public static final int INK = Palette.ACCENT_INK;
+	public static int INK = Palette.ACCENT_INK;
 	public static final int WARN = 0xFFDDAA5E;
 	public static final int DANGER = 0xFFE07D70;
 
 	public static final int SWITCH_OFF_TRACK = 0xFF2A2724;
-	public static final int SWITCH_ON_KNOB = 0xFF1A120A;
+	public static int SWITCH_ON_KNOB = onKnob();
 	public static final int SLIDER_TRACK = 0x16FFFFFF;
 	public static final int KNOB_RING = 0x60000000;
 	/** Text selection in fields. */
-	public static final int SELECTION = Palette.withAlpha(Palette.ACCENT, 0.36F);
+	public static int SELECTION = Palette.withAlpha(Palette.ACCENT, 0.36F);
+
+	static {
+		Palette.follow(Tokens2::followAccent);
+	}
+
+	/** Remakes the accent family from {@link Palette}'s (the player's theme; the names say ember, Flint's default). */
+	private static void followAccent() {
+		EMBER = Palette.ACCENT;
+		EMBER_HOVER = Palette.ACCENT_HOVER;
+		EMBER_PRESS = Palette.ACCENT_PRESS;
+		EMBER_TEXT = emberText();
+		EMBER_SOFT = Palette.withAlpha(Palette.ACCENT, 0.14F);
+		INK = Palette.ACCENT_INK;
+		SELECTION = Palette.withAlpha(Palette.ACCENT, 0.36F);
+		SWITCH_ON_KNOB = onKnob();
+	}
+
+	/** The deck's own warmer orange for text on Ember; another theme's text tint. */
+	private static int emberText() {
+		return Palette.ACCENT == Palette.EMBER_ACCENT ? 0xFFEC9A3C : Palette.ACCENT_TEXT;
+	}
+
+	private static int onKnob() {
+		return Palette.ACCENT == Palette.EMBER_ACCENT ? 0xFF1A120A : Palette.ACCENT_INK;
+	}
 
 	// ---------- sizes (UI units) ----------
 

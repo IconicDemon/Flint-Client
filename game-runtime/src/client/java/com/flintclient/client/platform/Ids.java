@@ -106,6 +106,16 @@ public final class Ids {
 		}
 	}
 
+	/** The id of the item in your main hand ({@code minecraft:diamond_sword}), or null outside a world or with an empty hand. */
+	public static @Nullable String heldItem() {
+		var player = Minecraft.getInstance().player;
+		if (player == null) {
+			return null;
+		}
+		ItemStack held = player.getMainHandItem();
+		return held.isEmpty() ? null : BuiltInRegistries.ITEM.getKey(held.getItem()).toString();
+	}
+
 	/** Plays sound {@code id} once, as a menu sound at {@code volume} (0 to 1); nothing for an id that isn't one. */
 	public static void playSound(String id, float volume) {
 		Identifier location = Identifier.tryParse(id);

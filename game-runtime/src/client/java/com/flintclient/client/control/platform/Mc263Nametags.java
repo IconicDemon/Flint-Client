@@ -240,7 +240,7 @@ public final class Mc263Nametags {
 	private static Component badge(java.util.UUID player, Component name) {
 		try {
 			Minecraft mc = Minecraft.getInstance();
-			FlintPlayers.Tag tag = mc.player != null && player.equals(mc.player.getUUID()) ? FlintPlayers.own() : FlintPlayers.tag(player);
+			FlintPlayers.Tag tag = mc.player != null && player.equals(mc.player.getUUID()) ? FlintPlayers.worn() : FlintPlayers.tag(player);
 			if (tag == null || !com.flintclient.client.control.ControlState.settings().gameBool(com.flintclient.client.control.model.GameOptions.FLINT_BADGE)) {
 				return name;
 			}

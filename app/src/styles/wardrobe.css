@@ -1,0 +1,1099 @@
+/* The wardrobe (features/wardrobe): categories | the category's items | "Your loadout".
+   Theme tokens only (tokens.css): the accent is the theme's, used for the selected item and the primary action alone;
+   equipped is the success dot. One radius family (--r-md for panels and cards, --r-sm inside them), an 8 px spacing
+   grid, 1 px low-contrast borders, no gradients or glows. The three columns end together inside the window; the middle
+   one scrolls. */
+
+.wardrobe {
+  --wd-h: clamp(480px, calc(100vh - 184px), 1200px);
+  /* Compact: small cards (more per row), tight spacing, a preview that doesn't take over the page. */
+  --wd-card: 132px;
+  display: grid;
+  grid-template-columns: clamp(184px, 12vw, 220px) minmax(0, 1fr) clamp(280px, 22vw, 360px);
+  gap: var(--space-4);
+  height: var(--wd-h);
+  min-height: 0;
+}
+
+.store-page:has(> .store-offline) .wardrobe {
+  --wd-h: clamp(460px, calc(100vh - 264px), 1200px);
+}
+
+.wd-side,
+.wd-main,
+.wd-loadout {
+  min-height: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ---------- Categories ---------- */
+
+.wd-side {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+}
+
+.wd-side ul {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+/* The Store's kinds first; the rest below a hairline. */
+.wd-cat-sep {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+
+.wd-cat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--space-3);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-2);
+  text-align: left;
+  transition:
+    background var(--t-micro) var(--ease),
+    color var(--t-micro) var(--ease);
+}
+
+.wd-cat:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.wd-cat:active {
+  background: var(--press);
+}
+
+.wd-cat.is-active {
+  background: var(--selected);
+  color: var(--fg);
+}
+
+.wd-cat svg {
+  flex: none;
+  color: var(--text-3);
+  transition: color var(--t-micro) var(--ease);
+}
+
+.wd-cat.is-active svg {
+  color: var(--fg);
+}
+
+.wd-cat-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-cat-count {
+  min-width: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-4);
+  text-align: right;
+}
+
+.wd-cat.is-active .wd-cat-count {
+  color: var(--text-3);
+}
+
+.wd-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+
+
+
+
+
+/* ---------- The middle: the category's items ---------- */
+
+.wd-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wd-main-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+.wd-main-head,
+.wd-loadout-head {
+  align-items: center;
+}
+
+.wd-main-head h2,
+.wd-loadout-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--fg);
+}
+
+/* A panel heading's count: a quiet badge. */
+.wd-main-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.wd-main-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  animation: wd-in var(--t-page) var(--ease-out);
+}
+
+/* Nothing in the middle column is squeezed: it scrolls instead. */
+.wd-main-body > * {
+  flex-shrink: 0;
+}
+
+@keyframes wd-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.wd-main-body > .empty {
+  flex: 1;
+  justify-content: center;
+}
+
+/* "Coming soon": one quiet line in the middle. */
+.wd-soon {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.wd-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.wd-search {
+  flex: 1 1 160px;
+  min-width: 120px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.wd-search.has-error {
+  box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.6);
+}
+
+.wd-sort,
+.wd-filter {
+  flex: none;
+}
+
+.wd-filter {
+  gap: var(--space-2);
+}
+
+.wd-filter.is-on {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.wd-filter-count {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.wd-filter-pop {
+  min-width: 224px;
+}
+
+.wd-filter-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.wd-filter-group {
+  display: grid;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.wd-filter-group > span {
+  color: var(--text-3);
+}
+
+/* ---------- Cards ---------- */
+
+.wd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--wd-card), 1fr));
+  gap: var(--space-3);
+}
+
+/* A long list draws only the rows on screen (features/wardrobe/WardrobeCard.tsx VirtualGrid). */
+.wd-vgrid {
+  position: relative;
+}
+
+.wd-vgrid > .wd-grid {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
+.wd-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  text-align: left;
+  transition: background var(--t-micro) var(--ease);
+}
+
+/* The card's 1 px edge sits over its picture, so the picture never hides it. */
+.wd-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--line);
+  pointer-events: none;
+  transition: box-shadow var(--t-fast) var(--ease);
+}
+
+button.wd-card,
+.wd-card > button {
+  cursor: pointer;
+}
+
+.wd-card:hover {
+  background: var(--surface-3);
+}
+
+.wd-card:hover::after {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+button.wd-card:active {
+  background: var(--surface-4);
+}
+
+.wd-card.is-selected::after,
+.wd-card.is-selected:hover::after {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.wd-card-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: rgba(var(--bg-rgb), 0.35);
+  container-type: inline-size;
+}
+
+.wd-card-art .store-art {
+  --u: max(4px, round(down, 4.6cqi, 1px));
+}
+
+.wd-card-art .store-art-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.store-art-thumb.is-small {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* Locked: the real picture, dimmed, with a small lock. */
+.wd-card.is-locked .wd-card-art > :first-child {
+  opacity: 0.4;
+}
+
+.wd-card-lock {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: rgba(var(--bg-rgb), 0.72);
+  color: var(--text-2);
+}
+
+/* Equipped: a small green dot on the picture (and a check on the state line). */
+.wd-card-dot {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--surface-1);
+}
+
+.wd-card-flags {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+}
+
+.wd-flag {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: rgba(var(--bg-rgb), 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.wd-flag.is-test {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+}
+
+.wd-card-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.wd-card-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-card-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-card-state.is-on {
+  color: var(--text-2);
+}
+
+.wd-card-state.is-on svg {
+  color: var(--success);
+}
+
+/* ---------- The loadout ---------- */
+
+.wd-loadout {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wd-loadout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+
+.wd-outfit-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 200px;
+  isolation: isolate;
+}
+
+.wd-stage .store-stage-canvas {
+  flex: 1;
+}
+
+.wd-stage:hover .store-stage-tools,
+.wd-stage:focus-within .store-stage-tools {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.wd-panel {
+  display: grid;
+  gap: var(--space-3);
+  max-height: 46%;
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.wd-panel .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.wd-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.wd-panel-title > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wd-panel-title strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-panel-title .faint {
+  font-size: 12px;
+}
+
+.wd-panel-art {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.wd-panel-art .store-art {
+  --u: 2.5px;
+}
+
+.wd-panel-art .wd-skin-front {
+  width: 40%;
+}
+
+.wd-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wd-gift-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-2);
+}
+
+.wd-worn {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wd-worn li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: var(--space-1);
+  border-radius: var(--r-sm);
+  transition: background var(--t-micro) var(--ease);
+}
+
+.wd-worn li:hover {
+  background: var(--hover);
+}
+
+.wd-worn-art {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.wd-worn-art .store-art {
+  --u: 1.75px;
+}
+
+.wd-worn-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.wd-worn-text strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wd-reward {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.wd-reward-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.wd-reward-state.is-success {
+  color: var(--success);
+}
+
+.wd-reward-state.is-warning {
+  color: var(--warning);
+}
+
+.wd-reward-req {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+/* ---------- The emote wheel ---------- */
+
+.wd-wheel-card {
+  display: grid;
+  place-items: center;
+  padding: var(--space-2) 0;
+}
+
+.wd-wheel {
+  --r: 100px;
+  --slot: 56px;
+  position: relative;
+  width: calc(var(--r) * 2 + var(--slot) + 8px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.wd-wheel-place {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--slot);
+  height: var(--slot);
+  margin: calc(var(--slot) / -2) 0 0 calc(var(--slot) / -2);
+  transform: rotate(var(--a)) translateY(calc(var(--r) * -1)) rotate(calc(var(--a) * -1));
+}
+
+.wd-wheel-slot {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition:
+    box-shadow var(--t-fast) var(--ease),
+    background var(--t-micro) var(--ease);
+}
+
+.wd-wheel-slot:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.wd-wheel-slot.is-target {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  cursor: pointer;
+}
+
+.wd-wheel-slot.is-target:hover,
+.wd-wheel-slot.is-filled:not(:disabled):hover {
+  background: var(--surface-3);
+}
+
+.wd-wheel-slot.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.wd-wheel-slot .store-art-thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.wd-wheel-n {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-4);
+}
+
+.wd-wheel-clear {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-4);
+  box-shadow: 0 0 0 2px var(--surface-1);
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.wd-wheel-place:hover .wd-wheel-clear,
+.wd-wheel-place:focus-within .wd-wheel-clear {
+  opacity: 1;
+}
+
+.wd-wheel-clear:hover {
+  color: var(--fg);
+}
+
+.wd-wheel-hub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  width: calc(var(--r) * 2 - var(--slot) - 24px);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.wd-wheel-hub svg {
+  color: var(--text-2);
+}
+
+.wd-wheel-card.is-off .wd-wheel {
+  opacity: 0.7;
+}
+
+/* ---------- Outfits ---------- */
+
+.wd-outfits {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.wd-name-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wd-grid.is-outfits {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--wd-card) + 16px), 1fr));
+}
+
+.wd-outfit-new .wd-card-art {
+  background: transparent;
+  color: var(--text-3);
+  outline: 1px dashed var(--line-focus);
+  outline-offset: -8px;
+}
+
+.wd-outfit-new:hover .wd-card-art {
+  color: var(--text);
+}
+
+.wd-outfit-pick {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.wd-outfit-art {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.wd-outfit-art > span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.wd-outfit-art > span:only-child {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+.wd-outfit-art .store-art {
+  --u: 2.5px;
+}
+
+.wd-outfit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-3) var(--space-4);
+}
+
+.wd-outfit-actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.wd-center-note {
+  text-align: center;
+}
+
+/* ---------- Skin changer ---------- */
+
+.wd-skins {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wd-skin-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wd-grid.is-skins {
+  margin-top: var(--space-2);
+}
+
+.wd-skin-pick {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.wd-skin-front {
+  width: 34%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.wd-skin-tools {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--t-micro) var(--ease);
+}
+
+.wd-skin:hover .wd-skin-tools,
+.wd-skin:focus-within .wd-skin-tools,
+.wd-skin-tools:has(.is-favourite) {
+  opacity: 1;
+}
+
+.wd-skin-tools .icon-btn {
+  background: rgba(var(--bg-rgb), 0.72);
+}
+
+.wd-skin-tools .is-favourite {
+  color: var(--fg);
+}
+
+/* ---------- Badges ---------- */
+
+.wd-badges {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wd-badge-own {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.wd-badge-text {
+  display: grid;
+  flex: 1 1 200px;
+  gap: var(--space-1);
+  font-size: 12.5px;
+}
+
+.wd-badge-text strong {
+  font-size: 15px;
+}
+
+.wd-badge-art {
+  display: grid;
+  place-items: center;
+}
+
+.wd-badge-art img {
+  width: 40px;
+  height: 64px;
+  image-rendering: pixelated;
+}
+
+.wd-badge-art.is-large img {
+  width: 30px;
+  height: 48px;
+}
+
+/* A Minecraft nametag: the mark, then the name, on the game's dark plate (the game's look, not a theme colour). */
+.wd-nametag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  font-family: "Monocraft", var(--font-body);
+  font-size: 13px;
+  color: #fff;
+}
+
+.wd-nametag img {
+  width: 10px;
+  height: 16px;
+  image-rendering: pixelated;
+}
+
+/* Your badges: a compact row (the words, then Equip) over the owned marks. */
+.wd-badge-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.wd-badge-bar-text {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+.wd-badge-bar-text strong {
+  font-size: 13px;
+}
+
+.wd-badge-problem {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.wd-grid.is-badges .wd-card-art {
+  aspect-ratio: 4 / 3;
+}
+
+/* ---------- Every window size ---------- */
+
+/* 1440p and 4K: the cards grow a little with the window so a row stays the same few inches, never posters. */
+@media (min-width: 2200px) {
+  .wardrobe {
+    --wd-card: 148px;
+    grid-template-columns: 236px minmax(0, 1fr) clamp(340px, 18vw, 420px);
+  }
+}
+
+@media (max-width: 1500px) {
+  .wardrobe {
+    --wd-card: 124px;
+    grid-template-columns: 172px minmax(0, 1fr) clamp(256px, 24vw, 320px);
+    gap: var(--space-3);
+  }
+
+  .wd-main-head,
+  .wd-loadout-head {
+    padding: var(--space-4) var(--space-4) 0;
+  }
+
+  .wd-main-body,
+  .wd-panel {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+}
+
+/* The launcher's narrowest windows: the categories become icons (their names stay for screen readers and tooltips). */
+@media (max-width: 1240px) {
+  .wardrobe {
+    --wd-card: 116px;
+    grid-template-columns: 52px minmax(0, 1fr) clamp(236px, 26vw, 288px);
+  }
+
+  .wd-side {
+    padding: var(--space-1);
+  }
+
+  .wd-cat {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .wd-cat-name,
+  .wd-cat-count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .wd-cat .wd-dot {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+
+
+
+  .wd-grid {
+    gap: var(--space-3);
+  }
+}
+
+@media (max-height: 760px) {
+  .wardrobe {
+    --wd-h: max(440px, calc(100vh - 168px));
+  }
+
+  .wd-cat {
+    height: 30px;
+  }
+}
+
+.wd-cell {
+  display: flex;
+  min-width: 0;
+}
+
+.wd-cell > .wd-card {
+  flex: 1;
+}

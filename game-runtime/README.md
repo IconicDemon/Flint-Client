@@ -101,6 +101,11 @@ card pictures and the Font Awesome glyph font (OFL, licence bundled).
 | What's new | `app/src/data/releaseNotes.json`, bundled at build time (`module/news`) |
 | Version line | the mod's version (the app's version) and Minecraft's own version |
 | Cosmetics, Store, Messages | honest "not available yet" pages |
+| Discover, the showcase, the "Join our Discord" card | the Flint app through the game link (`module/social/MenuLink`, `MenuFeeds`): its partner feed, the Store's admin showcase (`/api/v1/showcase/?placement=game_menu`) and community rewards; nothing shows without an answer |
+| Other mods' title-screen buttons (Flashback, Replay Mod, Mod Menu…) | found on a Minecraft title screen laid out out of sight (`ui/screen/ExternalButtons`), shown inside the top-right row after Settings and before Utilities (as many as fit), each mod's icon as a white mark (`render/WhiteMark`) on Flint's dark tile; pressing one presses the mod's own button (1.8.9: `src/mc189/.../ui/screen/ExternalButtons`, 1.8.9's own title screen and its `buttonClicked`) |
+| Minecraft Friends (26.2 and later) | the Friends window's second icon opens Minecraft's own friends list |
+
+QA without the launcher: `node qa/tools/mock-link.mjs` answers the game link the way the app does (partners, showcase, community, Friends) and prints the two variables a game needs.
 
 Fonts are generated from the launcher's fonts by `tools/make_fonts.py`; licences are in
 `src/client/resources/META-INF/licenses/`.
@@ -114,7 +119,7 @@ Fonts are generated from the launcher's fonts by `tools/make_fonts.py`; licences
 | Modules, settings, layouts, presets, search, open/close state (no Minecraft imports) | `control/model/` |
 | HUD placement, snapping, undo, CPS counter (no Minecraft imports) | `control/hud/` |
 | HUD renderer, the 8 module views, styles, previews | `control/hud/render/` |
-| Right Shift menu: the HUD page (`HudPageScreen`, what Right Shift opens in a world) and the window (`ModMenuScreen`: Mod Menu, the settings tabs, Mod Profiles, Module Presets, Theme), built from the reference catalog `assets/flintclient/rshift/catalog.json` (`Catalog`) | `control/rshift/` |
+| Right Shift menu: the HUD page (`HudPageScreen`, what Right Shift opens in a world) and the window (`ModMenuScreen`: Mod Menu, the settings tabs, Mod Profiles, Module Presets, Theme), built from the reference catalog `assets/flintclient/rshift/catalog.json` (`Catalog`); the HUD page's quick tiles (MC Settings, Cosmetics, Screenshots, Waypoints, Minecraft Folder) are one renderer, `QuickTile`, and a list of entries in `HudPage` | `control/rshift/` |
 | HUD editing engine under the HUD page (select, drag, snap, scale, nudge, undo) | `control/editor/` |
 | First-world hint | `control/cc/` |
 | 26.3 adapter: key mappings, key names and states, sounds, player data | `control/platform/` |

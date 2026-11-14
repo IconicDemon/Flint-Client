@@ -512,7 +512,9 @@ fn parse_reward_status(value: &Value) -> Option<RewardStatus> {
     let said = value["action"]["kind"].as_str().filter(|k| ACTIONS.contains(k)).unwrap_or("none");
     // Only a locked reward has something to do; the Store says so too.
     let kind = if status == "locked" { said } else { "none" };
-    let url = INVITE_ACTIONS.contains(&kind).then(|| value["action"]["url"].as_str().and_then(invite_url)).flatten().map(String::from);
+    // Every invite action is for Flint's own server, so it opens discord.gg/flintclient whatever invite the Store has stored
+    // (owner, 1.0.4).
+    let url = INVITE_ACTIONS.contains(&kind).then(|| crate::data::DISCORD_INVITE.to_owned());
     Some(RewardStatus { permanence: permanence_of(&requirement, &value["permanence"]), cosmetic_id, requirement, status, action: RewardAction { kind: kind.into(), url } })
 }
 
@@ -626,25 +628,30 @@ pub struct Catalog {
     pub enabled: bool,
     pub discord_enabled: bool,
     pub rewards: Vec<CommunityReward>,
+    /// Flint's Discord server as the Store names it for everyone (`invite_url`), checked by [`invite_url`]; none when it names
+    /// none or one Flint doesn't accept.
+    pub invite_url: Option<String>,
     /// When the Store last sent or confirmed it (ms).
     pub fetched_at: Option<u64>,
 }
 
 impl Catalog {
     fn empty(state: Avail) -> Self {
-        Self { state, enabled: false, discord_enabled: false, rewards: Vec::new(), fetched_at: None }
+        Self { state, enabled: false, discord_enabled: false, rewards: Vec::new(), invite_url: None, fetched_at: None }
     }
 }
 
 fn usable_asset(value: &Value) -> Option<Asset> {
-    let asset: Asset = serde_json::from_value(value.clone()).ok()?;
+    let mut asset: Asset = serde_json::from_value(value.clone()).ok()?;
     let ok = is_uuid(&asset.id) && asset.version >= 0 && asset.sha256.len() == 64 && asset.sha256.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    asset.has_texture = ok;
+    asset.model = None;
     ok.then_some(asset)
 }
 
 fn parse_community_reward(value: &Value, discord_enabled: bool) -> Option<CommunityReward> {
     let cosmetic_id = value["cosmetic_id"].as_str().filter(|id| is_uuid(id))?.to_owned();
-    let kind = value["kind"].as_str().filter(|k| SLOTS.contains(k))?.to_owned();
+    let kind = value["kind"].as_str().and_then(kinds::normalize).filter(|k| kinds::slot_of(k).is_some())?;
     let requirement = &value["requirement"];
     let kind_of = code(&requirement["type"])?;
     if kind_of.starts_with("discord_") && !discord_enabled {
@@ -679,7 +686,8 @@ fn parse_catalog(body: &Value) -> Option<Catalog> {
     } else {
         Vec::new()
     };
-    Some(Catalog { state: Avail::Ok, enabled, discord_enabled, rewards, fetched_at: Some(now_millis()) })
+    let invite = body["invite_url"].as_str().and_then(invite_url).map(String::from);
+    Some(Catalog { state: Avail::Ok, enabled, discord_enabled, rewards, invite_url: invite, fetched_at: Some(now_millis()) })
 }
 
 /// The public community catalog: asked for at most once a minute (sent with its ETag, so an unchanged one is a 304). While
@@ -733,24 +741,18 @@ fn listed_reward(state: &AppState, cosmetic_id: &str) -> CmdResult<CommunityRewa
         .ok_or_else(|| "This reward isn't in the Flint Store's community rewards.".to_owned())
 }
 
-/// Public art, the same for every account: kept apart from any account's Store copy.
-fn community_dir(state: &AppState) -> PathBuf {
-    state.paths.cache().join("store").join(state.store.endpoints.origin_key()).join("community").join("assets")
-}
-
 /// A listed reward's texture (a data URL), checked against the catalog's SHA-256: a locked cape can be looked at without
 /// owning it.
 pub async fn reward_asset(state: &AppState, cosmetic_id: &str) -> CmdResult<String> {
     let reward = listed_reward(state, cosmetic_id)?;
-    let path = community_dir(state).join(format!("{}-v{}.png", reward.asset.id, reward.asset.version));
-    verified_texture(state, &reward.asset, &path).await.map(|bytes| data_url(&bytes))
+    verified_texture(state, &reward.asset).await.map(|bytes| data_url(&bytes))
 }
 
 /// Strip `index` of a listed animated reward cape (PNG bytes), checked against the catalog's hash and size.
 pub async fn reward_strip(state: &AppState, cosmetic_id: &str, index: usize) -> CmdResult<Vec<u8>> {
     let reward = listed_reward(state, cosmetic_id)?;
     let animation = reward.asset.animation.as_ref().ok_or("This item isn't animated.")?;
-    anim::verified_strip(state, animation, index, &community_dir(state).join("strips")).await
+    anim::verified_strip(state, animation, index).await
 }
 
 // ---------- commands ----------

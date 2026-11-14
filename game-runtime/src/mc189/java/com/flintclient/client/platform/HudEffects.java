@@ -33,6 +33,11 @@ public final class HudEffects {
 		return type != null ? type : StatusEffect.UNKNOWN;
 	}
 
+	/** The Right Shift menu's HUD preview samples: none on 1.8.9. */
+	public static int samples(Object[] out) {
+		return 0;
+	}
+
 	public static int read(Object[] out) {
 		Minecraft mc = Minecraft.getInstance();
 		LocalClientPlayerEntity player = mc.world == null ? null : mc.player;

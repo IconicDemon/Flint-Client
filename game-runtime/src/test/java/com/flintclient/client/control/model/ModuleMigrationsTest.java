@@ -213,6 +213,17 @@ class ModuleMigrationsTest {
 	}
 
 	@Test
+	void blockIndicatorsRangeIsRetiredItFollowsYourReach() {
+		String id = com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.ID;
+		ModuleState indicator = read(id, "{\"indicatorRange\": 32, \"showBlockBreakingPercentage\": false}");
+		assertNull(indicator.descriptor().setting("indicatorRange"), "no range setting any more");
+		assertFalse(indicator.bool(com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.BREAKING), "its other settings stay");
+		assertEquals(List.of("indicatorRange"), ModuleMigrations.retiredKeys(ModuleRegistry.get(id)), "the old key leaves the file");
+		assertTrue(ModuleRegistry.get(com.flintclient.client.control.model.mods.MoreHudMods.DamageIndicator.ID).setting("indicatorRange") != null,
+			"Damage Indicator keeps its own");
+	}
+
+	@Test
 	void retiredKeysAreListedPerModule() {
 		assertEquals(List.of("showRight"), ModuleMigrations.retiredKeys(ModuleRegistry.get(ModuleId.CPS)));
 		assertEquals(List.of("showMouse", "showSpace"), ModuleMigrations.retiredKeys(ModuleRegistry.get(ModuleId.KEYSTROKES)));

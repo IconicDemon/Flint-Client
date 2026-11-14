@@ -9,20 +9,20 @@
 
 # ---------- input events: 1.21.9's records are Flint's own here (compat/input), and the overrides take 1.21.1's raw values ----------
 replace net.minecraft.client.input. com.flintclient.client.compat.input.
-s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean keyPressed\(((?:[\w.]+\.)?KeyEvent) (\w+)\) \{ => public boolean keyPressed(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\t$1 $2 = new $1(flint\$key, flint\$scancode, flint\$modifiers);
-s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean keyReleased\(KeyEvent (\w+)\) \{ => public boolean keyReleased(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\tKeyEvent $1 = new KeyEvent(flint\$key, flint\$scancode, flint\$modifiers);
-s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean charTyped\(CharacterEvent (\w+)\) \{ => public boolean charTyped(char flint\$char, int flint\$modifiers) {\n\t\tCharacterEvent $1 = new CharacterEvent(flint\$char, flint\$modifiers);
-s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseClicked\(MouseButtonEvent (\w+), boolean (\w+)\) \{ => public boolean mouseClicked(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);\n\t\tboolean $2 = com.flintclient.client.compat.input.Events.doubleClick(flint\$x, flint\$y, flint\$button);
-s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseReleased\(MouseButtonEvent (\w+)\) \{ => public boolean mouseReleased(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
-s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} public boolean mouseDragged\(MouseButtonEvent (\w+), double (\w+), double (\w+)\) \{ => public boolean mouseDragged(double flint\$x, double flint\$y, int flint\$button, double $2, double $3) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
+s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} public boolean keyPressed\(((?:[\w.]+\.)?KeyEvent) (\w+)\) \{ => public boolean keyPressed(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\t$1 $2 = new $1(flint\$key, flint\$scancode, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/WorldMapScreen.java} public boolean keyReleased\(KeyEvent (\w+)\) \{ => public boolean keyReleased(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n\t\tKeyEvent $1 = new KeyEvent(flint\$key, flint\$scancode, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} public boolean charTyped\(CharacterEvent (\w+)\) \{ => public boolean charTyped(char flint\$char, int flint\$modifiers) {\n\t\tCharacterEvent $1 = new CharacterEvent(flint\$char, flint\$modifiers);
+s-in {platform/HostScreen.java,ui/kit/InlineConfirm.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} public boolean mouseClicked\(MouseButtonEvent (\w+), boolean (\w+)\) \{ => public boolean mouseClicked(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);\n\t\tboolean $2 = com.flintclient.client.compat.input.Events.doubleClick(flint\$x, flint\$y, flint\$button);
+s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} public boolean mouseReleased\(MouseButtonEvent (\w+)\) \{ => public boolean mouseReleased(double flint\$x, double flint\$y, int flint\$button) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
+s-in {platform/HostScreen.java,ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} public boolean mouseDragged\(MouseButtonEvent (\w+), double (\w+), double (\w+)\) \{ => public boolean mouseDragged(double flint\$x, double flint\$y, int flint\$button, double $2, double $3) {\n\t\tMouseButtonEvent $1 = com.flintclient.client.compat.input.Events.mouse(flint\$x, flint\$y, flint\$button);
 s-in ui/widget/*.java public void onPress\(InputWithModifiers \w+\) \{ => public void onPress() {
 s-in ui/widget/*.java super\.onPress\(\w+\) => super.onPress()
 # …and their calls on the screens and widgets they extend, in 1.21.1's form.
-s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.keyPressed\((\w+)\) => super.keyPressed($1.key(), $1.scancode(), $1.modifiers())
-s-in {ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.charTyped\((\w+)\) => super.charTyped((char) $1.codepoint(), $1.modifiers())
-s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseClicked\((\w+|MenuScale\.toMenu\(\w+\)), \w+\) => super.mouseClicked(($1).x(), ($1).y(), ($1).button())
-s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseReleased\((\w+|MenuScale\.toMenu\(\w+\))\) => super.mouseReleased(($1).x(), ($1).y(), ($1).button())
-s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java,control/platform/CrosshairDrawScreen.java} super\.mouseDragged\((\w+|MenuScale\.toMenu\(\w+\)), ((?:MenuScale\.toMenu\()?\w+\)?), ((?:MenuScale\.toMenu\()?\w+\)?)\) => super.mouseDragged(($1).x(), ($1).y(), ($1).button(), $2, $3)
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} super\.keyPressed\((\w+)\) => super.keyPressed($1.key(), $1.scancode(), $1.modifiers())
+s-in {ui/screen/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} super\.charTyped\((\w+)\) => super.charTyped((char) $1.codepoint(), $1.modifiers())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} super\.mouseClicked\((\w+|MenuScale\.toMenu\(\w+\)), \w+\) => super.mouseClicked(($1).x(), ($1).y(), ($1).button())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} super\.mouseReleased\((\w+|MenuScale\.toMenu\(\w+\))\) => super.mouseReleased(($1).x(), ($1).y(), ($1).button())
+s-in {ui/screen/*.java,ui/widget/*.java,control/keys/KeyBindsSearchScreen.java,control/platform/TierSearchScreen.java,control/platform/WorldMapScreen.java} super\.mouseDragged\((\w+|MenuScale\.toMenu\(\w+\)), ((?:MenuScale\.toMenu\()?\w+\)?), ((?:MenuScale\.toMenu\()?\w+\)?)\) => super.mouseDragged(($1).x(), ($1).y(), ($1).button(), $2, $3)
 
 # ---------- GUI drawing (compat/GraphicsBridge): the 2D pose, pipelines, colours, fonts, textures ----------
 s-in ** \b(graphics|g|guiGraphics|graphics\(\))\.pose\(\) => $1.pose2d()
@@ -432,7 +432,8 @@ s camera\.position\(\) => camera.getPosition()
 file control/platform/Mc263StoreCapes.java
 # 1.21.1's PlayerSkin names its textures by their path, with the skin's address beside them; a Store cape is a texture path.
 s import net\.minecraft\.core\.ClientAsset;\n =>
-s new PlayerSkin\(skin\.body\(\), new ClientAsset\.ResourceTexture\(cape, cape\), skin\.elytra\(\), skin\.model\(\), skin\.secure\(\)\) => new PlayerSkin(skin.texture(), skin.textureUrl(), cape, skin.elytraTexture(), skin.model(), skin.secure())
+s new PlayerSkin\(skin\.body\(\), new ClientAsset\.ResourceTexture\(cape, cape\), vanilla\.elytra\(\), skin\.model\(\), skin\.secure\(\)\) => new PlayerSkin(skin.texture(), skin.textureUrl(), cape, vanilla.elytraTexture(), skin.model(), skin.secure())
+s a\.body\(\)\.equals\(b\.body\(\)\) => a.texture().equals(b.texture())
 # The cape an elytra takes its texture from is a texture path too.
 s public static ClientAsset\.@Nullable Texture wingsCape\(PlayerSkin skin, ClientAsset\.@Nullable Texture cape\) => public static @Nullable ResourceLocation wingsCape(PlayerSkin skin, @Nullable ResourceLocation cape)
 s s\.vanilla\(\)\.cape\(\) => s.vanilla().capeTexture()
@@ -441,3 +442,59 @@ file control/platform/Mc263SoundActivity.java
 # 1.21.1's camera names its place and yaw getPosition and getYRot.
 s camera\.position\(\) => camera.getPosition()
 s camera\.yaw\(\) => camera.getYRot()
+
+# ---------- Item Customizer on 1.21.1 ----------
+file control/platform/Mc263ViewModel.java
+# 1.21.1 calls Mining Fatigue DIG_SLOWDOWN (1.21.2 renamed it).
+s MobEffects\.MINING_FATIGUE => MobEffects.DIG_SLOWDOWN
+
+# ---------- Instant Swap on 1.21.1 (the 1.21.11 overlay's engine and window mixin) ----------
+file control/platform/Mc263SwapEngine.java
+# 1.21.1's window handle is getWindow(); its pause menu leaves the world in two steps (McCompat.leaveWorld).
+s \.handle\(\) => .getWindow()
+s mc\.disconnectFromWorld\(ClientLevel\.DEFAULT_QUIT_MESSAGE\) => com.flintclient.client.compat.McCompat.leaveWorld(mc)
+# 1.21.1 has no AFK frame limit (1.21.2 added it): nothing to keep awake.
+s Minecraft\.getInstance\(\)\.getFramerateLimitTracker\(\)\.onInputReceived\(\); => // 1.21.1 has no AFK frame limit.
+
+file mixin/swap/SwapWindowMixin.java
+# 1.21.1's DisplayData is a class with public fields.
+s data\.isFullscreen\(\) \? data\.withFullscreen\(false\) => data.isFullscreen ? new DisplayData(data.width, data.height, data.fullscreenWidth, data.fullscreenHeight, false)
+
+# ---------- 3D cosmetics on 1.21.1 (the 1.21.11 overlay's, drawn from 1.21.1's player renderer) ----------
+# The render state is Flint's own stand-in (compat/state/AvatarRenderState carries what the player wears); this overlay's own
+# mixins replace 1.21.11's where 1.21.1 draws differently (the player renderer, the held shield, the first-person hand, the emote
+# pose). The wardrobe's preview player is drawn from the player model itself (McCompat.previewAvatar): no state hook for it.
+skip mixin/cosmetics/AvatarRenderStateCosmeticsMixin.java
+skip mixin/cosmetics/GuiEntityCosmeticsMixin.java
+
+file cosmetics/platform/Mc263Cosmetics.java
+s import net\.minecraft\.world\.entity\.Avatar;\n =>
+s public static void extract\(Avatar entity, => public static void extract(net.minecraft.world.entity.LivingEntity entity,
+
+file cosmetics/platform/Mc263Emotes.java
+# 1.21.1's movement input is the Input's own flags.
+s import net\.minecraft\.world\.entity\.player\.Input;\n =>
+s Input keys = player\.input\.keyPresses;\n(\t+)boolean moving = keys\.forward\(\) \|\| keys\.backward\(\) \|\| keys\.left\(\) \|\| keys\.right\(\) \|\| keys\.jump\(\) \|\| keys\.shift\(\) => net.minecraft.client.player.Input keys = player.input;\n$1boolean moving = keys.up || keys.down || keys.left || keys.right || keys.jumping || keys.shiftKeyDown
+
+file cosmetics/platform/CosmeticsLayer.java
+# A layer of 1.21.1's player renderer: the state is the one Flint filled as the player is drawn (compat/state/RenderStates), and
+# what it submits is drawn at once into the renderer's buffers. 1.21.1's player model has no posed root.
+s extends RenderLayer<AvatarRenderState, PlayerModel> \{ => extends RenderLayer<net.minecraft.client.player.AbstractClientPlayer, PlayerModel<net.minecraft.client.player.AbstractClientPlayer>> {
+s public CosmeticsLayer\(RenderLayerParent<AvatarRenderState, PlayerModel> parent\) => public CosmeticsLayer(RenderLayerParent<net.minecraft.client.player.AbstractClientPlayer, PlayerModel<net.minecraft.client.player.AbstractClientPlayer>> parent)
+s public void submit\(PoseStack poseStack, SubmitNodeCollector collector, int light, AvatarRenderState state, float yRot, float xRot\) \{\n => public void render(PoseStack poseStack, net.minecraft.client.renderer.MultiBufferSource buffers, int light, net.minecraft.client.player.AbstractClientPlayer player,\n\t\tfloat limbSwing, float limbSwingAmount, float partialTick, float ageInTicks, float headYaw, float headPitch) {\n\t\tif (com.flintclient.client.compat.state.RenderStates.peek(player) instanceof AvatarRenderState state) {\n\t\t\tdraw(poseStack, new SubmitNodeCollector(buffers), light, state);\n\t\t}\n\t}\n\n\t/** What {@code state} wears, on this layer's model as posed now (also the wardrobe's preview player: McCompat.previewAvatar). */\n\tpublic void draw(PoseStack poseStack, SubmitNodeCollector collector, int light, AvatarRenderState state) {\n
+s PlayerModel model = getParentModel\(\); => PlayerModel<?> model = getParentModel();
+s \t+model\.root\(\)\.translateAndRotate\(poseStack\);\n =>
+s static ModelPart part\(PlayerModel model, => static ModelPart part(PlayerModel<?> model,
+
+file cosmetics/platform/EmoteModel.java
+s private static PlayerModel lastModel; => private static PlayerModel<?> lastModel;
+s public static void apply\(PlayerModel model, => public static void apply(PlayerModel<?> model,
+
+file cosmetics/platform/EmoteWheelScreen.java
+# 1.21.1's screens take raw mouse and key values.
+s public boolean mouseClicked\(MouseButtonEvent event, boolean doubleClick\) \{\n(\t+)choose\(slotAt\(event\.x\(\), event\.y\(\)\)\); => public boolean mouseClicked(double flint\$x, double flint\$y, int flint\$button) {\n$1choose(slotAt(flint\$x, flint\$y));
+s public boolean keyReleased\(KeyEvent event\) \{\n(\t+)if \(key\.matches\(event\)\) \{ => public boolean keyReleased(int flint\$key, int flint\$scancode, int flint\$modifiers) {\n$1if (key.matches(flint\$key, flint\$scancode)) {
+s return super\.keyReleased\(event\); => return super.keyReleased(flint\$key, flint\$scancode, flint\$modifiers);
+
+
+skip mixin/fx/PanelBlurMixin.java

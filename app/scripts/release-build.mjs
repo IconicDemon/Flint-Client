@@ -37,8 +37,8 @@ const windows = process.platform === "win32";
 // fails rather than ship an app that silently lacks one. (Windows runs the batch wrappers through its shell.)
 const version = JSON.parse(readFileSync("package.json", "utf8")).version;
 // Each line with the Minecraft version it compiles against (one 26.1 jar, built against 26.1.2, serves every 26.1 release;
-// the obfuscated 1.21.x lines are game-runtime/legacy's build, 1.8.9 is game-runtime/legacy189's own code base). 26.3 comes first: its clean empties game-runtime/build.
-for (const [line, minecraft] of [["26.3", "26.3"], ["26.2", "26.2"], ["26.1", "26.1.2"], ["1.21.11", "1.21.11"], ["1.21.10", "1.21.10"], ["1.21.1", "1.21.1"], ["1.8.9", "1.8.9"]]) {
+// the obfuscated 1.21.x and 1.19.x lines are game-runtime/legacy's build, 1.8.9 is game-runtime/legacy189's own code base). 26.3 comes first: its clean empties game-runtime/build.
+for (const [line, minecraft] of [["26.3", "26.3"], ["26.2", "26.2"], ["26.1", "26.1.2"], ["1.21.11", "1.21.11"], ["1.21.10", "1.21.10"], ["1.21.1", "1.21.1"], ["1.19.2", "1.19.2"], ["1.19", "1.19"], ["1.8.9", "1.8.9"]]) {
   const main = line === "26.3";
   const project = minecraft === "1.8.9" ? ["-p", "legacy189"] : minecraft.startsWith("1.") ? ["-p", "legacy"] : [];
   // A clean build each time: an incremental one can keep classes of deleted sources in the jar.

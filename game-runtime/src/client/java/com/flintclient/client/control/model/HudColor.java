@@ -7,7 +7,8 @@ package com.flintclient.client.control.model;
 public enum HudColor implements Labelled {
 	DEFAULT("Default", 0),
 	WHITE("White", 0xFFF3ECE2),
-	EMBER("Ember", 0xFFE7962F),
+	/** Flint's orange; shown as "Orange", like the theme (saved as {@code EMBER}). */
+	EMBER("Orange", 0xFFE7962F),
 	SAND("Sand", 0xFFE3C58F),
 	SKY("Sky", 0xFF8EC3E6),
 	MINT("Mint", 0xFF8FD3B6),

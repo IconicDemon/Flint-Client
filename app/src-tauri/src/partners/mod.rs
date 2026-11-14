@@ -11,11 +11,12 @@
 //!   profile and joins (play.rs, rules.rs).
 //! - **Favourites**: kept in Flint's data folder (`partners/favorites.json`), for this launcher.
 
+pub mod game;
 pub mod media;
 pub mod play;
 pub mod rules;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::core::{now_secs, read_json_opt, write_json, AppState, CmdResult};
 use reqwest::header::{ACCEPT, CACHE_CONTROL, ETAG, IF_NONE_MATCH, RETRY_AFTER};

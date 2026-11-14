@@ -305,7 +305,7 @@ final class AmbientEngine {
 	AmbientDimension getDimension(Level level) {
 		String id = AmbientCompat.id(level.dimension()).toString();
 		for (String silent : silentDimensions) {
-			if (id.matches(".*" + silent.toLowerCase(java.util.Locale.ROOT).replace("*", ".*").replace("?", "\\?") + ".*")) {
+			if (AmbientGlob.contains(id, silent.toLowerCase(java.util.Locale.ROOT))) {
 				return silentDim;
 			}
 		}

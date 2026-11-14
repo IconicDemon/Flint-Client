@@ -29,7 +29,11 @@ public final class LegacyFrames {
 	}
 
 	/** From the head of GameRenderer.render: one frame. */
+	/** Frames drawn so far (the crash sweep waits a few after each change). */
+	public static long frames;
+
 	public static void frame() {
+		frames++;
 		if (!recording) {
 			return;
 		}

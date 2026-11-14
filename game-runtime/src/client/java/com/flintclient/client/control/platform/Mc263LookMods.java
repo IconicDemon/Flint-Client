@@ -204,16 +204,20 @@ public final class Mc263LookMods {
 
 	// ---------- Mob Overlay ----------
 
-	/** Whether Mob Overlay covers {@code entity} now (a mob; with Show always off, only the one under the crosshair). */
+	/**
+	 * Whether Mob Overlay covers {@code entity} now: a mob you can see (never an invisible one); with Show always off, only the
+	 * one under the crosshair. The outline is only ever on that one: Minecraft draws a glowing outline through walls, so
+	 * outlining every mob would show the ones behind them.
+	 */
 	private static boolean overlaid(Entity entity, int mode) {
-		if (!(entity instanceof Mob) || !Mods.on(MOBS)) {
+		if (!(entity instanceof Mob) || !Mods.on(MOBS) || entity.isInvisible()) {
 			return false;
 		}
 		ModuleState s = Mods.state(MOBS);
 		if (s.option(MobOverlay.MODE) != mode) {
 			return false;
 		}
-		return s.bool(MobOverlay.ALWAYS) || mc().crosshairPickEntity == entity;
+		return mode != 0 && s.bool(MobOverlay.ALWAYS) || mc().crosshairPickEntity == entity;
 	}
 
 	/** Whether {@code entity} is drawn with Minecraft's glowing outline (Mob Overlay's Outline mode adds mobs to it). */

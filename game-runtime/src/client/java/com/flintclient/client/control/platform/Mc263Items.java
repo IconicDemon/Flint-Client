@@ -1,5 +1,5 @@
 /*
- * Dropped Item Tweaks' rendered count, scales and static items are adapted from Dropped Item Tweaks (LGPL-3.0; licence text
+ * Dropped Item Tweaks' rendered count and static items are adapted from Dropped Item Tweaks (LGPL-3.0; licence text
  * in META-INF/licenses/LGPL-3.0-DroppedItemTweaks.txt). Realistic's pose is Realistic Item Drops' (Silabear, Stoupy51;
  * CC-BY-SA-4.0, META-INF/licenses/CC-BY-SA-4.0-RealisticItemDrops.txt): the angles, sizes and rest heights its armor-stand
  * heads give a dropped item.
@@ -15,9 +15,7 @@ import com.flintclient.client.control.model.mods.VisualMods.ItemPhysics;
 import com.flintclient.client.control.model.mods.VisualMods.Items2d;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
-import java.util.Collections;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.entity.state.ItemEntityRenderState;
@@ -65,7 +63,7 @@ public final class Mc263Items {
 	private static final int ICONS_MODULE = Mods.index(VisualMods.Items2d.ID);
 	private static final HookGuard GUARD = new HookGuard("dropped item rendering",
 		(path, error) -> FlintClient.LOGGER.warn("Flint: the {} hook failed; it's off for this session", path, error));
-	/** Item ids for Dropped Item Tweaks' custom scale list, looked up once per item. */
+	/** Item ids (Item Customizer's lists), looked up once per item. */
 	private static final Map<Item, String> IDS = new IdentityHashMap<>();
 	private static final RandomSource RANDOM = RandomSource.create();
 
@@ -115,11 +113,7 @@ public final class Mc263Items {
 				} else if ((mode & REALISTIC) != 0 && physics.bool(ItemPhysics.ONE_MODEL)) {
 					state.count = 1;
 				}
-				float scale = physics.decimal(ItemPhysics.ITEM_SCALE);
-				float custom = physics.decimal(ItemPhysics.CUSTOM_SCALE);
-				if (custom != 0 && listed(physics.ids(ItemPhysics.CUSTOM_ITEMS), stack.getItem())) {
-					scale = custom;
-				}
+				float scale = 1;
 				if ((mode & REALISTIC) != 0 && physics.bool(ItemPhysics.REALISTIC_SIZE)) {
 					scale *= (mode & BLOCK) != 0 ? REALISTIC_BLOCK : REALISTIC_FLAT;
 				}
@@ -127,6 +121,11 @@ public final class Mc263Items {
 				if (style == 2 && physics.bool(ItemPhysics.STATIC) && (mode & ICON) == 0) {
 					mode |= STATIC;
 				}
+			}
+			// Item Customizer's Dropped Item Size, over Item Physics' own (Realistic's) size.
+			float sized = Mc263ViewModel.dropped(stack);
+			if (sized != 1) {
+				extra.flint$scale(extra.flint$scale() * sized);
 			}
 			if ((mode & ICON) != 0 && icon.bool(Items2d.ONE_SPRITE)) {
 				state.count = 1;
@@ -187,10 +186,6 @@ public final class Mc263Items {
 			mc.particleEngine.createParticle(particle, entity.getX(), entity.getY() + 0.2, entity.getZ(), RANDOM.nextGaussian(), RANDOM.nextGaussian(),
 				RANDOM.nextGaussian());
 		}
-	}
-
-	private static boolean listed(List<String> ids, Item item) {
-		return Collections.binarySearch(ids, id(item)) >= 0;
 	}
 
 	/** {@code item}'s id ({@code minecraft:golden_apple}), looked up once per item and kept. Render thread. */

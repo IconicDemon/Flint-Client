@@ -1,6 +1,6 @@
 [package]
 name = "flint-app"
-version = "1.0.3"
+version = "1.0.4"
 description = "The Flint Client desktop application"
 authors = ["Flint Client"]
 license = "GPL-3.0-only"
@@ -19,9 +19,15 @@ sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# Tauri's default features but `dynamic-acl` (adding permissions while the app runs, which Flint never does): without it
+# the app carries only its resolved permissions, checked exactly as before, instead of every plugin's permission
+# manifests too (built at start-up for that and for longer "not allowed" messages, which debug builds still give).
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon"] }
 tauri-plugin-opener = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart"] }
+# The same reqwest as the updater's (0.13), so the app carries one HTTP client instead of two. Its TLS is the one it had
+# on 0.12, given whole (core.rs `tls_config`: rustls with ring and the webpki roots, HTTP/1.1); `query` and `form`
+# are features of their own since 0.13.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "stream", "multipart", "query", "form"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
@@ -33,10 +39,16 @@ hex = "0.4"
 base64 = "0.22"
 rand = "0.8"
 futures-util = "0.3"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Deflate through flate2 (miniz_oxide), which reads and writes every deflated entry. zip's `deflate` feature would add
+# zopfli as well, used only for compression levels above 9, which Flint never asks for (it writes at the default, 6).
+zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 url = "2"
 rsa = { version = "0.9", features = ["sha2"] }
-tauri-plugin-updater = "2"
+# The updater's default features but `zip`, which only unpacks the old ("v1-compatible") .zip update archives: Flint
+# publishes the signed installer itself on Windows, the AppImage itself on Linux and an .app.tar.gz on macOS (which
+# the updater unpacks without `zip`), see release.yml. Without it the app drops the second zip crate (4.x) it brought.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
@@ -47,6 +59,17 @@ brotli = { version = "9", default-features = false, features = ["std"] }
 # The Modrinth App keeps its profile list in SQLite: Flint copies the database to a temporary folder and reads the copy,
 # read-only (import/adapters/modrinth.rs). Bundled, so no system SQLite is needed.
 rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
+# Friends live (social/live.rs): the Flint Store's push socket. Only the websocket handshake and framing come from
+# tungstenite; Flint opens the TCP and TLS connection itself with the TLS stack reqwest already uses (rustls with ring and
+# the webpki roots), so no second TLS stack or root store comes in.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+# A partner's WebP picture becomes a PNG for the in-game Discover page (Minecraft reads PNG only; partners/game.rs): a small
+# pure-Rust decoder, and the PNG encoder the tray icon already links.
+image-webp = "0.2"
+png = "0.18"
 
 [profile.release]
 codegen-units = 1
@@ -83,6 +106,13 @@ opt-level = 3
 [profile.dev.package.crc32fast]
 opt-level = 3
 
+# Optimized for size, not speed: the SQLite that only an import reads the Modrinth App's or Lunar Client's profile list
+# with (a few rows, once, when the player asks), never anything start-up or a launch waits for.
+[profile.release.package.libsqlite3-sys]
+opt-level = "s"
+[profile.release.package.rusqlite]
+opt-level = "s"
+
 [target."cfg(unix)".dependencies]
 libc = "0.2"
 
@@ -91,7 +121,7 @@ libc = "0.2"
 # The game's Music Player (media.rs): Windows' media sessions (what its own media controls show) and its image decoder for
 # album art. The `windows` crate is already in the build (WebView2's), so this only adds those bindings.
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging", "Wdk_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Wdk_System_Threading"] }
 windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Media_Control", "Storage_Streams", "Graphics_Imaging"] }
 
 # Tests only (never in the app): a silent, muted media session made in the test itself, read back through media.rs by an

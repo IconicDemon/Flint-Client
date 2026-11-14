@@ -1,5 +1,6 @@
 package com.flintclient.client.module.social;
 
+import com.flintclient.client.control.feature.CosmeticKinds;
 import com.flintclient.client.module.account.LauncherLink;
 import com.flintclient.client.module.account.LauncherLink.LinkException;
 import com.google.gson.JsonArray;
@@ -25,9 +26,11 @@ import org.jspecify.annotations.Nullable;
  * short and without control characters, lists capped) and anything malformed is left out. Calls block: run them off the
  * render thread. Platform-free (Gson and sockets).
  */
-public final class SocialLink {
+public final class SocialLink implements FriendsClient.Source {
 	/** A list or a poll: Flint answers from memory. */
 	private static final int QUICK_MILLIS = 6000;
+	/** The longest Flint holds a poll (it allows 25 s). */
+	static final int MAX_WAIT_MILLIS = 25_000;
 	/** An action may sign in first (the launcher allows 45 s). */
 	private static final int ACTION_MILLIS = 50_000;
 	/** The Store: an inventory, or an equip and the inventory after it (the launcher allows 40 s). */
@@ -48,7 +51,14 @@ public final class SocialLink {
 	/** The statuses a friend shows, and the ones the player can pick. */
 	public static final List<String> FRIEND_STATUSES = List.of("online", "busy", "away", "offline");
 	public static final List<String> MY_STATUSES = List.of("online", "busy", "away", "invisible");
-	public static final List<String> SLOTS = List.of("cape", "back", "head", "aura");
+	/** The slots the Store knows ({@link CosmeticKinds#SLOTS}). */
+	public static final List<String> SLOTS = CosmeticKinds.SLOTS;
+	/** The skin changer's list at most (the launcher keeps 60). */
+	static final int MAX_SKINS = 100;
+	/** A skin's picture: a 64 KiB PNG as base64, with room. */
+	private static final int MAX_SKIN_REPLY = 128 * 1024;
+	/** Adding a skin looks it up at Mojang and downloads it; applying signs in and uploads (the launcher allows 40 s). */
+	private static final int SKIN_MILLIS = 45_000;
 
 	private final LauncherLink link;
 
@@ -64,8 +74,20 @@ public final class SocialLink {
 
 	// ---------- what comes back ----------
 
-	public record Me(String uuid, String name, String status, boolean allowRequests) {
+	/**
+	 * The player as Friends sees them. {@code lastSeen} (who sees when they were last on: friends or nobody) and {@code gifts} (who
+	 * may send them gifts: everyone, friends or nobody) are null from a Friends service that doesn't have them yet: the settings
+	 * then don't offer them.
+	 */
+	public record Me(String uuid, String name, String status, boolean allowRequests, @Nullable String lastSeen, @Nullable String gifts) {
+		public Me(String uuid, String name, String status, boolean allowRequests) {
+			this(uuid, name, status, allowRequests, null, null);
+		}
 	}
+
+	/** Who may see when the player was last on, and who may send them gifts (the Friends service's privacy settings). */
+	public static final List<String> LAST_SEEN = List.of("friends", "nobody");
+	public static final List<String> GIFTS = List.of("everyone", "friends", "nobody");
 
 	public record Friend(String uuid, String name, String status, boolean inGame, long lastSeen, boolean pinned, int unread) {
 		public boolean online() {
@@ -89,10 +111,11 @@ public final class SocialLink {
 
 	/**
 	 * The Friends page's state. {@code phase}: signed_out, connecting, unavailable, ready or error; {@code error} a short
-	 * code then (or when a ready state couldn't be refreshed); {@code offline}: the last sync found no network.
+	 * code then (or when a ready state couldn't be refreshed); {@code offline}: the last sync found no network. {@code typing}:
+	 * the friends typing to the player now (their uuids; the app keeps each for 5 s after their last keystroke).
 	 */
 	public record Friends(boolean configured, String phase, boolean testIdentity, @Nullable Me me, List<Friend> friends, List<Request> incoming,
-		List<Request> outgoing, boolean offline, boolean stale, @Nullable String error, @Nullable Chat chat) {
+		List<Request> outgoing, boolean offline, boolean stale, @Nullable String error, @Nullable Chat chat, List<String> typing) {
 		public boolean ready() {
 			return "ready".equals(phase);
 		}
@@ -127,16 +150,53 @@ public final class SocialLink {
 	public record Page(List<Message> messages, boolean complete) {
 	}
 
+	/** A Friends state and Flint's revision of it (-1: a Flint that can't hold a request until it changes). */
+	public record Held(Friends friends, long revision) {
+	}
+
 	/**
 	 * One Store item the account owns; {@code art}: its picture's version, or -1 when it has none; {@code animation}: an
 	 * animated cape's manifest as the Store wrote it (read with {@code CapeAnimation.parse}), or null for a still one (and from
 	 * a Flint app before 1.0.3).
 	 */
+	/**
+	 * {@code unlock}: how an item the account doesn't own unlocks when it is a community reward (the Flint app passes the
+	 * community catalog's {@code requirement.type}: {@code discord_member}, {@code discord_booster}, {@code first_launch}…);
+	 * null for one for sale.
+	 */
 	public record Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art,
-		@Nullable JsonObject animation) {
+		@Nullable JsonObject animation, boolean owned, long price, long addedAt, @Nullable JsonObject model, @Nullable String unlock,
+		@Nullable String slug) {
+		public Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art,
+			@Nullable JsonObject animation, boolean owned, long price, long addedAt, @Nullable JsonObject model, @Nullable String unlock) {
+			this(id, name, kind, gift, giftFrom, test, art, animation, owned, price, addedAt, model, unlock, null);
+		}
+
+		public Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art,
+			@Nullable JsonObject animation, boolean owned, long price, long addedAt, @Nullable JsonObject model) {
+			this(id, name, kind, gift, giftFrom, test, art, animation, owned, price, addedAt, model, null);
+		}
+
 		public Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art) {
 			this(id, name, kind, gift, giftFrom, test, art, null);
 		}
+
+		public Item(String id, String name, String kind, boolean gift, @Nullable String giftFrom, boolean test, long art,
+			@Nullable JsonObject animation) {
+			this(id, name, kind, gift, giftFrom, test, art, animation, true, -1, 0, null);
+		}
+
+		/** The slot it is worn in (null: an emote, or a kind this game doesn't know). */
+		public @Nullable String slot() {
+			return CosmeticKinds.slotOf(kind);
+		}
+	}
+
+	/**
+	 * One skin in the skin changer's list (the launcher's {@code skin_library.rs}): {@code id} its PNG's SHA-256, {@code variant}
+	 * the arm model it suggests ({@code classic} or {@code slim}), {@code legacy} a 64×32 skin.
+	 */
+	public record Skin(String id, String name, String source, String origin, String variant, boolean legacy, long addedAt) {
 	}
 
 	/**
@@ -144,22 +204,63 @@ public final class SocialLink {
 	 * older), or -1 from a Flint app that doesn't say.
 	 */
 	public record Cosmetics(String storeUrl, List<Item> items, Map<String, String> equipped, boolean stale, @Nullable String problem,
-		long version) {
+		long version, List<Item> shop, @Nullable List<String> emotes) {
+		public Cosmetics(String storeUrl, List<Item> items, Map<String, String> equipped, boolean stale, @Nullable String problem, long version) {
+			this(storeUrl, items, equipped, stale, problem, version, List.of(), null);
+		}
+
 		public @Nullable String worn(String slot) {
 			return equipped.get(slot);
 		}
 	}
 
+	/**
+	 * The account's badges as the Flint app has them (the website's {@code /me}): {@code badges} the marks it owns by name
+	 * ("default" first), {@code badge} the one other players see. Both null when the app or the Store has no list (then the
+	 * game works its marks out itself).
+	 */
+	public record Badges(@Nullable List<String> badges, @Nullable String badge) {
+	}
 	// ---------- Friends ----------
 
 	/** The Friends page's state for the account the game plays as ({@code playing}), with the chat it has open. */
+	@Override
 	public Friends friends(String playing, @Nullable String chat) throws LinkException {
+		return friends(playing, chat, -1, 0, null).friends();
+	}
+
+	/**
+	 * {@link #friends(String, String)}, which Flint holds until its state is no longer revision {@code since} (a pushed
+	 * message, a request, a sync), for at most {@code waitMillis}, so the game hears of a change at once. {@code since} -1:
+	 * answered at once. {@code call} cuts it short. A Flint from before 1.0.4 answers at once with no revision (-1).
+	 */
+	@Override
+	public Held friends(String playing, @Nullable String chat, long since, int waitMillis, LauncherLink.@Nullable Call call) throws LinkException {
 		JsonObject fields = new JsonObject();
 		fields.addProperty("playing", playing);
 		if (chat != null) {
 			fields.addProperty("chat", chat);
 		}
-		return readFriends(link.request("friends", fields, QUICK_MILLIS, MAX_FRIENDS_REPLY), chat);
+		int wait = since >= 0 ? Math.max(0, Math.min(MAX_WAIT_MILLIS, waitMillis)) : 0;
+		if (wait > 0) {
+			fields.addProperty("since", since);
+			fields.addProperty("waitMs", wait);
+		}
+		JsonObject reply = link.request("friends", fields, QUICK_MILLIS + wait, MAX_FRIENDS_REPLY, call);
+		return new Held(readFriends(reply, chat), revision(reply));
+	}
+
+	/** Flint's state revision in an answer; -1 when there is none (a Flint that can't hold a request). */
+	public static long revision(JsonObject reply) {
+		JsonElement value = reply.get("revision");
+		if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+			return -1;
+		}
+		try {
+			return Math.max(-1, value.getAsJsonPrimitive().getAsBigDecimal().longValueExact());
+		} catch (ArithmeticException | NumberFormatException e) {
+			return -1;
+		}
 	}
 
 	/** Runs one of the page's actions ({@code {"kind": "send", …}}) and returns Flint's answer. */
@@ -253,7 +354,22 @@ public final class SocialLink {
 
 	/** Changes the player's status ({@link #MY_STATUSES}) and/or whether they take requests; null leaves one as it is. */
 	public @Nullable Me settings(String playing, @Nullable String status, @Nullable Boolean allowRequests) throws LinkException {
+		return settings(playing, status, allowRequests, null, null);
+	}
+
+	/**
+	 * As above, with who sees when the player was last on ({@link #LAST_SEEN}) and who may send them gifts ({@link #GIFTS}): send
+	 * those two only when the player's {@link Me} has them (a Friends service without them refuses the whole change).
+	 */
+	public @Nullable Me settings(String playing, @Nullable String status, @Nullable Boolean allowRequests, @Nullable String lastSeen,
+		@Nullable String gifts) throws LinkException {
 		JsonObject action = action("settings");
+		if (lastSeen != null) {
+			action.addProperty("lastSeen", lastSeen);
+		}
+		if (gifts != null) {
+			action.addProperty("gifts", gifts);
+		}
 		if (status != null) {
 			action.addProperty("status", status);
 		}
@@ -304,12 +420,195 @@ public final class SocialLink {
 		return readCosmetics(link.request("equip", fields, STORE_MILLIS, MAX_FRIENDS_REPLY));
 	}
 
+	/** The account's badges and the one others see (the Flint app's {@code /me}); a list of nulls when it has none. */
+	public Badges badges(String playing) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		return readBadges(link.request("badges", fields, STORE_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	/** Asks the Flint app to save {@code tag} (one of {@link #badges}) as the badge others see; the Store's answer. */
+	public Badges badgeSet(String playing, String tag) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("tag", tag);
+		return readBadges(link.request("badgeSet", fields, STORE_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	/** The app's badges answer: plain names only ({@code a-z}, {@code _}), at most 32; anything else reads as no list. */
+	static Badges readBadges(JsonObject reply) {
+		JsonElement list = reply.get("badges");
+		if (list == null || !list.isJsonArray()) {
+			return new Badges(null, null);
+		}
+		List<String> names = new ArrayList<>();
+		for (JsonElement e : list.getAsJsonArray()) {
+			if (names.size() >= 32) {
+				break;
+			}
+			if (e.isJsonPrimitive() && e.getAsJsonPrimitive().isString() && badgeName(e.getAsString())) {
+				names.add(e.getAsString());
+			}
+		}
+		JsonElement chosen = reply.get("badge");
+		String badge = chosen != null && chosen.isJsonPrimitive() && chosen.getAsJsonPrimitive().isString() && badgeName(chosen.getAsString())
+			? chosen.getAsString() : null;
+		return new Badges(List.copyOf(names), badge);
+	}
+
+	private static boolean badgeName(String name) {
+		return !name.isEmpty() && name.length() <= 32 && name.chars().allMatch(c -> (c >= 'a' && c <= 'z') || c == '_');
+	}
+
+	/**
+	 * Puts these emotes on the wheel ({@code slots}: 8 places, an emote id or "" for empty); the items after it. A Flint app
+	 * without the wheel answers "bad request".
+	 */
+	public Cosmetics emotes(String playing, List<String> slots) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		JsonArray wheel = new JsonArray();
+		for (int i = 0; i < CosmeticKinds.EMOTE_SLOTS; i++) {
+			String id = i < slots.size() ? cosmeticId(slots.get(i)) : null;
+			if (id == null) {
+				wheel.add(com.google.gson.JsonNull.INSTANCE);
+			} else {
+				wheel.add(id);
+			}
+		}
+		fields.add("slots", wheel);
+		return readCosmetics(link.request("emotes", fields, STORE_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	// ---------- the skin changer (the launcher's skin_library.rs) ----------
+
+	/** The skins added for the account the game plays as, newest first. */
+	public List<Skin> skins(String playing) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		return readSkins(link.request("skinsList", fields, QUICK_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	/** Adds a skin by a Minecraft username or an image address (one of them); never applied. The list after it. */
+	public List<Skin> addSkin(String playing, @Nullable String username, @Nullable String url) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		if (username != null) {
+			fields.addProperty("username", username);
+		} else if (url != null) {
+			fields.addProperty("url", url);
+		}
+		return readSkins(link.request("skinAdd", fields, SKIN_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	/** Takes a skin out of the list; the list after it. */
+	public List<Skin> removeSkin(String playing, String id) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("id", id);
+		return readSkins(link.request("skinRemove", fields, QUICK_MILLIS, MAX_FRIENDS_REPLY));
+	}
+
+	/** A listed skin's PNG. */
+	public byte[] skinArt(String playing, String id) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("id", id);
+		return readArt(link.request("skinArt", fields, QUICK_MILLIS, MAX_SKIN_REPLY));
+	}
+
+	/** Puts a listed skin on the account's Minecraft profile with the {@code variant} arm model (classic or slim). */
+	public void applySkin(String playing, String id, String variant) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("id", id);
+		fields.addProperty("variant", "slim".equals(variant) ? "slim" : "classic");
+		link.request("skinApply", fields, SKIN_MILLIS, 4096);
+	}
+
+	static List<Skin> readSkins(JsonObject reply) {
+		List<Skin> skins = new ArrayList<>();
+		for (JsonObject entry : objects(reply, "skins", MAX_SKINS)) {
+			String id = string(entry, "id");
+			String name = string(entry, "name");
+			if (id != null && id.matches("[0-9a-f]{64}") && name != null) {
+				String origin = string(entry, "origin");
+				skins.add(new Skin(id, clean(name, 40, false), oneOf(entry, "source", List.of("username", "url"), "url"),
+					origin == null ? "" : clean(origin, 300, false), oneOf(entry, "variant", List.of("classic", "slim"), "classic"),
+					bool(entry, "legacy"), Math.max(0, number(entry, "addedAt"))));
+			}
+		}
+		return List.copyOf(skins);
+	}
+
 	/** The PNG of an item the account owns, as the Store hashed it. */
 	public byte[] art(String playing, String id) throws LinkException {
 		JsonObject fields = new JsonObject();
 		fields.addProperty("playing", playing);
 		fields.addProperty("id", id);
 		return readArt(link.request("cosmeticArt", fields, STORE_MILLIS, MAX_ART_REPLY));
+	}
+
+	// ---------- 3D cosmetics' files and the emote room ----------
+
+	/** A 3D cosmetic's file is at most 2 MiB (a texture): as base64 in a JSON line, about 2.8 MiB. */
+	static final int MAX_MODEL_REPLY = 3 * 1024 * 1024;
+
+	/**
+	 * A file ({@code part}: geometry, texture, animation, thumbnail) of a 3D cosmetic {@code playing} owns or the Store lists,
+	 * as the bytes Flint checked against the Store's SHA-256 and size.
+	 */
+	public byte[] modelFile(String playing, String id, String part) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("id", id);
+		fields.addProperty("part", part);
+		String data = string(link.request("modelFile", fields, STORE_MILLIS, MAX_MODEL_REPLY), "base64");
+		if (data == null) {
+			throw new LinkException("Flint sent a file this game can't read.", false);
+		}
+		try {
+			return java.util.Base64.getDecoder().decode(data);
+		} catch (IllegalArgumentException e) {
+			throw new LinkException("Flint sent a file this game can't read.", false);
+		}
+	}
+
+	/**
+	 * The game playing as {@code playing} joined {@code server} (the address after Minecraft's SRV lookup, {@code host:port}),
+	 * or left it ({@code null}): Flint opens or closes the server's emote room.
+	 */
+	public JsonObject emoteRoom(String playing, @Nullable String server) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		if (server != null) {
+			fields.addProperty("server", server);
+		}
+		return link.request("emoteRoom", fields, 5_000, 4096);
+	}
+
+	/** Tells the room this game started emote {@code cosmeticId} ({@code kind} "emote") or stopped ({@code kind} "stop"). */
+	public JsonObject emoteSend(String playing, String kind, @Nullable String cosmeticId) throws LinkException {
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("kind", kind);
+		if (cosmeticId != null) {
+			fields.addProperty("cosmeticId", cosmeticId);
+		}
+		return link.request("emoteSend", fields, 5_000, 4096);
+	}
+
+	/**
+	 * The room's events after {@code since} (other players' emotes and stops, this game's refused ones), waiting up to
+	 * {@code waitMs} (at most 25 s) for one: {@code {"events": [...], "seq", "live", "items": {id: item}}}.
+	 */
+	public JsonObject emoteEvents(String playing, long since, int waitMs) throws LinkException {
+		int wait = Math.max(0, Math.min(waitMs, 25_000));
+		JsonObject fields = new JsonObject();
+		fields.addProperty("playing", playing);
+		fields.addProperty("since", since);
+		fields.addProperty("waitMs", wait);
+		return link.request("emoteEvents", fields, wait + 10_000, MAX_FRIENDS_REPLY);
 	}
 
 	// ---------- reading answers ----------
@@ -346,7 +645,23 @@ public final class SocialLink {
 		String error = string(reply, "error");
 		return new Friends(!reply.has("configured") || bool(reply, "configured"), phase, bool(reply, "testIdentity"), me, List.copyOf(friends),
 			readRequests(reply, "incoming"), readRequests(reply, "outgoing"), bool(reply, "offline"), bool(reply, "stale"),
-			error == null ? null : code(error), chat);
+			error == null ? null : code(error), chat, readTyping(reply));
+	}
+
+	/** The uuids in an answer's {@code typing} (an app before typing sends none): at most one per friend the game can list. */
+	static List<String> readTyping(JsonObject reply) {
+		JsonElement value = reply.get("typing");
+		if (value == null || !value.isJsonArray()) {
+			return List.of();
+		}
+		List<String> out = new ArrayList<>();
+		for (JsonElement e : value.getAsJsonArray()) {
+			String uuid = e.isJsonPrimitive() && e.getAsJsonPrimitive().isString() ? canonical(e.getAsString()) : null;
+			if (uuid != null && !out.contains(uuid) && out.size() < MAX_FRIENDS) {
+				out.add(uuid);
+			}
+		}
+		return List.copyOf(out);
 	}
 
 	static @Nullable Me readMe(JsonObject me) {
@@ -356,7 +671,10 @@ public final class SocialLink {
 			return null;
 		}
 		JsonElement allow = me.get("allowRequests");
-		return new Me(uuid, name, oneOf(me, "status", MY_STATUSES, "online"), allow == null || !allow.isJsonPrimitive() || bool(me, "allowRequests"));
+		String lastSeen = string(me, "lastSeen");
+		String gifts = string(me, "gifts");
+		return new Me(uuid, name, oneOf(me, "status", MY_STATUSES, "online"), allow == null || !allow.isJsonPrimitive() || bool(me, "allowRequests"),
+			lastSeen != null && LAST_SEEN.contains(lastSeen) ? lastSeen : null, gifts != null && GIFTS.contains(gifts) ? gifts : null);
 	}
 
 	private static List<Request> readRequests(JsonObject reply, String key) {
@@ -409,20 +727,8 @@ public final class SocialLink {
 	}
 
 	static Cosmetics readCosmetics(JsonObject reply) {
-		List<Item> items = new ArrayList<>();
-		for (JsonObject entry : objects(reply, "items", MAX_ITEMS)) {
-			String id = cosmeticId(string(entry, "id"));
-			String kind = oneOf(entry, "kind", SLOTS, "");
-			String name = string(entry, "name");
-			if (id != null && !kind.isEmpty() && name != null) {
-				JsonElement art = entry.get("art");
-				long version = art != null && art.isJsonPrimitive() && art.getAsJsonPrimitive().isNumber() ? Math.max(0, number(entry, "art")) : -1;
-				String from = string(entry, "giftFrom");
-				JsonElement animation = entry.get("animation");
-				items.add(new Item(id, clean(name, 120, false), kind, bool(entry, "gift"), from == null ? null : clean(from, MAX_NAME, false),
-					bool(entry, "test"), version, animation != null && animation.isJsonObject() ? animation.getAsJsonObject() : null));
-			}
-		}
+		List<Item> items = readItems(reply, "items", true);
+		List<Item> shop = readItems(reply, "shop", false);
 		Map<String, String> equipped = new LinkedHashMap<>();
 		JsonElement worn = reply.get("equipped");
 		if (worn != null && worn.isJsonObject()) {
@@ -435,9 +741,70 @@ public final class SocialLink {
 		}
 		String problem = string(reply, "problem");
 		String store = string(reply, "storeUrl");
+		// The emote wheel: 8 places, each an owned emote (else empty); null from a Flint app without it.
+		List<String> emotes = null;
+		JsonElement wheel = reply.get("emotes");
+		if (wheel != null && wheel.isJsonArray()) {
+			JsonArray places = wheel.getAsJsonArray();
+			List<String> out = new ArrayList<>();
+			for (int i = 0; i < CosmeticKinds.EMOTE_SLOTS; i++) {
+				JsonElement e = i < places.size() ? places.get(i) : null;
+				String id = e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isString() ? cosmeticId(e.getAsString()) : null;
+				boolean owned = false;
+				for (Item item : items) {
+					owned |= item.id().equals(id) && "emote".equals(item.kind());
+				}
+				out.add(owned ? id : "");
+			}
+			emotes = List.copyOf(out);
+		}
 		return new Cosmetics(store != null && store.matches("https?://[A-Za-z0-9.:\\[\\]-]{1,200}") ? store : "https://store.flintclient.com",
-			List.copyOf(items), Collections.unmodifiableMap(equipped), bool(reply, "stale"), problem == null ? null : clean(problem, 300, false),
-			reply.get("version") instanceof JsonPrimitive v && v.isNumber() ? Math.max(-1, number(reply, "version")) : -1);
+			items, Collections.unmodifiableMap(equipped), bool(reply, "stale"), problem == null ? null : clean(problem, 300, false),
+			reply.get("version") instanceof JsonPrimitive v && v.isNumber() ? Math.max(-1, number(reply, "version")) : -1, shop, emotes);
+	}
+
+	/**
+	 * The items listed under {@code key}: {@code items} (owned) or {@code shop} (the Store's others the account doesn't own,
+	 * with their Merit price). Every kind the Store sends is kept (an older name read as today's,
+	 * {@link CosmeticKinds#normalize}); one without a name or id is left out, and an id listed twice counts once.
+	 */
+	private static List<Item> readItems(JsonObject reply, String key, boolean owned) {
+		List<Item> items = new ArrayList<>();
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		for (JsonObject entry : objects(reply, key, MAX_ITEMS)) {
+			String id = cosmeticId(string(entry, "id"));
+			String kind = CosmeticKinds.normalize(string(entry, "kind"));
+			String name = string(entry, "name");
+			if (id != null && kind != null && name != null && seen.add(id)) {
+				JsonElement art = entry.get("art");
+				long version = art != null && art.isJsonPrimitive() && art.getAsJsonPrimitive().isNumber() ? Math.max(0, number(entry, "art")) : -1;
+				String from = string(entry, "giftFrom");
+				JsonElement animation = entry.get("animation");
+				JsonElement model = entry.get("model");
+				JsonElement price = entry.get("priceCoins");
+				long added = Math.max(0, number(entry, "addedAt"));
+				String unlock = owned ? null : string(entry, "unlock");
+				// The Store's slug: its item page (/cosmetics/<slug>/) is where "Get it in the Flint Store" goes.
+				String slug = string(entry, "slug");
+				String granted = string(entry, "grantedAt");
+				if (added == 0 && granted != null) {
+					try {
+						added = java.time.Instant.parse(granted).toEpochMilli();
+					} catch (RuntimeException ignored) {
+						// Not a time: the Store's order stands.
+					}
+				}
+				items.add(new Item(id, clean(name, 120, false), kind, bool(entry, "gift"), from == null ? null : clean(from, MAX_NAME, false),
+					bool(entry, "test"), version, animation != null && animation.isJsonObject() ? animation.getAsJsonObject()
+						// A listed item the Store says is animated (its frames are only for owners): marked, for the Animated filter.
+						: !owned && bool(entry, "animated") ? new JsonObject() : null, owned,
+					price != null && price.isJsonPrimitive() && price.getAsJsonPrimitive().isNumber() ? Math.max(0, number(entry, "priceCoins")) : -1,
+					added, model != null && model.isJsonObject() ? model.getAsJsonObject() : null,
+					unlock != null && unlock.matches("[a-z_]{1,32}") ? unlock : null,
+					slug != null && slug.matches("[a-z0-9][a-z0-9-]{0,79}") ? slug : null));
+			}
+		}
+		return List.copyOf(items);
 	}
 
 	static byte[] readArt(JsonObject reply) throws LinkException {

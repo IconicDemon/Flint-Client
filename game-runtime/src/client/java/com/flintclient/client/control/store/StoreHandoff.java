@@ -19,8 +19,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <pre>{@code
  * {"schema": 1, "contractVersion": 1, "storeBaseUrl": "https://store.flintclient.com",
- *  "publicCosmeticsUrl": "https://store.flintclient.com/api/v1/players/cosmetics/", "equipRevision": 0}
+ *  "publicCosmeticsUrl": "https://store.flintclient.com/api/v1/players/cosmetics/", "equipRevision": 0,
+ *  "assetCacheDir": "C:/Users/me/AppData/Roaming/Flint Client/cache/assets"}
  * }</pre>
+ *
+ * <p>{@code assetCacheDir} (optional): the launcher's cache of verified cosmetic files ({@link AssetCache}), shared by every
+ * game it starts; an absolute folder, else it is left out (the game then keeps its own in the profile).
  *
  * <p>A hint, never proof of anything: it only says which Store to ask and when to ask about your own player again. A file
  * that is missing, unreadable, larger than {@link #MAX_BYTES}, of another {@code schema} or {@code contractVersion}, with a
@@ -38,7 +42,10 @@ public final class StoreHandoff {
 	static final int MAX_BYTES = 16 * 1024;
 
 	/** What a usable file says. */
-	public record Contents(StoreEndpoint endpoint, long equipRevision) {
+	public record Contents(StoreEndpoint endpoint, long equipRevision, @Nullable Path assetCacheDir) {
+		public Contents(StoreEndpoint endpoint, long equipRevision) {
+			this(endpoint, equipRevision, null);
+		}
 	}
 
 	private final Path file;
@@ -137,7 +144,26 @@ public final class StoreHandoff {
 			}
 			revision = r;
 		}
-		return new Contents(endpoint, revision);
+		return new Contents(endpoint, revision, folder(JsonFields.string(root, "assetCacheDir")));
+	}
+
+	/** {@code text} as an absolute folder, or null (absent, relative, too long or not a path here: the profile's own cache). */
+	static @Nullable Path folder(@Nullable String text) {
+		if (text == null || text.isBlank() || text.length() > 1024 || text.indexOf(0) >= 0) {
+			return null;
+		}
+		try {
+			Path path = Path.of(text);
+			return path.isAbsolute() ? path.normalize() : null;
+		} catch (RuntimeException e) {
+			return null;
+		}
+	}
+
+	/** The launcher's shared cache of cosmetic files, or null when its handoff names none (or there is no usable handoff). */
+	public @Nullable Path assetCacheDir() {
+		Contents c = contents;
+		return c == null ? null : c.assetCacheDir();
 	}
 
 	/** The Store to use: {@value StoreEndpoint#PROPERTY} when set, else the file's when usable, else the built-in one. */

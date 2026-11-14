@@ -84,9 +84,17 @@ public final class LayoutStore {
 
 	/** Reads every layout file now if that hasn't happened yet (otherwise the first call that needs them does). */
 	public void load() {
-		if (loaded) {
-			return;
+		if (!loaded) {
+			loadNow();
 		}
+	}
+
+	/**
+	 * {@link #load}'s work, kept out of it so the check stays small enough for the JIT to inline: every module check
+	 * ({@code Mods.on}, many per frame) passes through {@link #active}, and a call into this large method used to show as
+	 * its own frame there (JFR, 26.3).
+	 */
+	private void loadNow() {
 		loaded = true;
 		if (Files.isDirectory(dir)) {
 			try (DirectoryStream<Path> files = Files.newDirectoryStream(dir, "*.json")) {
@@ -476,6 +484,10 @@ public final class LayoutStore {
 	}
 
 	private Entry activeEntry() {
+		Entry entry = active;
+		if (entry != null && loaded) {
+			return entry;
+		}
 		load();
 		if (active == null) {
 			active = createDefault();

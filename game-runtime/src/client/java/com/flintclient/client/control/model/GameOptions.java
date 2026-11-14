@@ -29,6 +29,23 @@ public final class GameOptions {
 		false);
 	public static final IntSetting IDLE_MINUTES = new IntSetting("idleMinutes", "Idle minutes", null, 5, 0, 60, 1, " min");
 	public static final IntSetting IDLE_SECONDS = new IntSetting("idleSeconds", "Idle seconds", null, 0, 0, 55, 5, " s");
+	/**
+	 * Smooth screen sharing (perf/GpuPriority): on Windows, while the game is in a window (Flint opens it maximized), its GPU work
+	 * goes behind a screen capture's (Discord, OBS) when both want the GPU at once; in fullscreen and alone on the GPU nothing
+	 * changes. Measured with shaders (GPU at 97%): a captured window's stream had 0.1-0.7% of frames off by more than 8 ms instead
+	 * of 1.6-4.5%, at the same FPS; alone, no FPS cost.
+	 */
+	public static final BoolSetting SMOOTH_SHARING = new BoolSetting("smoothScreenSharing", "Smooth screen sharing",
+		"Discord and OBS get the GPU before Minecraft while it runs in a window, so your stream stays smooth. For smooth streams, use VSync "
+			+ "or Unlimited FPS instead of a 60-120 cap", true);
+	/**
+	 * Borderless fullscreen: Fullscreen (F11, Video Settings) is a borderless window over the whole monitor instead of exclusive
+	 * fullscreen. Measured on 26.3: Windows' window capture (Discord's "share an application") got 1 frame in 12 s of exclusive
+	 * fullscreen and every frame of borderless. On 26.x this is Minecraft's own Exclusive Fullscreen switch, kept in step both
+	 * ways (control/platform/FullscreenSync); on 1.21.x and 1.8.9 Flint makes the window (FullscreenModeMixin, BorderlessWindow189).
+	 */
+	public static final BoolSetting BORDERLESS_FULLSCREEN = new BoolSetting("borderlessFullscreen", "Borderless fullscreen",
+		"Fullscreen (F11) as a borderless window: instant Alt+Tab, and Discord or OBS see every frame. Off: exclusive fullscreen", true);
 
 	/** Flint's menu key (Right Shift unless changed), as Minecraft's Controls keeps it (not kept here). */
 	public static final KeySetting MENU_KEY = new KeySetting("menuKey", "Open Flint menu",
@@ -40,8 +57,23 @@ public final class GameOptions {
 
 	public static final BoolSetting MENU_SOUND = new BoolSetting("menuSound", "Open and close sound", "A soft sound as the menu opens and closes",
 		true);
+	/**
+	 * The menu's size before 1.0.4 (a 0.5×–1.5× slider). Kept so the file still reads; nothing shows or uses it now: {@link #MENU_SIZE}
+	 * took its place.
+	 */
 	public static final FloatSetting MENU_SCALE = new FloatSetting("menuScale", "UI scaling", "The Right Shift menu's size", 1, 0.5F, 1.5F,
 		0.05F, "×");
+	public static final ChoiceSetting<MenuSize> MENU_SIZE = new ChoiceSetting<>("menuSize", "Menu size",
+		"The size of this menu and Flint's windows (Large is the size before 1.0.4)", MenuSize.class, MenuSize.MEDIUM);
+	/**
+	 * How much of the game shows through the Right Shift menu's panels, cards and top row over a live game: 0 solid, up to 50 %.
+	 * Text stays readable at every step (MenuStyle lightens grey text as needed).
+	 */
+	public static final IntSetting MENU_TRANSPARENCY = new IntSetting("menuTransparency", "Menu transparency",
+		"How much of the game shows through the menu (0: solid)", 30, 0, 50, 5, "%");
+	/** How much the game behind the menu's panels is blurred (Minecraft's menu blur, kept to the panels): 0 off. */
+	public static final IntSetting MENU_BLUR = new IntSetting("menuBlurStrength", "Menu blur strength",
+		"How much the game behind the menu's panels is blurred (0: off)", 5, 0, 10, 1, "");
 	public static final FloatSetting HUD_SCALE_STEP = new FloatSetting("hudScalingStep", "Scaling step",
 		"How much one wheel notch resizes a HUD mod", 0.25F, 0.05F, 1, 0.05F, "×");
 
@@ -88,15 +120,17 @@ public final class GameOptions {
 	public static final IntSetting MENU_SIZE_NEWS = menuSize("menuSizeNews", "What's New card");
 	public static final IntSetting MENU_SIZE_SWITCH = menuSize("menuSizeSwitch", "Flint | Vanilla switch");
 	public static final IntSetting MENU_SIZE_TOP_RIGHT = menuSize("menuSizeTopRight", "Account and icons");
+	public static final IntSetting MENU_SIZE_DISCORD = menuSize("menuSizeDiscord", "Join our Discord card");
+	public static final IntSetting MENU_SIZE_SHOWCASE = menuSize("menuSizeShowcase", "Showcase");
 	/** The menu sizes, in the order Utilities › Menu sizes lists them. */
 	public static final List<IntSetting> MENU_SIZES = List.of(MENU_SIZE_LOGO, MENU_SIZE_BUTTONS, MENU_SIZE_VERSION, MENU_SIZE_REWARDS,
-		MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT);
+		MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT, MENU_SIZE_DISCORD, MENU_SIZE_SHOWCASE);
 
 	/** Every option, in the order the file keeps them. */
 	public static final List<SettingDescriptor<?>> ALL = List.of(NO_HOTBAR_LOOPING, MINIMAL_BOBBING, CLOCK_24H, LEAVE_KEY, LEAVE_CONFIRM, MOD_KEYS,
-		INACTIVE_FPS, LIMIT_UNFOCUSED, LIMIT_IDLE, IDLE_MINUTES, IDLE_SECONDS, HUD_SCALE_STEP, MENU_SCALE, MENU_SOUND, FLINT_BADGE,
-		SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES, CAPE_ELYTRA, MENU_SIZE_LOGO, MENU_SIZE_BUTTONS, MENU_SIZE_VERSION,
-		MENU_SIZE_REWARDS, MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT);
+		INACTIVE_FPS, LIMIT_UNFOCUSED, LIMIT_IDLE, IDLE_MINUTES, IDLE_SECONDS, SMOOTH_SHARING, BORDERLESS_FULLSCREEN, HUD_SCALE_STEP, MENU_SCALE, MENU_SIZE, MENU_TRANSPARENCY, MENU_BLUR, MENU_SOUND,
+		FLINT_BADGE, SHARE_PRESENCE, STORE_CAPES, VANILLA_MAIN_MENU, FRIEND_NOTICES, CAPE_ELYTRA, MENU_SIZE_LOGO, MENU_SIZE_BUTTONS, MENU_SIZE_VERSION,
+		MENU_SIZE_REWARDS, MENU_SIZE_NEWS, MENU_SIZE_SWITCH, MENU_SIZE_TOP_RIGHT, MENU_SIZE_DISCORD, MENU_SIZE_SHOWCASE);
 
 	/** A main-menu part's size: 50 % to 200 % in steps of 10, 100 % (its design size) by default. */
 	private static IntSetting menuSize(String id, String label) {

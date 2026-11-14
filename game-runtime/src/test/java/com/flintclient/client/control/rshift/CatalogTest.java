@@ -93,8 +93,12 @@ class CatalogTest {
 			}
 		}
 		for (ModuleDescriptor module : ModuleRegistry.all()) {
-			for (SettingDescriptor<?> setting : module.settings()) {
-				assertEquals(1, seen.getOrDefault(setting, 0), module.id() + "/" + setting.id());
+			for (com.flintclient.client.control.model.SettingSection section : module.sections()) {
+				// A module whose page is its own panel (Item Customizer) shows its settings there; only its Mod section is rows.
+				int expected = module.ownPage() && !section.title().equals("Mod") ? 0 : 1;
+				for (SettingDescriptor<?> setting : section.settings()) {
+					assertEquals(expected, seen.getOrDefault(setting, 0), module.id() + "/" + setting.id());
+				}
 			}
 		}
 		for (SettingDescriptor<?> global : Catalog.GLOBALS) {

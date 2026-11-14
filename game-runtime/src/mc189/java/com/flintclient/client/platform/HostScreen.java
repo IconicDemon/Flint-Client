@@ -217,6 +217,12 @@ public abstract class HostScreen extends Screen {
 		}
 		broken = true;
 		MenuHost.screenFailed(error);
+		com.flintclient.client.control.feature.Faults.screenFailed(screenLabel(title), "running", error);
+	}
+
+	/** How the player knows the screen, for the notice ("Flint menu closed · error"). */
+	static String screenLabel(@Nullable String title) {
+		return title == null || title.isBlank() || title.equals("Flint") ? "Flint menu" : title;
 	}
 
 	/** After a step: a screen that broke closes now that the step is over. */
@@ -246,6 +252,9 @@ public abstract class HostScreen extends Screen {
 			return;
 		}
 		try {
+			if (com.flintclient.client.control.feature.Faults.qaFailScreen) {
+				throw com.flintclient.client.control.feature.Faults.qaFailure(getClass().getSimpleName());
+			}
 			Frame frame = Frame.get();
 			paintBackground(frame);
 			paint(frame);

@@ -36,7 +36,7 @@ abstract class TitleScreenFlintButtonMixin extends Screen {
 	private void flint$addExtras(CallbackInfo callback) {
 		flint$extras = List.of();
 		// Minecraft's title screen, or a plain stand-in another mod shows instead (FlintTitleScreen.minecraftsTitle).
-		if (!FlintTitleScreen.minecraftsTitle(((Object) this).getClass()) || !FlintTitleScreen.fits()) {
+		if (!FlintTitleScreen.minecraftsTitle(((Object) this).getClass()) || !FlintTitleScreen.fits() || com.flintclient.client.ui.screen.ExternalButtons.probing()) {
 			return;
 		}
 		try {

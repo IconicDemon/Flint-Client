@@ -4,6 +4,7 @@ mod capemods;
 mod channel;
 mod content;
 mod core;
+mod curseforge;
 mod data;
 mod datadir;
 mod discord;
@@ -24,6 +25,7 @@ mod modicons;
 mod modpack;
 mod modrinth;
 mod mojangjoin;
+mod ornithe;
 mod netprobe;
 mod partners;
 mod perfcore;
@@ -33,11 +35,15 @@ mod redact;
 mod runtime;
 #[cfg(debug_assertions)]
 mod selftest;
+mod showcase;
+mod skin_library;
 mod skins;
 mod social;
 mod startup;
 mod storage;
 mod store;
+mod swap;
+mod swapstill;
 mod timing;
 mod troubleshoot;
 mod windowfit;
@@ -101,6 +107,11 @@ pub fn run() {
                 None => tauri::http::Response::builder().status(404).body(Vec::new()).expect("static response is valid"),
             }
         })
+        // Instant Swap's still window (swapstill.rs): its page and the old game's last frame, from the launcher only.
+        .register_uri_scheme_protocol(swapstill::SCHEME, |ctx, request| match swapstill::serve(ctx.app_handle(), request.uri().path()) {
+            Some((body, kind)) => tauri::http::Response::builder().header("Content-Type", kind).header("Cache-Control", "no-store").body(body).expect("static response is valid"),
+            None => tauri::http::Response::builder().status(404).body(Vec::new()).expect("static response is valid"),
+        })
         // A mod's own logo, read from its jar (modicons.rs), off the main thread.
         .register_asynchronous_uri_scheme_protocol(modicons::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -139,11 +150,34 @@ pub fn run() {
             }
             // QA tooling (test identity, staging data) exists only in debug and measurement builds.
             let qa = (cfg!(debug_assertions) || cfg!(feature = "perf")) && isolated && std::env::var("FLINT_QA").is_ok_and(|v| v == "1");
+            if qa {
+                // End-to-end checks (QA builds, isolated data): the window stays hidden behind whoever uses the computer, and a
+                // profile can be launched as Play does without clicking it.
+                if std::env::var("FLINT_QA_HIDDEN").is_ok_and(|v| v == "1") {
+                    if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                        let _ = window.hide();
+                    }
+                }
+                if let Ok(profile) = std::env::var("FLINT_QA_LAUNCH") {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                        let state = tauri::Manager::state::<AppState>(&handle);
+                        if let Err(error) = game::qa_launch(&handle, &state, &profile).await {
+                            eprintln!("[flint] QA launch of {profile} failed: {error}");
+                        }
+                    });
+                }
+            }
             let force_onboarding = (cfg!(debug_assertions) || isolated)
                 && (std::env::args().any(|a| a == "--onboarding") || std::env::var("FLINT_ONBOARDING").is_ok_and(|v| v == "1"));
             let (http, stream_http) = build_clients();
-            // Friends (social.rs): Flint's Supabase project as the build names it; development builds may name another.
-            let social = social::Social::new(http.clone(), social::Endpoints::from_build(cfg!(debug_assertions) || isolated));
+            // The Flint Store; development and isolated builds may point at another one (FLINT_STORE_URL).
+            let store_endpoints = store::Endpoints::from_env(cfg!(debug_assertions) || isolated);
+            // Friends (social.rs): Flint's Supabase project as the build names it; development builds may name another. Its
+            // live socket and writes go through the same Store (social/live.rs).
+            let social = social::Social::new(http.clone(), social::Endpoints::from_build(cfg!(debug_assertions) || isolated))
+                .with_store(store_endpoints.clone());
             // Settings → Storage → "Installs at once", read now (it applies from the next start).
             let install_slots = storage::install_slots(&core::read_json_opt(&root.join("settings.json")).unwrap_or_default());
             app.manage(AppState {
@@ -174,10 +208,11 @@ pub fn run() {
                 running: Mutex::new(HashMap::new()),
                 ai_cancel: Mutex::new(HashMap::new()),
                 modrinth: modrinth::Modrinth::new(qa || cfg!(debug_assertions)),
+                // CurseForge through Flint's Store proxy; development and isolated builds may name another (FLINT_CURSEFORGE_URL).
+                curseforge: curseforge::CurseForge::from_env(cfg!(debug_assertions) || isolated),
                 jobs: jobs::Jobs::with_slots(install_slots),
                 game_link: Default::default(),
-                // The Flint Store; development and isolated builds may point at another one (FLINT_STORE_URL).
-                store: store::StoreState::new(store::Endpoints::from_env(cfg!(debug_assertions) || isolated)),
+                store: store::StoreState::new(store_endpoints),
                 social,
             });
             // Profile folders take their profiles' names ("Daemon-26.2") before anything opens one.
@@ -192,6 +227,8 @@ pub fn run() {
                 let _ = emitter.emit("discord-status", status);
             });
             app.manage(presence);
+            // Home's sponsored card (showcase/): Flint Admin's launcher slides, kept for this run only.
+            app.manage(showcase::ShowcaseState::default());
             let selftest = cfg!(debug_assertions) && isolated && std::env::var_os("FLINT_SELFTEST").is_some();
             startup::prepare_window(app.handle(), selftest);
             // The window takes a size that fits its screen, then shows; its interface zooms with it (windowfit.rs).
@@ -271,9 +308,14 @@ pub fn run() {
             modrinth::library_versions,
             modrinth::library_tags,
             modrinth::library_status,
+            curseforge::curseforge_search,
+            curseforge::curseforge_categories,
+            curseforge::curseforge_changelog,
+            curseforge::curseforge_status,
             jobs::jobs_list,
             jobs::job_cancel,
             jobs::job_dismiss,
+            jobs::jobs_clear_finished,
             content::content_plan,
             content::mods_resolve,
             content::mods_install,
@@ -282,6 +324,7 @@ pub fn run() {
             content::content_identify,
             content::content_set_enabled,
             content::content_remove,
+            content::content_reveal,
             content::content_rollback,
             content::updates::content_updates,
             content::updates::content_update,
@@ -309,6 +352,11 @@ pub fn run() {
             skins::skin_upload,
             skins::skin_reset,
             skins::cape_set,
+            skin_library::skin_library_list,
+            skin_library::skin_library_add,
+            skin_library::skin_library_remove,
+            skin_library::skin_library_png,
+            skin_library::skin_library_apply,
             ai::ai_suggest,
             ai::ai_cancel,
             ai::ai_status,
@@ -320,6 +368,9 @@ pub fn run() {
             partners::play::partners_play_preview,
             partners::play::partners_play,
             partners::play::partners_check_server,
+            showcase::showcase_slides,
+            showcase::showcase_image,
+            showcase::showcase_open,
             gamesettings::autosync::auto_sync_set_enabled,
             gamesettings::autosync::auto_sync_status,
             gamesettings::autosync::auto_sync_dismiss,
@@ -335,9 +386,13 @@ pub fn run() {
             store::store_equip,
             capemods::cape_mod_conflicts,
             store::store_asset,
+            store::store_set_emotes,
+            store::store_model_file,
             store::anim::store_cape_strip,
             store::store_wallet,
             store::store_orders,
+            store::badges::badge_list,
+            store::badges::badge_set,
             store::store_approve_link,
             store::community::store_connections,
             store::community::store_discord_link_start,
@@ -352,6 +407,7 @@ pub fn run() {
             store::community::store_open_discord_invite,
             social::social_snapshot,
             social::social_focus,
+            social::social_typing,
             social::social_refresh,
             social::social_settings,
             social::social_search,

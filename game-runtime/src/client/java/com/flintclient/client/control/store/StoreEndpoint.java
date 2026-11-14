@@ -21,7 +21,8 @@ import org.jspecify.annotations.Nullable;
  * player wears is only what that Store answers for them.
  *
  * <p>Assets are downloaded only from the Store's own origin, or over {@code https} from a Supabase project's public
- * {@code cosmetic-assets} bucket (where the Store keeps real textures: Store src/lib/server/config.ts {@code assetUrl}); never
+ * {@code cosmetic-assets} bucket (where the Store keeps real textures: Store src/lib/server/config.ts {@code assetUrl}), or over
+ * {@code https} from Flint's asset CDN ({@value #CDN_HOST}, no port: the same files by the same hashes, {@code cdn_url}); never
  * with credentials, a query, or a {@code .}/{@code ..} path segment. Pure Java; version-neutral.
  */
 public final class StoreEndpoint {
@@ -32,6 +33,8 @@ public final class StoreEndpoint {
 	public static final String PROPERTY = "flint.store.baseUrl";
 	public static final String LOOKUP_PATH = "/api/v1/players/cosmetics/";
 	static final String SUPABASE_ASSETS = "/storage/v1/object/public/cosmetic-assets/";
+	/** Flint's asset CDN (Cloudflare R2): the same files as the Store's storage, by the same hashes ({@code cdn_url}). */
+	public static final String CDN_HOST = "assets.flintclient.com";
 	private static final Pattern SUPABASE_HOST = Pattern.compile("[a-z0-9]{20}\\.supabase\\.co");
 	private static final Pattern HOST = Pattern.compile("[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*");
 
@@ -121,6 +124,15 @@ public final class StoreEndpoint {
 		String h = uri.getHost().toLowerCase(Locale.ROOT);
 		int p = uri.getPort() == -1 ? defaultPort(s) : uri.getPort();
 		if (s.equals(scheme) && h.equals(host) && p == port) {
+			return true;
+		}
+		if (s.equals("https") && h.equals(CDN_HOST)) {
+			// The CDN: https on its default port only (no port given), any file below its root.
+			return uri.getPort() == -1 && uri.getRawPath().length() > 1;
+		}
+		if (loopback(host) && loopback(h) && (s.equals("http") || s.equals("https"))) {
+			// A Store on this computer (development and QA only: a released Store is never on loopback) serves its files from
+			// its local storage gateway on another port (the website's local demo: 127.0.0.1:54321).
 			return true;
 		}
 		return s.equals("https") && p == 443 && SUPABASE_HOST.matcher(h).matches() && uri.getRawPath().startsWith(SUPABASE_ASSETS)

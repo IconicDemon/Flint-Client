@@ -30,6 +30,14 @@ final class MenuGeometry {
 	static final int CARD_MIN_W = 64;
 	/** Between the "Daily rewards" card and "What's new" under it. */
 	static final int CARD_GAP = 5;
+	/** The "Join our Discord" card above Daily Rewards: as wide as the cards, a little taller (the player stands in it). */
+	static final int DISCORD_H = 42;
+	/** How far the player on the Discord card stands out above it (room kept free above the card). */
+	static final int DISCORD_POP = 12;
+	/** The showcase at the bottom left: a 16:9 picture and the thin bars under it. */
+	static final int SHOW_W = 100;
+	static final int SHOW_H = 60;
+	static final int SHOW_MIN_W = 72;
 	/** Kept between the switch and the account, between the stack and the window's sides, and right of the stack. */
 	static final int CLEAR = 8;
 	/** Sizes a part is given way to come in twentieths. */
@@ -38,7 +46,7 @@ final class MenuGeometry {
 
 	/** The parts the player sizes, in {@code GameOptions.MENU_SIZES}' order. */
 	enum Part {
-		LOGO, BUTTONS, VERSION, REWARDS, NEWS, SWITCH, TOP_RIGHT
+		LOGO, BUTTONS, VERSION, REWARDS, NEWS, SWITCH, TOP_RIGHT, DISCORD, SHOWCASE
 	}
 
 	/** A width that depends on the size a part is drawn at (text measured at that size), in menu units. */
@@ -60,7 +68,7 @@ final class MenuGeometry {
 		/** Pixels per menu unit: a part is never drawn under one pixel per unit. */
 		float unit = 1.0F;
 		/** The sizes asked for, by {@link Part} (1: the design size). */
-		final float[] asked = {1, 1, 1, 1, 1, 1, 1};
+		final float[] asked = filled(Part.values().length);
 		Measure logo = s -> Math.round(60 * s);
 		Measure footer = s -> Math.round(90 * s);
 		Measure pill = s -> Math.round(60 * s);
@@ -73,6 +81,10 @@ final class MenuGeometry {
 		int slots;
 		boolean news = true;
 		boolean rewards = true;
+		/** The "Join our Discord" card (above Daily Rewards), the showcase (bottom left) and other mods' buttons (top right). */
+		boolean discord;
+		boolean showcase;
+		int externals;
 		/** The least room under the cards (Minecraft's copyright line), in menu units. */
 		int copyright;
 
@@ -118,6 +130,14 @@ final class MenuGeometry {
 		int railH;
 		Box news;
 		Box rewards;
+		/** Null when that part isn't on the menu; hidden ({@code shown} false) when the window has no room for it. */
+		Box discord;
+		Box showcase;
+		/**
+		 * Other mods' buttons, inside the top-right row between Settings and Utilities (Utilities stays last), in the order
+		 * found, as many as fit.
+		 */
+		Box[] externals = new Box[0];
 
 		float scale(Part part) {
 			return scale[part.ordinal()];
@@ -136,6 +156,8 @@ final class MenuGeometry {
 				case VERSION -> footer;
 				case REWARDS -> rewards != null && rewards.shown() ? rewards : null;
 				case NEWS -> news != null && news.shown() ? news : null;
+				case DISCORD -> discord != null && discord.shown() ? discord : null;
+				case SHOWCASE -> showcase != null && showcase.shown() ? showcase : null;
 				case SWITCH -> toggle;
 				case TOP_RIGHT -> {
 					Box last = icons.length > 0 ? icons[icons.length - 1] : pill;
@@ -143,6 +165,7 @@ final class MenuGeometry {
 					for (Box icon : icons) {
 						h = Math.max(h, icon.h());
 					}
+					// Other mods' buttons sit inside the row, so they grow and shrink with it.
 					yield new Box(pill.x(), pill.y(), last.right() - pill.x(), h, scale(Part.TOP_RIGHT), true);
 				}
 			};
@@ -150,6 +173,12 @@ final class MenuGeometry {
 	}
 
 	private MenuGeometry() {
+	}
+
+	private static float[] filled(int n) {
+		float[] out = new float[n];
+		java.util.Arrays.fill(out, 1.0F);
+		return out;
 	}
 
 	/** The top bar's distance from the top and from the sides: close to the corners. */
@@ -197,16 +226,31 @@ final class MenuGeometry {
 		out.scale[Part.TOP_RIGHT.ordinal()] = st;
 		int icon = scaled(ICON_BUTTON, st);
 		int gap = scaled(TOP_GAP, st);
+		int pillW = in.pill.at(st);
+		out.toggle = switchBox(in.toggle, width, height, sw);
+		// Right to left: the last icon (Utilities), other mods' buttons, the rest of the icons, the account pill. The row is
+		// sized without other mods' buttons (it never gets smaller for them); they take what room is left before the switch.
+		int tail = Math.min(1, in.icons);
+		int shown = externalsThatFit(in.externals, in.icons, width - side, pillW, icon, gap, out.toggle.right() + CLEAR);
 		int x = width - side;
 		out.icons = new Box[in.icons];
-		for (int i = in.icons - 1; i >= 0; i--) {
+		out.externals = new Box[shown];
+		for (int i = in.icons - 1; i >= in.icons - tail; i--) {
 			x -= icon;
 			out.icons[i] = new Box(x, marginTop, icon, icon, st, true);
 			x -= gap;
 		}
-		int pillW = in.pill.at(st);
+		for (int i = shown - 1; i >= 0; i--) {
+			x -= icon;
+			out.externals[i] = new Box(x, marginTop, icon, icon, st, true);
+			x -= gap;
+		}
+		for (int i = in.icons - tail - 1; i >= 0; i--) {
+			x -= icon;
+			out.icons[i] = new Box(x, marginTop, icon, icon, st, true);
+			x -= gap;
+		}
 		out.pill = new Box(x - pillW, marginTop, pillW, scaled(BAR_H, st), st, true);
-		out.toggle = switchBox(in.toggle, width, height, sw);
 		int topBarBottom = marginTop + Math.max(Math.max(icon, out.pill.h()), out.toggle.h());
 		out.topBarBottom = topBarBottom;
 
@@ -265,13 +309,67 @@ final class MenuGeometry {
 			&& out.railY + out.railH <= height - 4;
 
 		// "What's new" at the bottom right, "Daily rewards" above it: clear of the stack, under the top bar.
-		Box[] cards = cards(in.news, in.rewards, asked[Part.NEWS.ordinal()], asked[Part.REWARDS.ordinal()], in.unit, width, height,
-			stackRight + CLEAR, topBarBottom, in.copyright);
+		Box[] cards = cards(in.news, in.rewards, in.discord, asked[Part.NEWS.ordinal()], asked[Part.REWARDS.ordinal()], asked[Part.DISCORD.ordinal()],
+			in.unit, width, height, stackRight + CLEAR, topBarBottom, in.copyright);
 		out.news = cards[0];
 		out.rewards = cards[1];
+		out.discord = cards[2];
 		out.scale[Part.NEWS.ordinal()] = cards[0] != null && cards[0].shown() ? cards[0].scale() : asked[Part.NEWS.ordinal()];
 		out.scale[Part.REWARDS.ordinal()] = cards[1] != null && cards[1].shown() ? cards[1].scale() : asked[Part.REWARDS.ordinal()];
+		out.scale[Part.DISCORD.ordinal()] = cards[2] != null && cards[2].shown() ? cards[2].scale() : asked[Part.DISCORD.ordinal()];
+
+		// The bottom left: the showcase; left of the stack, clear of Quick Play, at the cards' distance from the edges.
+		left(out, in, asked, stackLeft, topBarBottom);
 		return out;
+	}
+
+	/**
+	 * How many of other mods' title-screen buttons fit in the top-right row (as large as its icons, a gap apart), in the order
+	 * found: as many as keep the account pill (its left end, the row ending at {@code right}) at {@code limit} or right of it
+	 * (the switch and {@link #CLEAR}); the rest are left off. None without the row's own icons to sit among.
+	 */
+	static int externalsThatFit(int count, int icons, int right, int pillW, int icon, int gap, int limit) {
+		if (icons <= 0) {
+			return 0;
+		}
+		int n = 0;
+		while (n < count && right - (icons + n + 1) * (icon + gap) - pillW >= limit) {
+			n++;
+		}
+		return n;
+	}
+
+	/**
+	 * The showcase at the bottom left, its bottom where "What's new" has its own: it narrows, then gets smaller, then hides
+	 * rather than come within {@link #CLEAR} of the stack or over Quick Play.
+	 */
+	private static void left(Result out, Input in, float[] asked, int stackLeft, int topBarBottom) {
+		int width = in.width;
+		int height = in.height;
+		int marginSide = Math.clamp(Math.round(width * 0.036F), 8, 20);
+		int bottom = height - Math.max(Math.clamp(Math.round(height * 0.066F), 8, 18), in.copyright);
+		int limit = stackLeft - CLEAR;
+		boolean rail = out.railVisible;
+		int railBottom = out.railY + out.railH;
+		float floor = least(in.unit);
+		float wanted = Math.max(floor, asked[Part.SHOWCASE.ordinal()]);
+		out.scale[Part.SHOWCASE.ordinal()] = wanted;
+		if (!in.showcase) {
+			return;
+		}
+		int cardBottom = bottom;
+		int ceiling = Math.max(topBarBottom + 8, rail ? railBottom + 6 : 0);
+		int room = limit - marginSide;
+		float fit = Math.min(room / (float) SHOW_MIN_W, (cardBottom - ceiling) / (float) SHOW_H);
+		float s = wanted <= fit ? wanted : (float) Math.floor(fit * STEPS) / STEPS;
+		boolean shown = s > 0.0F && s >= Math.min(wanted, 1.0F) - EPSILON && s >= floor - EPSILON;
+		if (!shown) {
+			s = wanted;
+		}
+		int w = Math.max(1, Math.min(scaled(SHOW_W, s), Math.max(1, room)));
+		int h = scaled(SHOW_H, s);
+		out.showcase = new Box(marginSide, cardBottom - h, w, h, s, shown);
+		out.scale[Part.SHOWCASE.ordinal()] = s;
 	}
 
 	/**
@@ -282,6 +380,12 @@ final class MenuGeometry {
 	 */
 	static Box[] cards(boolean news, boolean rewards, float newsAsked, float rewardsAsked, float unit, int width, int height, int clearRight,
 		int topBarBottom, int copyright) {
+		return cards(news, rewards, false, newsAsked, rewardsAsked, 1.0F, unit, width, height, clearRight, topBarBottom, copyright);
+	}
+
+	/** As above, with the "Join our Discord" card (index 2) above "Daily rewards" (or above whichever card is the top one). */
+	static Box[] cards(boolean news, boolean rewards, boolean discord, float newsAsked, float rewardsAsked, float discordAsked, float unit,
+		int width, int height, int clearRight, int topBarBottom, int copyright) {
 		int marginSide = Math.clamp(Math.round(width * 0.036F), 8, 20);
 		int marginBottom = Math.max(Math.clamp(Math.round(height * 0.066F), 8, 18), copyright);
 		int room = width - marginSide - clearRight;
@@ -289,28 +393,34 @@ final class MenuGeometry {
 		int bottom = height - marginBottom;
 		int ceiling = topBarBottom + 8;
 		float floor = least(unit);
-		Box[] out = new Box[2];
+		Box[] out = new Box[3];
 		if (news) {
-			out[0] = card(Math.max(floor, newsAsked), floor, room, right, bottom, ceiling);
+			out[0] = card(Math.max(floor, newsAsked), floor, room, right, bottom, ceiling, CARD_H);
 			if (out[0].shown()) {
 				bottom = out[0].y() - scaled(CARD_GAP, (out[0].scale() + Math.max(floor, rewardsAsked)) / 2.0F);
 			}
 		}
 		if (rewards) {
-			out[1] = card(Math.max(floor, rewardsAsked), floor, room, right, bottom, ceiling);
+			out[1] = card(Math.max(floor, rewardsAsked), floor, room, right, bottom, ceiling, CARD_H);
+			if (out[1].shown()) {
+				bottom = out[1].y() - scaled(CARD_GAP, (out[1].scale() + Math.max(floor, discordAsked)) / 2.0F);
+			}
+		}
+		if (discord) {
+			out[2] = card(Math.max(floor, discordAsked), floor, room, right, bottom, ceiling + scaled(DISCORD_POP, Math.max(floor, discordAsked)), DISCORD_H);
 		}
 		return out;
 	}
 
-	private static Box card(float asked, float floor, int room, int right, int bottom, int ceiling) {
-		float limit = Math.min(room / (float) CARD_MIN_W, (bottom - ceiling) / (float) CARD_H);
+	private static Box card(float asked, float floor, int room, int right, int bottom, int ceiling, int cardH) {
+		float limit = Math.min(room / (float) CARD_MIN_W, (bottom - ceiling) / (float) cardH);
 		float s = asked <= limit ? asked : (float) Math.floor(limit * STEPS) / STEPS;
 		boolean shown = s > 0.0F && s >= Math.min(asked, 1.0F) - EPSILON && s >= floor - EPSILON;
 		if (!shown) {
 			s = asked;
 		}
 		int w = Math.max(1, Math.min(scaled(CARD_W, s), Math.max(1, room)));
-		int h = scaled(CARD_H, s);
+		int h = scaled(cardH, s);
 		return new Box(right - w, bottom - h, w, h, s, shown);
 	}
 

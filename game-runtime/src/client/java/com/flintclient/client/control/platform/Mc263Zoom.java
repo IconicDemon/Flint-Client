@@ -212,7 +212,7 @@ public final class Mc263Zoom {
 			}
 			double main = MAIN.divisor(partial);
 			previousDivisor = main;
-			double divisor = main * SECONDARY.divisor(partial);
+			double divisor = ZoomifyZoom.combined(main, SECONDARY.divisor(partial));
 			return divisor == 1.0 ? fov : (float) (fov / divisor);
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);

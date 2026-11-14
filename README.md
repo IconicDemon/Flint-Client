@@ -2,7 +2,7 @@
 
 **A fast, modern launcher and in-game client for Minecraft: Java Edition.**
 
-[Website](https://flintclient.com) · [Download](https://github.com/IconicDemon/Flint-Client/releases/latest) · [Discord](https://discord.gg/59rAHZMWb7) · [Changelog](https://flintclient.com/releases/)
+[Website](https://flintclient.com) · [Download](https://github.com/IconicDemon/Flint-Client/releases/latest) · [Discord](https://discord.gg/flintclient) · [Changelog](https://flintclient.com/releases/)
 
 ![The Flint Client launcher, version 1.0.3](docs/images/flint-launcher.jpg)
 

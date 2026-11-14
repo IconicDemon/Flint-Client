@@ -38,4 +38,22 @@ public final class Images {
 			return new Pixels(w, h, image.getRGB(0, 0, w, h, null, 0, w));
 		}
 	}
+
+	/**
+	 * A PNG or JPEG picture's pixels (Flint's main menu art from the Flint app), or null when it isn't one, is larger than
+	 * {@link com.flintclient.client.render.PictureHeader#MAX_SIDE} either way, or can't be read. Worker thread.
+	 */
+	public static @Nullable Pixels decode(byte[] bytes) {
+		try {
+			if (com.flintclient.client.render.PictureHeader.pngSize(bytes) != null) {
+				BufferedImage image = TextureUtil.readImage(new java.io.ByteArrayInputStream(bytes));
+				int w = image.getWidth();
+				int h = image.getHeight();
+				return new Pixels(w, h, image.getRGB(0, 0, w, h, null, 0, w));
+			}
+			return com.flintclient.client.render.PictureHeader.readJpeg(bytes);
+		} catch (IOException | RuntimeException e) {
+			return null;
+		}
+	}
 }

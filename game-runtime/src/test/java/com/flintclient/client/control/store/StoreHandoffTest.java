@@ -117,4 +117,16 @@ class StoreHandoffTest {
 		}
 		assertEquals(7, handoff.equipRevision());
 	}
+
+	@Test
+	void theLaunchersSharedAssetCacheIsAnAbsoluteFolderOrNothing(@org.junit.jupiter.api.io.TempDir Path dir) {
+		String base = "{\"schema\":1,\"contractVersion\":1,\"storeBaseUrl\":\"https://store.flintclient.com\"";
+		String folder = dir.resolve("cache").resolve("assets").toString().replace("\\", "\\\\");
+		StoreHandoff.Contents c = StoreHandoff.parse(base + ",\"assetCacheDir\":\"" + folder + "\"}");
+		assertEquals(dir.resolve("cache").resolve("assets"), c.assetCacheDir());
+		assertNull(StoreHandoff.parse(base + "}").assetCacheDir(), "an older launcher: the profile's own cache");
+		assertNull(StoreHandoff.parse(base + ",\"assetCacheDir\":\"relative/cache\"}").assetCacheDir());
+		assertNull(StoreHandoff.parse(base + ",\"assetCacheDir\":5}").assetCacheDir());
+		assertNotNull(StoreHandoff.parse(base + ",\"assetCacheDir\":\"relative\"}"), "never the whole handoff");
+	}
 }

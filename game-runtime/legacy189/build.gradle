@@ -154,11 +154,51 @@ def shared = file("../src/client/resources")
 // FLINT_SUPABASE_ANON_KEY at build time (as in ../ and ../legacy).
 apply from: "../flint-services.gradle"
 
+def generatedResources = layout.buildDirectory.dir("generated/flint-resources")
+
+// The launcher's release notes, bundled for the main menu's "What's new" card and page (as in the 26.x and 1.21.x builds).
+def generateFlintResources = tasks.register("generateFlintResources") {
+	def notes = file("../../app/src/data/releaseNotes.json")
+	inputs.file(notes)
+	def coverDir = file("../../app/src/assets/news")
+	inputs.files(fileTree(dir: coverDir, include: "flint-*-cover.png"))
+	outputs.dir(generatedResources)
+	doLast {
+		def root = generatedResources.get().asFile
+		root.deleteDir()
+		def target = new File(root, "assets/flintclient/whats_new.json")
+		target.parentFile.mkdirs()
+		target.text = notes.text
+		// The release covers the launcher carries (the owner's art, 480x270), for the "What's new" page; linear sampling.
+		def covers = new File(root, "assets/flintclient/textures/gui/whats_new")
+		covers.mkdirs()
+		(coverDir.listFiles() ?: new File[0]).sort { it.name }.each { png ->
+			def version = (png.name =~ /^flint-(\d+\.\d+\.\d+)-cover\.png$/)
+			if (version.matches()) {
+				new File(covers, version.group(1) + ".png").bytes = png.bytes
+				new File(covers, version.group(1) + ".png.mcmeta").text = '{"texture":{"blur":true,"clamp":true}}'
+			}
+		}
+	}
+}
+
+sourceSets.main.resources.srcDir(generateFlintResources)
+
 processResources {
 	def modVersion = project.version
 	inputs.property "version", modVersion
 	filesMatching("fabric.mod.json") {
 		expand "version": modVersion
+	}
+	// Flint's main menu: its artwork, its words (Flint's translations, the file every line ships) and the release notes.
+	from(new File(shared, "assets/flintclient/textures/gui")) {
+		include "menu_background.png"
+		include "menu_background.png.mcmeta"
+		into "assets/flintclient/textures/gui"
+	}
+	from(new File(shared, "assets/flintclient/lang")) {
+		include "en_us.json"
+		into "assets/flintclient/lang"
 	}
 	// The shared Right Shift menu's cards: every picture (the legacy HUD's own names among them) and the line icons.
 	from(new File(shared, "assets/flintclient/textures/mods")) {

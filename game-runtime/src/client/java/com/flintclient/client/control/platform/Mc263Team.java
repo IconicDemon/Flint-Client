@@ -11,15 +11,15 @@ import net.minecraft.gizmos.Gizmos;
 import net.minecraft.gizmos.TextGizmo;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Team;
 
 /**
  * Minecraft 26.3's side of Team Tracker: your teammates (whoever is on your scoreboard team, as servers set teams for
- * Bedwars and the like), a marker over each (seen through walls, with how far away), and their bearings for the compass
- * on the HUD. Fault-isolated.
+ * Bedwars and the like), a marker over each (through walls only where Minecraft shows their nametag anyway, with how far
+ * away), and their bearings for the compass on the HUD. Fault-isolated.
  */
 public final class Mc263Team {
 	private static final HookGuard GUARD = new HookGuard("team tracker",
@@ -53,7 +53,7 @@ public final class Mc263Team {
 			boolean distanceText = s.bool(TeamTracker.DISTANCE_TEXT);
 			Vec3 eye = player.getEyePosition(partial);
 			for (Entity entity : level.entitiesForRendering()) {
-				if (entity == player || !(entity instanceof LivingEntity) || entity.getTeam() != team || !entity.isAlive()) {
+				if (!marked(entity, player, team)) {
 					continue;
 				}
 				Vec3 at = entity.getPosition(partial);
@@ -73,6 +73,24 @@ public final class Mc263Team {
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
+	}
+
+	/** How far Minecraft shows a player's nametag through a wall: no teammate further away is marked. */
+	public static final double NAMETAG_RANGE = 64;
+
+	/**
+	 * Whether {@code entity} gets a marker: a teammate whose nametag Minecraft would show you through a wall anyway (a player
+	 * on your team, not invisible to you, not sneaking, within {@link #NAMETAG_RANGE}, on a team that shows its own nametags).
+	 * So a marker never shows a player Minecraft hides, even where a server puts strangers on one team (a rank's colour).
+	 */
+	private static boolean marked(Entity entity, LocalPlayer player, Team team) {
+		if (entity == player || !(entity instanceof Player) || entity.getTeam() != team || !entity.isAlive()
+			|| entity.isInvisibleTo(player) || entity.isDiscrete() || entity.distanceToSqr(player) > NAMETAG_RANGE * NAMETAG_RANGE) {
+			return false;
+		}
+		// Minecraft's team rule for a teammate's nametag (visibility checked above).
+		return com.flintclient.client.control.feature.NametagRules.teamShows(
+			com.flintclient.client.control.feature.NametagRules.TeamRule.of(team.getNameTagVisibility().name()), true, true, true, true);
 	}
 
 	/** A teammate's colour: the one color chosen, else the team's own (white for a team without one). */
@@ -106,8 +124,7 @@ public final class Mc263Team {
 				if (n == bearings.length) {
 					break;
 				}
-				if (entity == player || !(entity instanceof LivingEntity) || entity.getTeam() != team || !entity.isAlive()
-					|| entity.distanceTo(player) > limit) {
+				if (!marked(entity, player, team) || entity.distanceTo(player) > limit) {
 					continue;
 				}
 				double dx = entity.getX() - player.getX();

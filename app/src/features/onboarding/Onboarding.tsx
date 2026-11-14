@@ -2,11 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, errorText, subscribe, type InstallItem, type PlanItem, type ProfileState } from "../../lib/api";
 import { bytes } from "../../lib/format";
 import { useT, type MessageKey } from "../../lib/i18n";
-import { THEMES, useSettings } from "../../lib/settings";
+import { useSettings } from "../../lib/settings";
 import { sound } from "../../lib/sound";
 import { jobActive, seqOf, useStore } from "../../lib/store";
 import { VERSIONS, defaultProfileName, loaderLabel, platformBlock, versionMeta } from "../../lib/versions";
-import { EFFECT_TEXT, FONT_TEXT } from "../../ui/AppearancePickers";
+import { EFFECT_TEXT, FONT_TEXT, THEME_NAMES } from "../../ui/AppearancePickers";
 import { Badge, Button, Progress, Spinner } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { FlintMark } from "../../ui/Logo";
@@ -411,8 +411,7 @@ function Review({ answers, edit, setCanContinue }: { answers: Answers; edit: (st
           <span className="muted">{answers.launchAtLogin ? t("onboarding.review.launchAtLogin") : t("onboarding.review.noLaunchAtLogin")}</span>
         </Group>
         <Group title={t("onboarding.review.sections.appearance")} step={IDX.appearance}>
-          {/* "Flint Ember": the brand and the theme's name, both names. */}
-          <span className="muted">Flint {THEMES.find((theme) => theme.id === settings.theme)?.name ?? "Ember"}</span>
+          <span className="muted">{t(THEME_NAMES[settings.theme])}</span>
         </Group>
         <Group title={t("onboarding.review.sections.typography")} step={IDX.appearance}>
           <span className="muted">

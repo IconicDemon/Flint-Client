@@ -652,14 +652,8 @@ public final class ModuleSettings {
 		if (setting == VisualMods.AutohideHud.DURATION) {
 			return module.bool(VisualMods.AutohideHud.ANIMATE) ? null : "Only with Hide animation on";
 		}
-		if (setting == VisualMods.ViewModel.SCALE_X || setting == VisualMods.ViewModel.SCALE_Y || setting == VisualMods.ViewModel.SCALE_Z) {
-			return module.bool(VisualMods.ViewModel.SCALE) ? null : "Turn on Scale first";
-		}
-		if (setting == VisualMods.ViewModel.POSITION_X || setting == VisualMods.ViewModel.POSITION_Y || setting == VisualMods.ViewModel.POSITION_Z) {
-			return module.bool(VisualMods.ViewModel.POSITION) ? null : "Turn on Position first";
-		}
-		if (setting == VisualMods.ViewModel.ROTATION_X || setting == VisualMods.ViewModel.ROTATION_Y || setting == VisualMods.ViewModel.ROTATION_Z) {
-			return module.bool(VisualMods.ViewModel.ROTATION) ? null : "Turn on Rotation first";
+		if (setting == VisualMods.ViewModel.SWING_SPEED_VALUE) {
+			return module.bool(VisualMods.ViewModel.SWING_SPEED) ? null : "Only with Swing Speed Modifier on";
 		}
 		if (setting == UtilityMods.Reconnect.ATTEMPTS || setting == UtilityMods.Reconnect.DELAY || setting == UtilityMods.Reconnect.INCREMENT_DELAY) {
 			return module.bool(UtilityMods.Reconnect.AUTO) ? null : "Only with Auto reconnect on";

@@ -1,7 +1,7 @@
 // Run with `npm test`. The Friends page's own logic: sections, the badge, the chat's rows and the gift link.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { badgeCount, chatItems, EMPTY_SNAPSHOT, errorKey, friendSections, giftUrl, isPlayerName, mergeMessages, statusKey, type ChatMessage, type Friend, type PendingMessage } from "./social.ts";
+import { badgeCount, chatItems, EMPTY_SNAPSHOT, errorKey, friendSections, giftUrl, isPlayerName, mergeMessages, statusKey, unsent, type ChatMessage, type Friend, type PendingMessage } from "./social.ts";
 
 const friend = (name: string, extra: Partial<Friend> = {}): Friend => ({ uuid: name.toLowerCase().padEnd(32, "0"), name, status: "online", inGame: false, lastSeen: null, pinned: false, since: null, unread: 0, ...extra });
 const ME = "a".repeat(32);
@@ -55,6 +55,14 @@ test("a chat groups messages by sender and day", () => {
 test("messages merge by id, oldest first", () => {
   const merged = mergeMessages([message(3, ME, 3), message(1, YOU, 1)], [message(2, YOU, 2), message(3, ME, 3, { body: "edited" })]);
   assert.deepEqual(merged.map((m) => [m.id, m.body]), [[1, "m1"], [2, "m2"], [3, "edited"]]);
+});
+
+test("a send whose message arrived already shows once", () => {
+  const sending = (key: string, clientId: string, to = YOU, failed = false): PendingMessage => ({ key, clientId, to, body: key, sensitive: false, at: 1, failed });
+  const pending = [sending("p1", "c-1"), sending("p2", "c-2"), sending("p3", "c-3", YOU, true), sending("p4", "c-4", "c".repeat(32))];
+  const arrived = [message(7, ME, 1, { clientId: "c-1" }), message(8, ME, 1, { clientId: "c-3" }), message(9, YOU, 1)];
+  assert.deepEqual(unsent(pending, arrived, YOU).map((p) => p.key), ["p2", "p3"]);
+  assert.deepEqual(unsent(pending, [], YOU).map((p) => p.key), ["p1", "p2", "p3"]);
 });
 
 test("the gift link names the friend for the Store", () => {

@@ -123,7 +123,7 @@ public final class FlintCreditsScreen extends FlintPageScreen {
 					y += c.px(10);
 					c.text(block.title(), x, y, Palette.ACCENT_TEXT);
 					y += c.px(3);
-					c.fill(x, y, x + w, y + Math.max(1, c.px(0.25F)), 0x22FFFFFF);
+					c.fill(x, y, x + w, y + Math.max(1, c.px(0.25F)), Palette.tint(0x22FFFFFF));
 					y += c.px(8);
 					continue;
 				}
@@ -137,7 +137,7 @@ public final class FlintCreditsScreen extends FlintPageScreen {
 				y += c.px(2.5F);
 			}
 			y += c.px(10);
-			c.fill(x, y - c.px(6), x + w, y - c.px(6) + Math.max(1, c.px(0.25F)), 0x22FFFFFF);
+			c.fill(x, y - c.px(6), x + w, y - c.px(6) + Math.max(1, c.px(0.25F)), Palette.tint(0x22FFFFFF));
 			y = paragraph(c, notOfficial, x, w, y, Palette.TEXT);
 			y += c.px(3);
 			y = paragraph(c, minecraftNote, x, w, y, Palette.MUTED);
@@ -189,6 +189,6 @@ public final class FlintCreditsScreen extends FlintPageScreen {
 		int barY = viewTop + Math.round((view - barH) * k);
 		int barW = Math.max(2, c.px(1.2F));
 		int barX = c.px(width) - c.px(MARGIN / 2.0F) - barW;
-		c.roundRect(barX, barY, barW, barH, barW / 2, 0x40FFFFFF);
+		c.roundRect(barX, barY, barW, barH, barW / 2, Palette.tint(0x40FFFFFF));
 	}
 }

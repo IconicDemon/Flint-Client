@@ -2,6 +2,7 @@ package com.flintclient.client.control.platform;
 
 import com.flintclient.client.control.feature.Features;
 import com.flintclient.client.control.feature.Mods;
+import com.flintclient.client.control.feature.ServerRules;
 import com.flintclient.client.control.feature.Waypoint;
 import com.flintclient.client.control.feature.WaypointShare;
 import com.flintclient.client.control.feature.WaypointStore;
@@ -68,10 +69,15 @@ public final class WorldMapScreen extends Screen {
 	private static final int TEXT = 0xFFF0F0F0;
 	private static final int MUTED = 0xFF9A9A9A;
 	private static final int FAINT = 0xFF6E6E6E;
-	private static final int ACCENT = 0xFFFF8139;
+	/** Flint's orange on Ember; the theme's accent on the others ({@link #accent}). */
+	private static final int EMBER_ACCENT = 0xFFFF8139;
 	private static final int HOVER = 0x16FFFFFF;
 	private static final int DANGER = 0xFFFF5A5A;
 	/** Titles: Minecraft's font a step larger than the rest. */
+	private static int accent() {
+		return com.flintclient.client.render.Palette.themed(EMBER_ACCENT);
+	}
+
 	private FontFace title() {
 		return com.flintclient.client.render.PixelFace.fixed(Math.max(2, gs));
 	}
@@ -252,7 +258,8 @@ public final class WorldMapScreen extends Screen {
 	 * is read round you while it shows, another dimension's comes from its folder). Another dimension's surface otherwise.
 	 */
 	private @Nullable MapWorld map() {
-		int layer = settings().integer(WorldMap.LAYER);
+		// On a server, the surface only (fair play: a layer under the ground shows the caves in it).
+		int layer = ServerRules.fairPlay() ? WorldMap.LAYER_SURFACE : settings().integer(WorldMap.LAYER);
 		if (other != null) {
 			return isHeight(layer) ? otherLayer(layer) : other;
 		}
@@ -413,7 +420,7 @@ public final class WorldMapScreen extends Screen {
 			int h = height * gs;
 			c.fill(0, 0, w, h, BG);
 			int layer = settings().integer(WorldMap.LAYER);
-			Mc263Maps.worldMapLayer(viewingHere() && isHeight(layer) ? layer : Integer.MIN_VALUE);
+			Mc263Maps.worldMapLayer(viewingHere() && isHeight(layer) && !ServerRules.fairPlay() ? layer : Integer.MIN_VALUE);
 			drawMap(c, graphics, w, h);
 			drawTop(c, w);
 			drawLayers(c, h);
@@ -494,10 +501,12 @@ public final class WorldMapScreen extends Screen {
 			drawWaypoints(c, s);
 		}
 		if (viewingHere()) {
-			if (s.bool(WorldMap.MOBS)) {
+			// No players or mobs on a server (fair play): they would show through walls.
+			boolean fair = ServerRules.fairPlay();
+			if (s.bool(WorldMap.MOBS) && !fair) {
 				drawMobs(c, g);
 			}
-			if (s.bool(WorldMap.PLAYERS)) {
+			if (s.bool(WorldMap.PLAYERS) && !fair) {
 				drawPlayers(c, g);
 			}
 			LocalPlayer player = minecraft.player;
@@ -737,9 +746,9 @@ public final class WorldMapScreen extends Screen {
 		boolean hot = hovering(x, y, x + size, y + size);
 		// On a solid backing, so it reads over a bright map as well as in the panel.
 		c.roundRectCorners(x, y, size, size, 5 * gs, PANEL);
-		c.roundRectCorners(x, y, size, size, 5 * gs, active ? 0x33FF8139 : hot ? 0x26FFFFFF : 0x12FFFFFF);
+		c.roundRectCorners(x, y, size, size, 5 * gs, active ? com.flintclient.client.render.Palette.themed(0x33FF8139) : hot ? 0x26FFFFFF : 0x12FFFFFF);
 		int iconSize = Math.round(size * 0.55F);
-		c.icon(icon, x + (size - iconSize) / 2, y + (size - iconSize) / 2, iconSize, active ? ACCENT : hot ? TEXT : 0xFFD0D0D4);
+		c.icon(icon, x + (size - iconSize) / 2, y + (size - iconSize) / 2, iconSize, active ? accent() : hot ? TEXT : 0xFFD0D0D4);
 		hits.add(new Hit(x, y, x + size, y + size, action, null, tip));
 		return x + size;
 	}
@@ -756,7 +765,7 @@ public final class WorldMapScreen extends Screen {
 		}
 		int cardW = 10 * gs + 12 * gs + 6 * gs + c.width(title) + 12 * gs + tabsW + 4 * gs;
 		card(c, x, pad, cardW, h);
-		c.icon(Icon.GLOBE, x + 9 * gs, pad + (h - 12 * gs) / 2, 12 * gs, ACCENT);
+		c.icon(Icon.GLOBE, x + 9 * gs, pad + (h - 12 * gs) / 2, 12 * gs, accent());
 		int tx = x + 27 * gs;
 		c.text(title, tx, c.baselineFor(title, pad + h / 2), TEXT);
 		tx += c.width(title) + 12 * gs;
@@ -765,10 +774,10 @@ public final class WorldMapScreen extends Screen {
 			int tw = c.width(name) + 16 * gs;
 			boolean on = id.equals(dimension);
 			boolean hot = hovering(tx, pad + 3 * gs, tx + tw, pad + h - 3 * gs);
-			c.roundRectCorners(tx, pad + 3 * gs, tw, h - 6 * gs, 4 * gs, on ? 0x33FF8139 : hot ? 0x1CFFFFFF : 0);
-			c.text(name, tx + 8 * gs, c.baselineFor(name, pad + h / 2), on ? ACCENT : hot ? TEXT : MUTED);
+			c.roundRectCorners(tx, pad + 3 * gs, tw, h - 6 * gs, 4 * gs, on ? com.flintclient.client.render.Palette.themed(0x33FF8139) : hot ? 0x1CFFFFFF : 0);
+			c.text(name, tx + 8 * gs, c.baselineFor(name, pad + h / 2), on ? accent() : hot ? TEXT : MUTED);
 			if (id.equals(Mc263Maps.dimension())) {
-				c.roundRectCorners(tx + tw - 6 * gs, pad + 6 * gs, 3 * gs, 3 * gs, gs + gs / 2, on ? ACCENT : MUTED);
+				c.roundRectCorners(tx + tw - 6 * gs, pad + 6 * gs, 3 * gs, 3 * gs, gs + gs / 2, on ? accent() : MUTED);
 			}
 			String target = id;
 			hits.add(new Hit(tx, pad + 3 * gs, tx + tw, pad + h - 3 * gs, () -> show(target), null, null));
@@ -866,7 +875,7 @@ public final class WorldMapScreen extends Screen {
 		hotLayers += ((hot ? 1 : 0) - hotLayers) * Math.min(1, frameSeconds() * 12);
 		card(c, layerX0, layerY0, cardW, cardH);
 		if (hotLayers > 0.01F) {
-			c.ring(layerX0, layerY0, cardW, cardH, 6 * gs, Math.max(1, gs / 2), com.flintclient.client.render.Palette.withAlpha(ACCENT, 0.35F * hotLayers));
+			c.ring(layerX0, layerY0, cardW, cardH, 6 * gs, Math.max(1, gs / 2), com.flintclient.client.render.Palette.withAlpha(accent(), 0.35F * hotLayers));
 		}
 		int cx = (layerX0 + layerX1) / 2;
 		// Auto and Surface: two chips, the one in use lit.
@@ -899,7 +908,7 @@ public final class WorldMapScreen extends Screen {
 		layerShown += ((height ? 1 : 0) - layerShown) * Math.min(1, frameSeconds() * 12);
 		int ty = Math.round(layerThumb);
 		if (layerShown > 0.01F) {
-			c.roundRect(tx, ty, tw, Math.max(tw, layerBottomY - ty), tw / 2, com.flintclient.client.render.Palette.withAlpha(ACCENT, 0.55F * layerShown));
+			c.roundRect(tx, ty, tw, Math.max(tw, layerBottomY - ty), tw / 2, com.flintclient.client.render.Palette.withAlpha(accent(), 0.55F * layerShown));
 		}
 		// Where you stand: a small mark beside the track.
 		LocalPlayer player = minecraft.player;
@@ -911,7 +920,7 @@ public final class WorldMapScreen extends Screen {
 		if (layerShown > 0.01F) {
 			int hw = 14 * gs + Math.round(2 * gs * hotLayers);
 			int hh = 8 * gs;
-			c.roundRect(cx - hw / 2, ty - hh / 2, hw, hh, hh / 2, com.flintclient.client.render.Palette.withAlpha(ACCENT, layerShown));
+			c.roundRect(cx - hw / 2, ty - hh / 2, hw, hh, hh / 2, com.flintclient.client.render.Palette.withAlpha(accent(), layerShown));
 			c.roundRect(cx - hw / 2 + gs, ty - hh / 2 + gs, hw - 2 * gs, Math.max(1, gs), gs / 2 + 1, com.flintclient.client.render.Palette.withAlpha(0xFFFFFFFF, 0.35F * layerShown));
 		}
 		// The value, at the foot.
@@ -922,7 +931,7 @@ public final class WorldMapScreen extends Screen {
 	/** A small chip centred on ({@code cx}, {@code cy}): lit in the accent while {@code on}, else quiet. */
 	private void chip(Canvas c, int cx, int cy, int w, String label, boolean on) {
 		int h = 13 * gs;
-		c.roundRect(cx - w / 2, cy - h / 2, w, h, 4 * gs, on ? 0x40FF8139 : 0x12FFFFFF);
+		c.roundRect(cx - w / 2, cy - h / 2, w, h, 4 * gs, on ? com.flintclient.client.render.Palette.themed(0x40FF8139) : 0x12FFFFFF);
 		centred(c, label, cx, cy, on ? TEXT : MUTED, SMALL);
 	}
 
@@ -1039,7 +1048,7 @@ public final class WorldMapScreen extends Screen {
 		int fy = y + ph - 26 * gs;
 		boolean canAdd = viewingHere() && minecraft.player != null;
 		boolean hot = canAdd && hovering(x + pad, fy, x + pw - pad, fy + 20 * gs);
-		c.roundRectCorners(x + pad, fy, pw - 2 * pad, 20 * gs, 5 * gs, canAdd ? hot ? 0xFFFF9452 : ACCENT : 0x14FFFFFF);
+		c.roundRectCorners(x + pad, fy, pw - 2 * pad, 20 * gs, 5 * gs, canAdd ? hot ? com.flintclient.client.render.Palette.themedHover(0xFFFF9452) : accent() : 0x14FFFFFF);
 		TextLine add = line("Add waypoint here", BODY);
 		int iconSize = 10 * gs;
 		int total = iconSize + 5 * gs + c.width(add);
@@ -1219,7 +1228,7 @@ public final class WorldMapScreen extends Screen {
 				c.roundRectCorners(x + pad, iy, w - 2 * pad, itemH, 4 * gs, item.danger() ? 0x30FF5A5A : 0x20FFFFFF);
 			}
 			int color = item.danger() ? DANGER : hot ? TEXT : 0xFFDADADF;
-			c.icon(item.icon(), x + pad + 5 * gs, iy + (itemH - 10 * gs) / 2, 10 * gs, item.danger() ? DANGER : hot ? ACCENT : MUTED);
+			c.icon(item.icon(), x + pad + 5 * gs, iy + (itemH - 10 * gs) / 2, 10 * gs, item.danger() ? DANGER : hot ? accent() : MUTED);
 			TextLine label = line(item.label(), BODY);
 			c.text(label, x + pad + 21 * gs, c.baselineFor(label, iy + itemH / 2), color);
 			Runnable action = item.action();
@@ -1738,7 +1747,7 @@ public final class WorldMapScreen extends Screen {
 			int bw = (box.getWidth() + 10) * gs;
 			int bh = 18 * gs;
 			c.roundRectCorners(bx, by, bw, bh, 4 * gs, 0xFF19191C);
-			c.ring(bx, by, bw, bh, 4 * gs, Math.max(1, gs / 2), box.isFocused() ? ACCENT : 0x30FFFFFF);
+			c.ring(bx, by, bw, bh, 4 * gs, Math.max(1, gs / 2), box.isFocused() ? accent() : 0x30FFFFFF);
 		}
 
 		void paint(Canvas c, int w, int h) {
@@ -1786,7 +1795,7 @@ public final class WorldMapScreen extends Screen {
 			// Shown, and the preview marker.
 			int toggleY = (cardY + 142) * gs;
 			int tx = (cardX + 14) * gs;
-			c.roundRectCorners(tx, toggleY, 24 * gs, 13 * gs, 13 * gs / 2, visible ? ACCENT : 0x40FFFFFF);
+			c.roundRectCorners(tx, toggleY, 24 * gs, 13 * gs, 13 * gs / 2, visible ? accent() : 0x40FFFFFF);
 			int knob = 9 * gs;
 			c.roundRectCorners(visible ? tx + 13 * gs : tx + 2 * gs, toggleY + 2 * gs, knob, knob, knob / 2, 0xFFFFFFFF);
 			TextLine shown = line("Shown on the maps", BODY);
@@ -1805,7 +1814,7 @@ public final class WorldMapScreen extends Screen {
 			TextLine save = line("Save", BODY);
 			int saveW = c.width(save) + 24 * gs;
 			boolean hot = mousePxX >= right - saveW && mousePxX < right && mousePxY >= by && mousePxY < by + bh;
-			c.roundRectCorners(right - saveW, by, saveW, bh, 5 * gs, hot ? 0xFFFF9452 : ACCENT);
+			c.roundRectCorners(right - saveW, by, saveW, bh, 5 * gs, hot ? com.flintclient.client.render.Palette.themedHover(0xFFFF9452) : accent());
 			c.textCentered(save, right - saveW / 2, c.baselineFor(save, by + bh / 2), 0xFF1A0E05);
 			hits.add(new Hit(right - saveW, by, right, by + bh, this::save, null, null));
 			TextLine cancel = line("Cancel", BODY);

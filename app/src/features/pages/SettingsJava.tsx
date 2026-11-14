@@ -6,9 +6,9 @@ import { bytes } from "../../lib/format";
 import { useT } from "../../lib/i18n";
 import { customJavaWarnings, groupVersions, rowDetail, rowJava, runtimeLabel } from "../../lib/javaPlan";
 import { UNKNOWN_LIMITS, effectiveMemory, limitsFrom, machineLabel, memoryAdvice, overridesLine, type MemoryLimits } from "../../lib/memory";
-import { useSettings } from "../../lib/settings";
+import { SMOOTH_MIN_HEAP_MB, useSettings } from "../../lib/settings";
 import { useStore } from "../../lib/store";
-import { Badge, Button, TextField } from "../../ui/controls";
+import { Badge, Button, Segmented, TextField } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { MemorySlider } from "../../ui/MemorySlider";
 import type { RowDef } from "./SettingsPage";
@@ -90,6 +90,24 @@ export function useJavaRows(): RowDef[] {
       keywords: "settings.java.custom.keywords",
       block: true,
       render: () => <JavaPathControl java={java} onSaved={() => void reloadJava()} />,
+    },
+    {
+      section: "java",
+      title: t("settings.java.cleaner.title"),
+      // The 4 GB floor follows the description in one short sentence (perfcore::SMOOTH_MIN_HEAP_MB).
+      desc: `${t(settings.memoryCleaner === "smooth" ? "settings.java.cleaner.descSmooth" : "settings.java.cleaner.descOfficial")} ${t("settings.java.cleaner.minHeap", { gigabytes: SMOOTH_MIN_HEAP_MB / 1024 })}`,
+      keywords: "settings.java.cleaner.keywords",
+      render: () => (
+        <Segmented
+          label={t("settings.java.cleaner.title")}
+          value={settings.memoryCleaner}
+          onChange={(v) => update({ memoryCleaner: v })}
+          options={[
+            { value: "smooth", label: t("settings.java.cleaner.smooth") },
+            { value: "official", label: t("settings.java.cleaner.official") },
+          ]}
+        />
+      ),
     },
     {
       section: "java",

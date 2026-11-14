@@ -27,6 +27,8 @@ pub struct Player {
     pub balance: i64,
     pub owned: Vec<String>,
     pub equipped: BTreeMap<String, String>,
+    /// The emote wheel (cosmetics v2), sent only by a Store with [`World::v2`].
+    pub emotes: Vec<Option<String>>,
 }
 
 pub struct Cosmetic {
@@ -38,6 +40,8 @@ pub struct Cosmetic {
     pub sha256: String,
     /// `asset.animation` as the Store sends it (with each strip's `url`), for an animated cape.
     pub animation: Option<Value>,
+    /// `asset.model` as the Store sends it (cosmetics v2), for a 3D cosmetic.
+    pub model: Option<Value>,
 }
 
 #[derive(Default)]
@@ -97,6 +101,17 @@ pub struct World {
     pub granted_via: HashMap<(String, String), String>,
     /// Accounts that got the first-launch reward (once, ever).
     pub first_launch_claimed: HashSet<String>,
+    /// A Store with cosmetics v2: every slot, the emote wheel and its route.
+    pub v2: bool,
+    /// A Store with the public cosmetics catalog (`GET /api/v1/catalog/cosmetics/`): every cosmetic that isn't a reward, with
+    /// its Merit price from `prices`. Off by default (a 404, as before the route existed).
+    pub catalog: bool,
+    pub prices: HashMap<String, i64>,
+    /// Role badges (`GET /me/` `badges`/`badge`, `PUT /me/badge/`), by dashed UUID: (owned, chosen). Empty: today's Store,
+    /// whose `/me/` has no badge fields and no badge route.
+    pub badges: HashMap<String, (Vec<String>, String)>,
+    /// `PUT /me/badge/` calls per dashed UUID (more than 10 answer 429, as the Store's limit per minute).
+    pub badge_puts: HashMap<String, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -173,7 +188,21 @@ impl World {
         let path = format!("/assets/{slug}.png");
         self.files.insert(path.clone(), png.to_vec());
         let sha256 = hex::encode(Sha256::digest(png));
-        self.cosmetics.insert(id.clone(), Cosmetic { slug: slug.into(), kind: kind.into(), name: format!("TEST · {slug}"), asset_id: uuid_v4(), path, sha256, animation: None });
+        self.cosmetics.insert(id.clone(), Cosmetic { slug: slug.into(), kind: kind.into(), name: format!("TEST · {slug}"), asset_id: uuid_v4(), path, sha256, animation: None, model: None });
+        id
+    }
+
+    /// A 3D cosmetic (cosmetics v2) of `kind` with these model files (`geometry`, `texture`, `animation`, `thumbnail`),
+    /// served at /assets/model/<slug>-<part>, attached to the body; returns its id.
+    pub fn add_model_cosmetic(&mut self, slug: &str, kind: &str, files: &[(&str, &[u8])]) -> String {
+        let id = uuid_v4();
+        let mut model = json!({ "geometry": null, "texture": null, "animation": null, "thumbnail": null, "texture_frames": null, "frame_ms": null, "attach": { "anchor": "anchor_body", "side": null }, "hides_cape": false });
+        for (part, bytes) in files {
+            let path = format!("/assets/model/{slug}-{part}");
+            self.files.insert(path.clone(), bytes.to_vec());
+            model[*part] = json!({ "path": path, "sha256": hex::encode(Sha256::digest(bytes)), "bytes": bytes.len(), "url": format!("{}{}", self.base, path), "width": 64, "height": 64 });
+        }
+        self.cosmetics.insert(id.clone(), Cosmetic { slug: slug.into(), kind: kind.into(), name: format!("TEST · {slug}"), asset_id: uuid_v4(), path: String::new(), sha256: String::new(), animation: None, model: Some(model) });
         id
     }
 
@@ -416,6 +445,7 @@ impl World {
 
     fn asset_json(&self, id: &str) -> Value {
         match self.cosmetics.get(id) {
+            Some(c) if c.model.is_some() => json!({ "id": c.asset_id, "version": 1, "model": c.model }),
             Some(c) => json!({ "id": c.asset_id, "version": 1, "path": c.path, "sha256": c.sha256, "width": 64, "height": 32, "url": format!("{}{}", self.base, c.path), "animation": c.animation }),
             None => Value::Null,
         }
@@ -449,14 +479,20 @@ impl World {
             }));
         }
         let equipped: BTreeMap<&String, &String> = player.map(|p| p.equipped.iter().filter(|(_, c)| self.owns(uuid, c)).collect()).unwrap_or_default();
-        json!({
+        let mut body = json!({
             "version": player.map(|p| p.version).unwrap_or(0),
             "minecraft_uuid": uuid,
             "name": player.map(|p| p.name.clone()).unwrap_or_default(),
             "balance": player.map(|p| p.balance).unwrap_or(0),
             "owned": owned,
             "equipped": equipped,
-        })
+        });
+        if self.v2 {
+            let mut wheel = player.map(|p| p.emotes.clone()).unwrap_or_default();
+            wheel.resize(8, None);
+            body["emotes"] = json!(wheel);
+        }
+        body
     }
 
     /// A launcher session's inventory read claims an active first-launch reward, once per account, ever.
@@ -536,6 +572,24 @@ impl World {
                 }
                 Reply::json(200, json!({ "players": players }))
             }
+            ("GET", "/api/v1/catalog/cosmetics/") if self.catalog => {
+                let rewards: HashSet<&String> = self.rewards.iter().map(|r| &r.cosmetic_id).collect();
+                let items: Vec<Value> = self
+                    .cosmetics
+                    .iter()
+                    .filter(|(id, _)| !rewards.contains(id))
+                    .map(|(id, c)| json!({ "cosmetic_id": id, "slug": c.slug, "kind": c.kind, "name": c.name, "price_coins": self.prices.get(id),
+                        "animated": c.animation.is_some(), "asset": self.asset_json(id) }))
+                    .collect();
+                let body = json!({ "schema": 1, "items": items });
+                let etag = format!("\"k1-{}\"", &hex::encode(Sha256::digest(body.to_string().as_bytes()))[..32]);
+                if request.headers.get("if-none-match") == Some(&etag) {
+                    return Reply { status: 304, headers: vec![("ETag".into(), etag)], body: Vec::new() };
+                }
+                let mut reply = Reply::json(200, body);
+                reply.headers.push(("ETag".into(), etag));
+                reply
+            }
             ("GET", "/api/v1/catalog/community/") if self.community => {
                 let body = self.catalog_json();
                 let etag = format!("\"c1-{}\"", &hex::encode(Sha256::digest(body.to_string().as_bytes()))[..32]);
@@ -560,6 +614,31 @@ impl World {
 
     fn me(&mut self, method: &str, path: &str, uuid: &str, request: &Request, body: &Value) -> Reply {
         match (method, path) {
+            ("GET", "/api/v1/me/") => {
+                let mut me = json!({ "uuid": uuid });
+                if let Some((owned, chosen)) = self.badges.get(uuid) {
+                    me["badges"] = json!(owned);
+                    me["badge"] = json!(chosen);
+                }
+                Reply::json(200, me)
+            }
+            ("PUT", "/api/v1/me/badge/") if !self.badges.is_empty() => {
+                let puts = self.badge_puts.entry(uuid.to_owned()).or_default();
+                *puts += 1;
+                if *puts > 10 {
+                    return Reply::json(429, json!({ "error": "rate_limited" }));
+                }
+                let tag = body["tag"].as_str().unwrap_or_default().to_owned();
+                if !super::badges::TAGS.contains(&tag.as_str()) {
+                    return Reply::json(400, json!({ "error": "invalid_tag" }));
+                }
+                let entry = self.badges.entry(uuid.to_owned()).or_insert_with(|| (vec!["default".into()], "default".into()));
+                if tag != "default" && !entry.0.contains(&tag) {
+                    return Reply::json(403, json!({ "error": "not_owned" }));
+                }
+                entry.1 = tag;
+                Reply::json(200, json!({ "badge": entry.1, "badges": entry.0 }))
+            }
             ("GET", "/api/v1/me/inventory/") => {
                 self.claim_first_launch(uuid);
                 let etag = format!("W/\"inv-{}-{}\"", uuid.replace('-', ""), self.version(uuid));
@@ -577,7 +656,8 @@ impl World {
             }
             ("PUT", "/api/v1/me/equipped/") => {
                 let slot = body["slot"].as_str().unwrap_or_default().to_owned();
-                if !["cape", "back", "head", "aura"].contains(&slot.as_str()) {
+                let slots: &[&str] = if self.v2 { &super::kinds::SLOTS } else { &["cape", "back", "head", "aura"] };
+                if !slots.contains(&slot.as_str()) {
                     return Reply::json(400, json!({ "error": "invalid_slot" }));
                 }
                 let target = body["cosmeticId"].as_str().map(str::to_owned);
@@ -585,7 +665,8 @@ impl World {
                     if !self.owns(uuid, id) {
                         return Reply::json(403, json!({ "error": "not_owned" }));
                     }
-                    if self.cosmetics.get(id).map(|c| c.kind.as_str()) != Some(slot.as_str()) {
+                    let worn_in = self.cosmetics.get(id).and_then(|c| super::kinds::normalize(&c.kind)).and_then(|k| super::kinds::slot_of(&k));
+                    if worn_in != Some(slot.as_str()) {
                         return Reply::json(400, json!({ "error": "wrong_slot" }));
                     }
                 }
@@ -596,6 +677,21 @@ impl World {
                 };
                 player.version += 1;
                 Reply::json(200, json!({ "ok": true, "version": player.version }))
+            }
+            ("PUT", "/api/v1/me/emotes/") if self.v2 => {
+                let Some(slots) = body["slots"].as_array().filter(|s| s.len() == 8) else {
+                    return Reply::json(400, json!({ "error": "invalid_slots" }));
+                };
+                let wheel: Vec<Option<String>> = slots.iter().map(|v| v.as_str().map(str::to_owned)).collect();
+                for id in wheel.iter().flatten() {
+                    if !self.owns(uuid, id) || self.cosmetics.get(id).map(|c| c.kind.as_str()) != Some("emote") {
+                        return Reply::json(400, json!({ "error": "not_an_emote" }));
+                    }
+                }
+                let player = self.player(uuid);
+                player.emotes = wheel.clone();
+                player.version += 1;
+                Reply::json(200, json!({ "emotes": wheel, "version": player.version }))
             }
             ("GET", "/api/v1/me/wallet/") => {
                 let balance = self.players.get(uuid).map(|p| p.balance).unwrap_or(0);

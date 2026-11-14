@@ -61,21 +61,34 @@ fn check_channel() {
 /// The Minecraft lines `game-runtime/` builds a jar for (src/runtime.rs embeds one per line), each with
 /// the Minecraft version it is compiled against. 26.3 is the main build (`./gradlew build`); the other
 /// 26.x lines are built with `-Pminecraft_version=<version>` (26.1's one jar, built against 26.1.2, serves
-/// every 26.1 release), and the obfuscated 1.21.x lines by the `legacy` build
+/// every 26.1 release), and the obfuscated 1.21.x and 1.19.x lines by the `legacy` build
 /// (`./gradlew -p legacy build -Pminecraft_version=<version>`); 1.8.9 has a code base of its own (`./gradlew -p legacy189 build`).
-const RUNTIME_LINES: &[(&str, &str)] =
-    &[("26.3", "26.3"), ("26.2", "26.2"), ("26.1", "26.1.2"), ("1.21.11", "1.21.11"), ("1.21.10", "1.21.10"), ("1.21.1", "1.21.1"), ("1.8.9", "1.8.9")];
+const RUNTIME_LINES: &[(&str, &str)] = &[
+    ("26.3", "26.3"),
+    ("26.2", "26.2"),
+    ("26.1", "26.1.2"),
+    ("1.21.11", "1.21.11"),
+    ("1.21.10", "1.21.10"),
+    ("1.21.1", "1.21.1"),
+    ("1.19.2", "1.19.2"),
+    ("1.19", "1.19"),
+    ("1.8.9", "1.8.9"),
+];
 
 /// The order the jars are packed in. src/runtime.rs unpacks a line by reading the stream up to the end of its jar, so the
 /// lines players start most come first (the newest line, then 1.8.9), and the rest sit beside the lines they share most
 /// of their files with.
-const PACK_ORDER: &[&str] = &["26.3", "1.8.9", "26.2", "26.1", "1.21.11", "1.21.10", "1.21.1"];
+const PACK_ORDER: &[&str] = &["26.3", "1.8.9", "26.2", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.19.2", "1.19"];
 
 /// Brotli at quality 9 with a 32 MiB window ("large window" brotli, which src/runtime.rs's decoder reads): each jar's
 /// files are stored uncompressed first (`stored_jar`), so brotli sees the class files themselves and finds what a line
 /// shares with the lines packed before it, even where the bytecode differs a little. The seven jars (about 66 MB stored,
 /// 33 MB as Gradle builds them) pack into about 5 MB; packing the jars as built, with a 16 MiB window, gave 11.7 MB.
-/// Quality 11 saves under 1% more and takes seven times as long.
+/// Higher qualities pack smaller but unpack slower, and a launch waits for the unpack: measured on the 1.0.4 jars (71 MB
+/// stored) with this decoder, quality 9 packs to 5.58 MB, 10 to 5.20 MB and 11 to 5.04 MB (also with a larger block
+/// size or without literal context modelling, 5.07 and 5.08 MB), but every line then unpacks about 30% slower (26.3:
+/// 29 -> 40 ms, 1.21.1: 64 -> 83 ms). Reading the skipped lines in 1 MiB pieces instead of std::io::copy's 8 KiB
+/// didn't make it faster either.
 const PACK_QUALITY: i32 = 9;
 const PACK_WINDOW_BITS: i32 = 25;
 

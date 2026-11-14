@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { slotOf } from "../../lib/cosmeticTypes";
 import { canRecheck, cardAction, cardState, discordNotice, recheckWait, rewardItem, type RewardCard, type RewardsView } from "../../lib/community";
 import { useT } from "../../lib/i18n";
 import type { StoreItem, StoreSlot } from "../../lib/storeSync";
 import { Button, Callout, Spinner } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
-import { ItemArt } from "./StoreInventory";
+import { ItemArt } from "../wardrobe/ItemArt";
 import { storeAnimation } from "./storeCape";
 import type { RecheckState } from "./useCommunity";
 
@@ -229,7 +230,7 @@ function RewardTile({
         aria-busy={pending || undefined}
         aria-disabled={readOnly || undefined}
         title={title}
-        onClick={() => !card.worn && !busy && !readOnly && onWear(reward.kind, reward.cosmeticId)}
+        onClick={() => { const slot = slotOf(reward); if (slot && !card.worn && !busy && !readOnly) onWear(slot, reward.cosmeticId); }}
         onPointerEnter={() => onPreview(shown)}
         onFocus={(e) => e.currentTarget.matches(":focus-visible") && onPreview(shown)}
         onBlur={() => onPreview(null)}

@@ -244,13 +244,24 @@ final class ModMenuWindow extends Node implements Host {
 		winH = Math.max(d(300), Math.min(d(WIN_H), y + h - d(EDGE) - winY));
 		float pw = profile.width(c);
 		profile.setBounds(winX + winW - pw, titleY, pw, d(TITLE));
+		// The tabs, 12 apart; on a narrow window the gaps close up (to 4) so they keep clear of Close, and when even that is
+		// too wide Close moves up to the title row, left of the profile, so it always sits whole inside the window's edge.
+		float tabsW = 0;
+		for (Parts.Tab tab : tabs) {
+			tabsW += tab.width(c);
+		}
+		float closeX = winX + winW - d(48);
+		int gaps = Math.max(1, tabs.size() - 1);
+		float gap = Math.clamp((closeX - d(12) - winX - tabsW) / gaps, d(4), d(12));
 		float at = winX;
 		for (Parts.Tab tab : tabs) {
 			float tw = tab.width(c);
 			tab.setBounds(at, tabsY, tw, d(TABS));
-			at += tw + d(12);
+			at += tw + gap;
 		}
-		close.setBounds(winX + winW - d(48), tabsY + (d(TABS) - d(48)) / 2, d(48), d(48));
+		boolean closeOnTabs = at - gap + d(12) <= closeX;
+		close.setBounds(closeOnTabs ? closeX : winX + winW - pw - d(12) - d(48), closeOnTabs ? tabsY + (d(TABS) - d(48)) / 2
+			: titleY + (d(TITLE) - d(48)) / 2, d(48), d(48));
 		mods.setBounds(winX, winY, winW, winH);
 		if (page != null) {
 			page.setBounds(winX, winY, winW, winH);
@@ -278,6 +289,11 @@ final class ModMenuWindow extends Node implements Host {
 	 */
 	@Override
 	protected void paint(Canvas c) {
+		if (colorsVersion != MenuStyle.version()) {
+			// A change of theme: controls that keep a look made from the colours (the search boxes) remake it.
+			colorsVersion = MenuStyle.version();
+			invalidate();
+		}
 		updateClock();
 		float cy = titleY + d(TITLE) / 2;
 		int markH = Math.max(1, c.px(d(TITLE)));
@@ -290,7 +306,104 @@ final class ModMenuWindow extends Node implements Host {
 		float textX = blockX + d(22 + 16 + 12);
 		MenuStyle.text(c, date, textX, cy, MenuStyle.TEXT);
 		MenuStyle.text(c, time, textX + date.width(c) + d(12), cy, MenuStyle.TEXT);
-		MenuStyle.block(c, winX, winY, winW, winH, MenuStyle.radius(), 0, 0);
+		if (screen.live()) {
+			// Over a live game the window is frosted glass, and the game and the HUD stay sharp around it.
+			MenuStyle.glass(c, winX, winY, winW, winH, MenuStyle.radius(), MenuStyle.seeThrough());
+			if (screen.frosted()) {
+				frost(c);
+			}
+			outlineCovered(c);
+		} else {
+			MenuStyle.block(c, winX, winY, winW, winH, MenuStyle.radius(), 0, 0);
+		}
+	}
+
+	// ---------- over a live game ----------
+
+	/** A HUD mod the window covers: a faint outline where it is. */
+	private static final int COVERED = 0x47FFFFFF;
+	/** The menu colours the layout was made with ({@link MenuStyle#version}). */
+	private int colorsVersion = -1;
+	/** Where a HUD mod's rectangle is read into (GUI units: x, y, w, h). */
+	private final float[] hudRect = new float[4];
+
+	/**
+	 * Keeps the menu blur to the window (Frame#clipBlur): its rectangle as two overlapping ones inset at the corners, so the blur
+	 * follows the rounding closely enough that no blurred corner shows outside it.
+	 */
+	private void frost(Canvas c) {
+		int x0 = c.px(winX);
+		int y0 = c.px(winY);
+		int x1 = c.px(winX + winW);
+		int y1 = c.px(winY + winH);
+		int inset = Math.round(c.px(MenuStyle.radius()) * 0.3F);
+		com.flintclient.client.platform.Frame.clipBlurTo(x0 + inset, y0, x1 - inset, y1);
+		com.flintclient.client.platform.Frame.clipBlurTo(x0, y0 + inset, x1, y1 - inset);
+		// Only the window: the top row's blocks are see-through over the sharp game (more rectangles left the clipped blur unreliable).
+	}
+
+	/** Each HUD mod on screen that the window covers, as a faint outline on the glass, so the player knows it is there. */
+	private void outlineCovered(Canvas c) {
+		int x0 = c.px(winX);
+		int y0 = c.px(winY);
+		int x1 = c.px(winX + winW);
+		int y1 = c.px(winY + winH);
+		int g = com.flintclient.client.platform.Frame.windowGuiScale();
+		int line = Math.max(1, g / 2);
+		// Only the part on the glass: outside it the mod itself shows.
+		c.pushClip(x0, y0, x1, y1);
+		try {
+			for (int i = 0, n = com.flintclient.client.control.hud.render.HudRenderer.moduleCount(); i < n; i++) {
+				if (!com.flintclient.client.control.hud.render.HudRenderer.lastRectAt(i, hudRect)) {
+					continue;
+				}
+				int rx = Math.round(hudRect[0] * g);
+				int ry = Math.round(hudRect[1] * g);
+				int rw = Math.round(hudRect[2] * g);
+				int rh = Math.round(hudRect[3] * g);
+				if (rw > 0 && rh > 0 && rx < x1 && rx + rw > x0 && ry < y1 && ry + rh > y0) {
+					c.ring(rx, ry, rw, rh, 2 * g, line, COVERED);
+				}
+			}
+		} finally {
+			c.popClip();
+		}
+	}
+
+	/**
+	 * The HUD mod the pointer is on (its card) or whose page is open, outlined in the accent where it sits on the screen, over
+	 * the window too. Takes the frame's hover whatever happens, so it never outlives the frame.
+	 */
+	private void highlightHovered(Canvas c) {
+		float amount = com.flintclient.client.control.hud.render.HudPreview.hoverAmount();
+		String id = com.flintclient.client.control.hud.render.HudPreview.takeHovered();
+		if (!screen.live()) {
+			return;
+		}
+		if (id == null && place == Place.MODS) {
+			Catalog.Mod open = mods.openMod();
+			if (open != null && open.module() != null) {
+				id = open.module().id();
+				amount = 1;
+			}
+		}
+		if (id == null) {
+			return;
+		}
+		int index = com.flintclient.client.control.model.ModuleRegistry.indexOf(id);
+		if (!com.flintclient.client.control.hud.render.HudRenderer.lastRectAt(index, hudRect)) {
+			return;
+		}
+		int g = com.flintclient.client.platform.Frame.windowGuiScale();
+		int pad = g;
+		int rx = Math.round(hudRect[0] * g) - pad;
+		int ry = Math.round(hudRect[1] * g) - pad;
+		int rw = Math.round(hudRect[2] * g) + 2 * pad;
+		int rh = Math.round(hudRect[3] * g) + 2 * pad;
+		float k = Math.min(1, amount);
+		c.frame().nextLayer();
+		c.roundRect(rx, ry, rw, rh, 3 * g, com.flintclient.client.render.Palette.withAlpha(MenuStyle.ACCENT, 0.10F * k));
+		c.ring(rx, ry, rw, rh, 3 * g, Math.max(1, g * 2 / 3), com.flintclient.client.render.Palette.withAlpha(MenuStyle.ACCENT, 0.95F * k));
 	}
 
 	/** The open tab's page fades and rises in as it is shown; the rest draws as it is. */
@@ -308,6 +421,7 @@ final class ModMenuWindow extends Node implements Host {
 				paintChild(c, child);
 			}
 		}
+		highlightHovered(c);
 	}
 
 	/** Whether a point is on the window (a click outside it closes nothing, but the screen may use this). */

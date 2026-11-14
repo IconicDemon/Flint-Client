@@ -291,7 +291,8 @@ public final class MoreMods {
 		public static final BoolSetting FRIEND_MESSAGES = new BoolSetting("friendMessages", "Show friend messages",
 			"Friends joining and leaving, in chat", true);
 		public static final BoolSetting AUTO_TIP = new BoolSetting("autoTipEnabled", "Auto tip", "Tips every booster for you", true);
-		public static final IntSetting TIP_INTERVAL = new IntSetting("autoTipInterval", "Interval", null, 900, 60, 3600, 60, " s");
+		public static final IntSetting TIP_INTERVAL = new IntSetting("autoTipInterval", "Interval",
+			"Every 15 minutes at the most often, as the AutoTip mod did: no command flood", 900, 900, 3600, 60, " s");
 		public static final BoolSetting AUTO_GG = new BoolSetting("autoGGEnabled", "Auto GG", "Says GG when a game ends", false);
 		public static final IntSetting GG_DELAY = new IntSetting("autoGGDelay", "Delay", null, 20, 1, 100, 1, " ticks");
 		public static final TextSetting GG_TEXT = new TextSetting("ggString", "GG text", "What is sent", "/ac gg", 64);

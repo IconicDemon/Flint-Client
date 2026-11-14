@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.control.store.AssetCache;
 import com.flintclient.client.control.store.StoreCosmeticsClient;
 import com.flintclient.client.control.store.StoreCosmeticsClient.Response;
 import com.flintclient.client.control.store.StoreEndpoint;
@@ -176,7 +177,7 @@ class StoreCapesTest {
 		assertArrayEquals(CapePngTest.capePixels(64, 32, 5), game.gpu.pixels.get(texture));
 		assertNull(game.capes.texture(ALEX), "the Store said nothing about Alex: no cape");
 		assertNull(game.capes.texture(OFFLINE));
-		assertTrue(Files.isRegularFile(cache.resolve(SHA + ".png")), "the verified texture is cached by its hash");
+		assertTrue(Files.isRegularFile(AssetCache.file(cache, SHA)), "the verified texture is cached by its hash");
 	}
 
 	@Test
@@ -235,7 +236,7 @@ class StoreCapesTest {
 		assertEquals(1, game.store.downloads.size());
 		assertNull(game.capes.texture(STEVE));
 		assertTrue(game.gpu.uploaded.isEmpty());
-		assertFalse(Files.exists(cache.resolve(SHA + ".png")), "nothing unverified is cached");
+		assertFalse(Files.exists(AssetCache.file(cache, SHA)), "nothing unverified is cached");
 		game.run(StoreCapes.ASSET_REFUSED_NANOS / s(1) - 20);
 		assertEquals(1, game.store.downloads.size(), "not tried again for half an hour");
 		game.run(30);
@@ -251,7 +252,7 @@ class StoreCapesTest {
 		assertEquals(1, game.store.downloads.size());
 		assertNull(game.capes.texture(STEVE));
 		assertTrue(game.gpu.uploaded.isEmpty());
-		assertFalse(Files.exists(cache.resolve(StoreCapes.sha256(junk) + ".png")), "a file that isn't a texture isn't cached");
+		assertFalse(Files.exists(AssetCache.file(cache, StoreCapes.sha256(junk))), "a file that isn't a texture isn't cached");
 		byte[] truncated = java.util.Arrays.copyOf(PNG, PNG.length - 20);
 		Game cut = new Game(cache);
 		cut.store.wear(STEVE, EMBER, truncated, StoreCapes.sha256(truncated), 64, 32);
@@ -401,7 +402,7 @@ class StoreCapesTest {
 		Game first = wearing(cache);
 		first.run(4);
 		assertEquals(1, first.store.downloads.size());
-		Path file = cache.resolve(SHA + ".png");
+		Path file = AssetCache.file(cache, SHA);
 		assertArrayEquals(PNG, Files.readAllBytes(file));
 
 		Game second = new Game(cache, first.store);
@@ -420,7 +421,8 @@ class StoreCapesTest {
 
 	@Test
 	void aLocalFileAloneNeverMakesACapeAppear(@TempDir Path cache) throws Exception {
-		Files.write(cache.resolve(SHA + ".png"), PNG);
+		Files.createDirectories(AssetCache.file(cache, SHA).getParent());
+		Files.write(AssetCache.file(cache, SHA), PNG);
 		Game game = new Game(cache);
 		game.run(10);
 		assertEquals(1, game.store.lookups.size());
@@ -612,7 +614,7 @@ class StoreCapesTest {
 		assertNotNull(frost);
 		assertArrayEquals(CapePngTest.capePixels(64, 32, 41), game.gpu.pixels.get(frost));
 		assertEquals(List.of(URI.create(EMBER)), game.store.downloads, "nothing is downloaded for a pick");
-		assertTrue(Files.isRegularFile(cache.resolve(SHA_B + ".png")), "its texture is kept in the cape cache by its hash");
+		assertTrue(Files.isRegularFile(AssetCache.file(cache, SHA_B)), "its texture is kept in the cape cache by its hash");
 		// The Store hasn't answered yet, and its lookup still says Ember: the pick stays.
 		game.run(30);
 		assertEquals(frost, game.capes.texture(STEVE), "a pick the Store hasn't settled stays (up to its hold)");

@@ -14,6 +14,7 @@
  */
 import { createElement, Fragment, useSyncExternalStore, type ReactNode } from "react";
 import en from "../locales/en.json" with { type: "json" };
+import { expandCatalog, type CompactCatalog } from "./i18nCatalog.ts";
 
 type English = typeof en;
 export type MessageKey = keyof English;
@@ -53,7 +54,7 @@ export const LANGUAGES: { id: Locale; native: string; english: string; region?: 
  * One chunk per language, fetched only when it's chosen. (No `with { type: "json" }` here: the dev server
  * serves these as JavaScript modules, which a JSON import attribute would make the web view reject.)
  */
-const CATALOGS: Record<Exclude<Locale, "en">, () => Promise<{ default: Catalog }>> = {
+const CATALOGS: Record<Exclude<Locale, "en">, () => Promise<{ default: Catalog | CompactCatalog }>> = {
   es: () => import("../locales/es.json"),
   "pt-BR": () => import("../locales/pt-BR.json"),
   de: () => import("../locales/de.json"),
@@ -187,8 +188,15 @@ export function formatLocale(): string {
 
 let requested = 0;
 
-/** A language's catalog as the app loads it: its lazy chunk. (The Node tests pass a loader that reads the file.) */
-const loadCatalog = async (locale: Exclude<Locale, "en">): Promise<Catalog> => (await CATALOGS[locale]()).default;
+/**
+ * A language's catalog as the app loads it: its lazy chunk, which a build ships without the keys (English's, put back
+ * here; lib/i18nCatalog.ts). (The Node tests pass a loader that reads the file.)
+ */
+const loadCatalog = async (locale: Exclude<Locale, "en">): Promise<Catalog> => {
+  const catalog = expandCatalog(Object.keys(ENGLISH), (await CATALOGS[locale]()).default);
+  if (!catalog) throw new Error(`the ${locale} chunk doesn't match this build's English`);
+  return catalog;
+};
 
 /** Switches the interface language; the catalog loads first, so the old language stays until the new one is ready. */
 export async function setLanguage(setting: LanguageSetting, load = loadCatalog): Promise<void> {

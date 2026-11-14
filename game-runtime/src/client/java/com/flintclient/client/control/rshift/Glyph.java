@@ -50,7 +50,17 @@ enum Glyph {
 	FIRE(0xF06D),
 	CROWN(0xF521),
 	CLOCK(0xF017),
-	TROPHY(0xF091);
+	TROPHY(0xF091),
+	COMPASS(0xF14E),
+	GLOBE(0xF0AC),
+	LINK(0xF0C1),
+	EXTERNAL(0xF08E),
+	SERVER(0xF233),
+	USER_GROUP(0xF500),
+	EYE_SLASH(0xF070),
+	SHIELD(0xF3ED),
+	/** The Library (the launcher's, and the in-game one). */
+	BOOK_OPEN(0xF518);
 
 	private final int codepoint;
 
@@ -62,5 +72,14 @@ enum Glyph {
 	void draw(Canvas c, float centerX, float centerY, float size, int argb) {
 		int px = Math.max(1, c.px(size));
 		c.glyph(codepoint, c.px(centerX) - px / 2, c.px(centerY) - px / 2, px, argb);
+	}
+
+	/**
+	 * This glyph in a {@code size} square centred on ({@code centerX}, {@code centerY}), its ink in the square's middle both ways
+	 * (not on Font Awesome's baseline): a lone icon in a tile, where a flag and a folder should sit as centred as a gear.
+	 */
+	void drawCentred(Canvas c, float centerX, float centerY, float size, int argb) {
+		int px = Math.max(1, c.px(size));
+		c.centredGlyph(codepoint, c.px(centerX) - px / 2, c.px(centerY) - px / 2, px, argb);
 	}
 }

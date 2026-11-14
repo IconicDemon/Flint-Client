@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  FLINT_DISCORD_INVITE,
+  discordUnlock,
   attemptProblem,
   ATTEMPT_MAX_MS,
   canRecheck,
@@ -260,4 +262,11 @@ test("a Discord outage is said once over the group: paused after the grace perio
 test("a listed reward's picture comes from the catalog, never as an owned item", () => {
   const item = rewardItem(reward(MEMBER, "discord_member", "conditional"));
   assert.deepEqual([item.listed, item.cosmeticId, item.kind, item.asset?.id], [true, MEMBER, "cape", `a-${MEMBER}`]);
+});
+
+test("a Flint Discord reward says how it unlocks (join or boost), never the Store", () => {
+  assert.deepEqual(discordUnlock({ requirement: { type: "discord_member", label: "x" } }), { how: "wardrobe.unlock.joinHow", button: "wardrobe.unlock.join" });
+  assert.deepEqual(discordUnlock({ requirement: { type: "discord_booster", label: "x" } }), { how: "wardrobe.unlock.boostHow", button: "wardrobe.unlock.boost" });
+  assert.equal(discordUnlock({ requirement: { type: "first_launch", label: "x" } }), null);
+  assert.equal(FLINT_DISCORD_INVITE, "https://discord.gg/flintclient");
 });

@@ -16,10 +16,12 @@ public abstract class SurvivalInventoryScreenMixin {
 	@WrapMethod(method = "renderEntity(IIIFFLnet/minecraft/entity/living/LivingEntity;)V")
 	private static void flint$picture(int x, int y, int size, float mouseX, float mouseY, LivingEntity entity, Operation<Void> original) {
 		OwnNametag.picture(true);
+		com.flintclient.legacy.cosmetics.Cosmetics189.dollBegin();
 		try {
 			original.call(x, y, size, mouseX, mouseY, entity);
 		} finally {
 			OwnNametag.picture(false);
+			com.flintclient.legacy.cosmetics.Cosmetics189.dollEnd();
 		}
 	}
 }

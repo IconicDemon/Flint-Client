@@ -303,4 +303,90 @@ class CapeAnimationTest {
 		a.add("strips", deep);
 		assertNull(parse(a));
 	}
+
+	/** A card preview (Store {@code animation.preview}) of {@code a} at {@code scale}, strips of made-up hashes at the bucket. */
+	static JsonObject preview(JsonObject a, int scale) {
+		int frames = a.get("frame_count").getAsInt();
+		int per = CapeAnimation.framesPerStrip(17 * scale);
+		JsonObject p = new JsonObject();
+		p.addProperty("scale", scale);
+		p.addProperty("width", 22 * scale);
+		p.addProperty("height", 17 * scale);
+		p.addProperty("frames_per_strip", per);
+		JsonArray strips = new JsonArray();
+		for (int first = 0, k = 0; first < frames; first += per, k++) {
+			JsonObject s = new JsonObject();
+			String hash = String.format("%064x", 1000 + k);
+			s.addProperty("path", "animated/" + hash + ".png");
+			s.addProperty("sha256", hash);
+			s.addProperty("bytes", 20_000);
+			s.addProperty("frames", Math.min(per, frames - first));
+			s.addProperty("url", AnimatedCapeFixture.BUCKET + "animated/" + hash + ".png");
+			strips.add(s);
+		}
+		p.add("strips", strips);
+		return p;
+	}
+
+	@Test
+	void theCardPreviewIsTheSameAnimationSmaller() {
+		JsonObject a = standard();
+		a.add("preview", preview(a, 8));
+		CapeAnimation full = parse(a);
+		assertNotNull(full);
+		CapeAnimation p = full.preview();
+		assertNotNull(p, "the preview is read");
+		assertEquals(8, p.scale());
+		assertEquals(full.frameCount(), p.frameCount());
+		assertEquals(full.loopMillis(), p.loopMillis());
+		for (int f = 0; f < full.frameCount(); f++) {
+			assertEquals(full.duration(f), p.duration(f), "the manifest's own durations");
+		}
+		assertEquals(1, p.strips().size(), "10 frames of 136 px: one strip");
+		assertNull(p.preview());
+		assertTrue(full.forOthers() == p, "other players play the preview");
+		assertNotEquals(full.key(), p.key());
+		CapeAnimation without = parse(standard());
+		assertNull(without.preview());
+		assertTrue(without.forOthers() == without, "no preview: the full strips");
+		assertNotEquals(without, full, "a preview makes another manifest");
+	}
+
+	@Test
+	void aPreviewThatDoesntCheckOutLeavesTheFullStrips() {
+		java.util.List<Consumer<JsonObject>> bad = java.util.List.of(
+			p -> p.addProperty("scale", 16),
+			p -> p.addProperty("scale", 32),
+			p -> p.addProperty("scale", 2),
+			p -> p.addProperty("width", 999),
+			p -> p.addProperty("frames_per_strip", 3),
+			p -> p.getAsJsonArray("strips").remove(0),
+			p -> p.getAsJsonArray("strips").get(0).getAsJsonObject().addProperty("url", "https://evil.example/x.png"),
+			p -> p.getAsJsonArray("strips").get(0).getAsJsonObject().addProperty("sha256", "nope"),
+			p -> p.getAsJsonArray("strips").get(0).getAsJsonObject().addProperty("bytes", CapeAnimation.MAX_STRIP_BYTES + 1));
+		for (int i = 0; i < bad.size(); i++) {
+			JsonObject a = standard();
+			JsonObject p = preview(a, 8);
+			bad.get(i).accept(p);
+			a.add("preview", p);
+			CapeAnimation parsed = parse(a);
+			assertNotNull(parsed, "the animation stays: case " + i);
+			assertNull(parsed.preview(), "case " + i);
+		}
+		JsonObject a = standard();
+		a.add("preview", new JsonPrimitive("small"));
+		assertNull(parse(a).preview());
+	}
+
+	@Test
+	void aStripsCdnAddressIsReadWhenItIsAllowed() {
+		JsonObject a = standard();
+		String hash = strip(a, 0).get("sha256").getAsString();
+		strip(a, 0).addProperty("cdn_url", "https://assets.flintclient.com/cosmetic-assets/animated/" + hash + ".png");
+		strip(a, 1).addProperty("cdn_url", "https://evil.example/x.png");
+		CapeAnimation parsed = parse(a);
+		assertEquals(URI.create("https://assets.flintclient.com/cosmetic-assets/animated/" + hash + ".png"), parsed.strips().get(0).cdnUrl());
+		assertNull(parsed.strips().get(1).cdnUrl(), "an address Flint doesn't download from is dropped, the strip kept");
+		assertNotNull(parsed.strips().get(1).url());
+	}
 }

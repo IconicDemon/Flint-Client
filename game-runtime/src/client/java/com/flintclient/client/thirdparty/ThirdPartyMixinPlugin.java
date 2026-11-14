@@ -27,6 +27,10 @@ public final class ThirdPartyMixinPlugin implements IMixinConfigPlugin {
 
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+		if (mixinClassName.endsWith(".HotLoadKeyMappingMixin")) {
+			// Hot loading (com.flintclient.client.hotload.HotLoader): a hot-loaded mod's keys go in.
+			return FabricLoader.getInstance().isModLoaded("fabric-key-mapping-api-v1");
+		}
 		if (mixinClassName.contains(".Walksy")) {
 			return FabricLoader.getInstance().isModLoaded("walksylib");
 		}

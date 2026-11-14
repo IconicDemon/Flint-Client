@@ -10,7 +10,8 @@ export type MyStatus = "online" | "busy" | "away" | "invisible";
 export type Me = { uuid: string; name: string; status: MyStatus; allowRequests: boolean };
 export type Friend = { uuid: string; name: string; status: FriendStatus; inGame: boolean; lastSeen: number | null; pinned: boolean; since: number | null; unread: number };
 export type FriendRequest = { id: number | string; uuid: string; name: string; at: number | null };
-export type ChatMessage = { id: number; from: string; to: string; body: string; sensitive: boolean; at: number | null; read: boolean };
+/** `clientId`: the sender's id for it, when the server says (the sender's "sending" copy is replaced by it). */
+export type ChatMessage = { id: number; from: string; to: string; body: string; sensitive: boolean; at: number | null; read: boolean; clientId?: string };
 export type Conversation = { messages: ChatMessage[]; loaded: boolean };
 export type SocialPhase = "signed_out" | "connecting" | "unavailable" | "ready" | "error";
 
@@ -31,6 +32,10 @@ export type SocialSnapshot = {
   focus: string | null;
   /** The list shown is the last run's, kept on this computer, until the first sync: no status in it is live. */
   stale: boolean;
+  /** The Flint Store's push socket is open: what friends do arrives at once. */
+  live: boolean;
+  /** Friends typing to the player now. */
+  typing: string[];
 };
 
 export type SocialEvent =
@@ -59,6 +64,8 @@ export const EMPTY_SNAPSHOT: SocialSnapshot = {
   syncedAt: null,
   focus: null,
   stale: false,
+  live: false,
+  typing: [],
 };
 
 export const MAX_MESSAGE = 1000;
@@ -136,6 +143,15 @@ export function mergeMessages(...lists: ChatMessage[][]): ChatMessage[] {
   const byId = new Map<number, ChatMessage>();
   for (const list of lists) for (const m of list) byId.set(m.id, m);
   return Array.from(byId.values()).sort((a, b) => a.id - b.id);
+}
+
+/**
+ * The sends to `to` still shown as on their way: one whose message arrived already (pushed back before its own answer came)
+ * shows once, as the real message; a failed one stays, to retry or discard.
+ */
+export function unsent(pending: PendingMessage[], messages: ChatMessage[], to: string): PendingMessage[] {
+  const arrived = new Set(messages.map((m) => m.clientId).filter((id): id is string => !!id));
+  return pending.filter((p) => p.to === to && (p.failed || !arrived.has(p.clientId)));
 }
 
 /** Messages close together from one person form a group; their time shows once, under the last of them. */

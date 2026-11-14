@@ -654,7 +654,8 @@ public final class Mc263BetterF3 {
 			custom("chunk_coords", false, "format.flintf3.coords", styled(pos.getX() >> 4, x), styled(pos.getY() >> 4, y),
 				styled(pos.getZ() >> 4, z));
 			Vec3 velocity = velocity(mc, camera);
-			int perSecond = Math.min(mc.getFps(), 20);
+			// A tick's movement (or a frame's, below the tick rate) times how many there are in a second.
+			float perSecond = Math.min(mc.getFps(), Mc263HudData.tickrate());
 			custom("velocity", false, "format.flintf3.coords", styled(String.format(Locale.ROOT, "%.3f", velocity.x * perSecond), x),
 				styled(String.format(Locale.ROOT, "%.3f", velocity.y * perSecond), y),
 				styled(String.format(Locale.ROOT, "%.3f", velocity.z * perSecond), z));
@@ -960,7 +961,8 @@ public final class Mc263BetterF3 {
 			Vec3 now = new Vec3(vehicle.getX(), vehicle.getY(), vehicle.getZ());
 			long since = mc.level.getGameTime() - movedAt;
 			if (!previous.equals(now)) {
-				velocity = previous.subtract(now);
+				// Where it is now less where it was: moving towards +X reads positive.
+				velocity = now.subtract(previous);
 				movedAt = mc.level.getGameTime();
 			} else if (since > 1L) {
 				velocity = Vec3.ZERO;

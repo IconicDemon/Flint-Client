@@ -1,6 +1,7 @@
 package com.flintclient.client.control.platform;
 
 import com.flintclient.client.FlintClient;
+import com.flintclient.client.control.feature.BlockCamouflage;
 import com.flintclient.client.control.feature.Mods;
 import com.flintclient.client.control.hud.render.HudLooks;
 import com.flintclient.client.control.model.ModuleState;
@@ -23,12 +24,14 @@ import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.repository.Pack;
 import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.Util;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
@@ -39,6 +42,7 @@ import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -49,8 +53,8 @@ import org.joml.Vector2f;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Minecraft 26.3's side of the second batch of HUD modules: the block and the mob under the crosshair (further than
- * reach, up to each module's range), jump reset timing (hits and jumps come from {@code LivingEntityMixin}), the item
+ * Minecraft 26.3's side of the second batch of HUD modules: the block under the crosshair (Minecraft's own target, within your
+ * reach), the mob under it (up to Damage Indicator's range, never through walls), jump reset timing (hits and jumps come from {@code LivingEntityMixin}), the item
  * just taken in hand, your turning for Mousestrokes, your own model, and your resource packs with their icons. The HUD
  * views read it on the render thread; what changes rarely (a block's name, an item's lines, the pack list) is rebuilt
  * only when it changes. Fault-isolated.
@@ -77,38 +81,48 @@ public final class Mc263HudExtras {
 		/** How far it's mined, 0 to 100, or -1 when it isn't being mined. */
 		public int percent = -1;
 		private @Nullable BlockState state;
+		/** What the name and icon were made for besides the block: creative or spectator, and powder snow known for what it is. */
+		private boolean seesThrough;
+		private boolean knowsPowderSnow;
 	}
 
 	private static final BlockLook BLOCK = new BlockLook();
+	/** When you were last in powder snow ({@code Util.getMillis}), or -1. */
+	private static long powderSnowAt = -1;
 
-	/** The block you look at within {@code range} blocks, or null (no block, no world). */
-	public static @Nullable BlockLook block(int range) {
+	/**
+	 * The block Minecraft outlines, or null (none, no world). That is Minecraft's own target: the first block in your line of
+	 * sight within your block interaction range (survival's or creative's, and whatever reach a server or an effect gives the
+	 * attribute), so nothing past your reach and nothing behind another block. A block made to pass for another is named as the
+	 * one it passes for ({@link BlockCamouflage}).
+	 */
+	public static @Nullable BlockLook block() {
 		if (!GUARD.on()) {
 			return null;
 		}
 		try {
 			Minecraft mc = mc();
-			Entity camera = mc.getCameraEntity();
-			if (mc.level == null || camera == null) {
-				return null;
-			}
-			HitResult hit = mc.hitResult;
-			double reach = range * (double) range;
-			if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
-				// Further than reach: pick again as far as the range (only blocks; looking at a mob shows nothing).
-				hit = hit != null && hit.getType() == HitResult.Type.ENTITY ? null : camera.pick(range, 1.0F, false);
-			}
-			if (!(hit instanceof BlockHitResult blockHit) || hit.getType() != HitResult.Type.BLOCK
-				|| camera.getEyePosition().distanceToSqr(hit.getLocation()) > reach) {
+			LocalPlayer player = mc.player;
+			if (mc.level == null || player == null || !(mc.hitResult instanceof BlockHitResult blockHit)
+				|| blockHit.getType() != HitResult.Type.BLOCK) {
 				return null;
 			}
 			BlockPos pos = blockHit.getBlockPos();
-			BlockState state = mc.level.getBlockState(pos);
-			if (state.isAir()) {
+			BlockState real = mc.level.getBlockState(pos);
+			if (real.isAir()) {
 				return null;
 			}
-			if (state != BLOCK.state) {
-				BLOCK.state = state;
+			long now = Util.getMillis();
+			if (player.isInPowderSnow) {
+				powderSnowAt = now;
+			}
+			boolean seesThrough = player.isCreative() || player.isSpectator();
+			boolean knowsPowderSnow = BlockCamouflage.knowsPowderSnow(powderSnowAt < 0 ? -1 : now - powderSnowAt);
+			if (real != BLOCK.state || seesThrough != BLOCK.seesThrough || knowsPowderSnow != BLOCK.knowsPowderSnow) {
+				BLOCK.state = real;
+				BLOCK.seesThrough = seesThrough;
+				BLOCK.knowsPowderSnow = knowsPowderSnow;
+				BlockState state = disguised(real, seesThrough, knowsPowderSnow);
 				BLOCK.name = state.getBlock().getName().getString();
 				ItemStack icon = state.getCloneItemStack(mc.level, pos, false);
 				BLOCK.icon = icon == null ? ItemStack.EMPTY : icon;
@@ -123,6 +137,16 @@ public final class Mc263HudExtras {
 			GUARD.fail(e);
 			return null;
 		}
+	}
+
+	/** {@code real} as Block Indicator names it: the block it passes for in its own namespace, or itself ({@link BlockCamouflage}). */
+	private static BlockState disguised(BlockState real, boolean seesThrough, boolean knowsPowderSnow) {
+		Identifier id = BuiltInRegistries.BLOCK.getKey(real.getBlock());
+		String path = BlockCamouflage.disguise(id.getPath(), seesThrough, knowsPowderSnow);
+		if (path.equals(id.getPath())) {
+			return real;
+		}
+		return BuiltInRegistries.BLOCK.getOptional(id.withPath(path)).map(Block::defaultBlockState).orElse(real);
 	}
 
 	// ---------- the mob under the crosshair ----------
@@ -141,7 +165,10 @@ public final class Mc263HudExtras {
 
 	private static final TargetLook TARGET = new TargetLook();
 
-	/** The living thing you look at within {@code range} blocks (not through walls), or null. */
+	/**
+	 * The living thing you look at within {@code range} blocks (not through walls), or null. Never another player where the
+	 * server's rules don't allow other players' health (Hypixel: {@code ServerRules.playerHealthShown}).
+	 */
 	public static @Nullable TargetLook target(int range) {
 		if (!GUARD.on()) {
 			return null;
@@ -153,16 +180,19 @@ public final class Mc263HudExtras {
 			if (mc.level == null || camera == null || player == null) {
 				return null;
 			}
+			boolean players = com.flintclient.client.control.feature.ServerRules.playerHealthShown();
 			LivingEntity found = null;
 			if (mc.hitResult instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity living) {
-				found = living;
+				// Minecraft lets the crosshair rest on an invisible thing; its name and health would give it away.
+				found = !living.isInvisibleTo(player) && (players || !(living instanceof net.minecraft.world.entity.player.Player)) ? living : null;
 			} else {
 				Vec3 eye = camera.getEyePosition(1.0F);
 				Vec3 look = camera.getViewVector(1.0F);
 				Vec3 end = eye.add(look.scale(range));
 				AABB box = camera.getBoundingBox().expandTowards(look.scale(range)).inflate(1.0);
 				EntityHitResult hit = ProjectileUtil.getEntityHitResult(camera, eye, end, box,
-					e -> e instanceof LivingEntity && e.isPickable() && !e.isSpectator() && !e.isInvisibleTo(player), range * (double) range);
+					e -> e instanceof LivingEntity && e.isPickable() && !e.isSpectator() && !e.isInvisibleTo(player)
+						&& (players || !(e instanceof net.minecraft.world.entity.player.Player)), range * (double) range);
 				if (hit != null) {
 					HitResult wall = camera.pick(range, 1.0F, false);
 					if (wall.getType() != HitResult.Type.BLOCK || eye.distanceToSqr(wall.getLocation()) > eye.distanceToSqr(hit.getLocation())) {

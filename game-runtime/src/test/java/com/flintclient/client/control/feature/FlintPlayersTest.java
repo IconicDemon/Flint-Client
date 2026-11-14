@@ -19,7 +19,25 @@ class FlintPlayersTest {
 	@AfterEach
 	void reset() {
 		FlintPlayers.setOwn(FlintPlayers.Tag.DEFAULT);
+		FlintPlayers.forgetChoice();
 		FlintPlayers.clear();
+	}
+
+	@Test
+	void youOwnTheFlintMarkAndTheOneFlintGivesAndWearTheOneYouPick() {
+		assertEquals(java.util.List.of(FlintPlayers.Tag.DEFAULT), FlintPlayers.owned(), "everyone has the Flint mark");
+		FlintPlayers.wear(FlintPlayers.Tag.OWNER);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "a mark that isn't yours can't be worn");
+		FlintPlayers.setOwn(FlintPlayers.Tag.STAFF);
+		assertEquals(java.util.List.of(FlintPlayers.Tag.STAFF, FlintPlayers.Tag.DEFAULT), FlintPlayers.owned());
+		assertEquals(FlintPlayers.Tag.STAFF, FlintPlayers.worn(), "the given mark is worn until you pick another");
+		FlintPlayers.wear(FlintPlayers.Tag.DEFAULT);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn());
+		FlintPlayers.setOwn(FlintPlayers.Tag.DEVELOPER);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "the choice of the Flint mark stays with a new given mark");
+		FlintPlayers.wear(FlintPlayers.Tag.DEVELOPER);
+		FlintPlayers.setOwn(FlintPlayers.Tag.DEFAULT);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "a mark Flint took away is no longer worn");
 	}
 
 	@Test
@@ -39,6 +57,50 @@ class FlintPlayersTest {
 		assertEquals(FlintPlayers.Tag.STAFF, FlintPlayers.tag(someone));
 		FlintPlayers.clear();
 		assertNull(FlintPlayers.tag(someone));
+	}
+
+	@Test
+	void theAppsListIsWhatYouOwnAndTheStoresChoiceIsWorn() {
+		FlintPlayers.setOwn(FlintPlayers.Tag.STAFF);
+		FlintPlayers.fromLauncher(java.util.List.of("default", "staff", "vip", "a_newer_mark"), "vip");
+		assertEquals(java.util.List.of(FlintPlayers.Tag.DEFAULT, FlintPlayers.Tag.STAFF, FlintPlayers.Tag.VIP), FlintPlayers.owned(),
+			"the app's marks in its order; a name this game doesn't know is left out");
+		assertEquals(FlintPlayers.Tag.VIP, FlintPlayers.worn(), "the one the Store says others see");
+		FlintPlayers.setOwn(FlintPlayers.Tag.DEFAULT);
+		assertEquals(FlintPlayers.Tag.VIP, FlintPlayers.worn(), "presence doesn't change your own mark while the app's list is there");
+		FlintPlayers.wear(FlintPlayers.Tag.OWNER);
+		assertEquals(FlintPlayers.Tag.VIP, FlintPlayers.worn(), "a mark that isn't yours can't be worn");
+		FlintPlayers.wear(FlintPlayers.Tag.DEFAULT);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "a pick shows at once, before the Store answers");
+		FlintPlayers.fromLauncher(java.util.List.of("default", "staff", "vip"), "default");
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "the Store's answer");
+		assertNull(FlintPlayers.pick(), "the answer replaces the pick on its way");
+	}
+
+	@Test
+	void aRefusedPickRollsBack() {
+		FlintPlayers.fromLauncher(java.util.List.of("default", "staff"), "staff");
+		FlintPlayers.Tag before = FlintPlayers.pick();
+		FlintPlayers.wear(FlintPlayers.Tag.DEFAULT);
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn());
+		FlintPlayers.restorePick(before);
+		assertEquals(FlintPlayers.Tag.STAFF, FlintPlayers.worn(), "back to what the Store says");
+	}
+
+	@Test
+	void theFlintMarkIsAlwaysThereAndNoListMeansTodaysMarks() {
+		FlintPlayers.fromLauncher(java.util.List.of("staff"), "nobody");
+		assertEquals(java.util.List.of(FlintPlayers.Tag.DEFAULT, FlintPlayers.Tag.STAFF), FlintPlayers.owned());
+		assertEquals(FlintPlayers.Tag.DEFAULT, FlintPlayers.worn(), "an unknown choice shows the Flint mark");
+		assertEquals(true, FlintPlayers.fromLauncher());
+		FlintPlayers.fromLauncher(null, null);
+		assertEquals(false, FlintPlayers.fromLauncher());
+		FlintPlayers.setOwn(FlintPlayers.Tag.DEVELOPER);
+		assertEquals(java.util.List.of(FlintPlayers.Tag.DEVELOPER, FlintPlayers.Tag.DEFAULT), FlintPlayers.owned(), "as before: worked out here");
+		assertEquals(FlintPlayers.Tag.DEVELOPER, FlintPlayers.worn());
+		FlintPlayers.fromLauncher(java.util.List.of("default", "owner"), "owner");
+		FlintPlayers.forgetChoice();
+		assertEquals(false, FlintPlayers.fromLauncher(), "another account: the app's list goes");
 	}
 
 	@Test

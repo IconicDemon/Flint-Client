@@ -11,9 +11,10 @@
 // - --mc VERSION (default 26.3): the Minecraft the launcher has installed (versions\VERSION and fabric-loader-0.19.5-VERSION),
 //   with that line's jars: game-runtime/build/mc-<line>/libs/flint-game-runtime-<app>+<line>.jar and
 //   qa/build/mc-<line>/libs/flint-qa-1.0.0+<line>.jar (./gradlew build -Pminecraft_version=VERSION, and -p qa likewise).
-//   Every 26.1 release uses the 26.1 line. A version whose client jar the launcher hasn't downloaded runs from
-//   %USERPROFILE%\FlintQA\mc-cache instead, filled on first use with files checked against Mojang's and Fabric's sha1s
-//   (qa/mc_cache.mjs); the launcher's own folder is only ever read.
+//   Every 26.1 release uses the 26.1 line; 1.21.x and 1.19.x releases each have their own (1.19.2, 1.19: ./gradlew -p legacy
+//   build). The Java is the version's own (26.x: Java 25, 1.21.x: 21, 1.19.x: 17). A version whose client jar the launcher
+//   hasn't downloaded runs from %USERPROFILE%\FlintQA\mc-cache instead, filled on first use with files checked against
+//   Mojang's and Fabric's sha1s (qa/mc_cache.mjs); the launcher's own folder is only ever read.
 // - Offline QA identity ("FlintQA", access token 0): never a real account.
 // - Only one game runs at a time on this machine: as run_qa_189.mjs, the runner creates %USERPROFILE%\FlintQA\game.lock
 //   exclusively before launching and deletes it when the game exits (a lock under 15 minutes old: wait; older: stale).
@@ -136,7 +137,8 @@ function dataVersion(jar) {
 }
 
 // The Java runtime the version asks for (its javaVersion component: java-runtime-epsilon, Java 25, for 26.x;
-// java-runtime-delta, Java 21, for 1.21.x): the launcher's (read only), else the QA cache's (see mc_cache.mjs).
+// java-runtime-delta, Java 21, for 1.21.x; java-runtime-gamma, Java 17, for 1.19.x): the launcher's (read only), else the QA
+// cache's (see mc_cache.mjs).
 function javaBinary(vanilla) {
 	// FLINTQA_JAVA_BIN: one exact java.exe instead (comparing Java builds, e.g. Mojang's 25.0.1 against a newer 25).
 	if (process.env.FLINTQA_JAVA_BIN) return process.env.FLINTQA_JAVA_BIN;
@@ -146,11 +148,17 @@ function javaBinary(vanilla) {
 	return cachedJavaRuntime(component, { launcherRuntimes: path.join(APP_DATA, "runtimes"), cache: CACHE_ROOT }, (message) => console.log("[qa] " + message));
 }
 
+// The Java version the version asks for (26.x: 25, 1.21.x: 21, 1.19.x: 17).
+const javaMajor = (vanilla) => vanilla.javaVersion?.majorVersion ?? 25;
+
 function prepare(game, args, files) {
 	const fresh = !fs.existsSync(game);
 	if (!fresh && !args.reuse) throw new Error(`game folder exists: ${game} (use --reuse)`);
 	const mods = path.join(game, "mods");
 	fs.mkdirSync(mods, { recursive: true });
+	// FLINTQA_KEEP_MODS=1: the mods folder as it is (Instant Swap's standby game, swap-link.mjs: the first game has its jars
+	// loaded, and the Library added mods to it).
+	if (process.env.FLINTQA_KEEP_MODS === "1") return;
 	for (const f of fs.readdirSync(mods)) fs.rmSync(path.join(mods, f));
 	const jars = args.noRuntime ? [[QA_JAR, "flint-qa.jar"]] : [[RUNTIME_JAR, "flint-runtime.jar"], [QA_JAR, "flint-qa.jar"]];
 	if (args.mods) {
@@ -172,7 +180,11 @@ function argv(game, out, script, args, files) {
 	const { vanilla, fabric } = files;
 	const natives = path.join(game, "natives");
 	for (const sub of ["java", "jna", "lwjgl", "netty"]) fs.mkdirSync(path.join(natives, sub), { recursive: true });
-	const jvm = ["-Xmx3G", "-XX:StackShadowPages=32", "--enable-native-access=ALL-UNNAMED", "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED",
+	// 26.x's own JVM settings (its version file asks for them), kept for the Java 21 lines too; 1.19.x's version file has none
+	// of them and runs on Java 17, as the official launcher starts it.
+	const newerJava = javaMajor(vanilla) >= 21
+		? ["-XX:StackShadowPages=32", "--enable-native-access=ALL-UNNAMED", "--add-exports", "java.base/jdk.internal.misc=ALL-UNNAMED"] : [];
+	const jvm = ["-Xmx3G", ...newerJava,
 		`-Djava.library.path=${path.join(natives, "java")}`, `-Djna.tmpdir=${path.join(natives, "jna")}`,
 		`-Dorg.lwjgl.system.SharedLibraryExtractPath=${path.join(natives, "lwjgl")}`, `-Dio.netty.native.workdir=${path.join(natives, "netty")}`,
 		"-Dminecraft.launcher.brand=flint-qa", ...fabric.arguments.jvm,
@@ -250,13 +262,17 @@ async function main() {
 	let [java, javaArgs] = argv(game, out, script, args, files);
 	// FLINTQA_AOT=DIR: Java 25's start-up cache as the launcher uses it (app/src-tauri/src/jvmcache.rs), one per Java and
 	// Minecraft: the client jar becomes an unsigned copy; without a cache this launch records, and the cache is built after it
-	// exits; with one, the launch starts from it.
-	const aot = process.env.FLINTQA_AOT ? aotPlan(process.env.FLINTQA_AOT, MC, javaArgs, files.clientJar) : null;
+	// exits; with one, the launch starts from it. A version on an older Java (1.21.x, 1.19.x) has none, unless another Java is
+	// asked for.
+	const aotJava = javaMajor(files.vanilla) >= 25 || Boolean(process.env.FLINTQA_JAVA_BIN || process.env.FLINTQA_JAVA_COMPONENT);
+	if (process.env.FLINTQA_AOT && !aotJava) console.log(`[qa] no start-up cache: Minecraft ${MC} runs on Java ${javaMajor(files.vanilla)}`);
+	const aot = process.env.FLINTQA_AOT && aotJava ? aotPlan(process.env.FLINTQA_AOT, MC, javaArgs, files.clientJar) : null;
 	if (aot) {
 		javaArgs = aot.args;
 		console.log("[qa] start-up cache: " + aot.note);
 	}
-	await acquireLock(run);
+	// FLINTQA_NO_LOCK=1: a second game beside the first (Instant Swap's standby game, started by swap-link.mjs).
+	if (process.env.FLINTQA_NO_LOCK !== "1") await acquireLock(run);
 	for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.on(signal, () => (releaseLock(), process.exit(130)));
 	process.on("exit", releaseLock);
 	const logPath = path.join(out, "game.log");
@@ -265,6 +281,10 @@ async function main() {
 	const proc = spawn(java, javaArgs, { cwd: game, stdio: ["ignore", log, log], windowsHide: false });
 	let exited = null;
 	proc.on("exit", (code) => (exited = code));
+	// FLINTQA_PRIORITY=idle: the lowest process priority, as the launcher starts a standby game (swap.rs STANDBY_FLAGS).
+	if (process.env.FLINTQA_PRIORITY === "idle") {
+		spawnSync("powershell", ["-NoProfile", "-Command", `(Get-Process -Id ${proc.pid}).PriorityClass = "Idle"`], { windowsHide: true });
+	}
 	if (!args.front) {
 		spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", BACKGROUND, String(proc.pid)], { stdio: "ignore", windowsHide: true });
 	}

@@ -1,8 +1,10 @@
 package com.flintclient.client.module.social;
 
+import com.flintclient.client.module.account.LauncherLink;
 import com.flintclient.client.module.account.LauncherLink.LinkException;
 import com.flintclient.client.module.social.SocialLink.Friend;
 import com.flintclient.client.module.social.SocialLink.Friends;
+import com.flintclient.client.module.social.SocialLink.Held;
 import com.flintclient.client.module.social.SocialLink.Request;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,12 +23,19 @@ import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Friends as the game shows them: the Flint app's Friends state, asked for over the game link ({@link SocialLink}) every
- * {@link #OPEN_POLL_MILLIS} while the Friends screen is open (with the chat it shows) and every {@link #IDLE_POLL_MILLIS}
- * while something only needs the count (the main menu's Friends badge, the in-game notices), never when nothing needs it.
- * Every call runs on one worker thread of its own; answers are taken on the render thread in {@link #tick}, so the screens
- * read plain fields. What Flint says is kept as the last good answer; why there is none (no Flint, Flint closed, another
- * account, signed out…) is {@link #reach}.
+ * Friends as the game shows them: the Flint app's Friends state, asked for over the game link ({@link SocialLink}) while the
+ * Friends screen is open (with the chat it shows) or something needs the count (the main menu's Friends badge, the in-game
+ * notices), never when nothing needs it.
+ *
+ * <p><b>At once</b>: Flint 1.0.4 and later hold each poll until their state changes (a message or request pushed to Flint, a
+ * sync) and answer it then, so a message reaches the game within milliseconds of reaching Flint; the next poll goes out as
+ * soon as one comes back. A poll held for the old chat or account is cut short when the chat or the account changes. Older
+ * Flints answer at once (no revision), and are polled every {@link #OPEN_POLL_MILLIS} with the screen open and every
+ * {@link #IDLE_POLL_MILLIS} otherwise, as before.
+ *
+ * <p>Polls run on a thread of their own and actions on another, so a held poll never holds an action up; answers are taken
+ * on the render thread in {@link #tick}, so the screens read plain fields. What Flint says is kept as the last good answer;
+ * why there is none (no Flint, Flint closed, another account, signed out…) is {@link #reach}.
  *
  * <p>Successive answers are compared ({@link #notice}): a new friend request, a request accepted, a friend coming online and
  * new messages become notices for the game's toasts, never on the first answer (what was already waiting isn't news).
@@ -35,6 +44,10 @@ import org.jspecify.annotations.Nullable;
 public final class FriendsClient {
 	public static final long OPEN_POLL_MILLIS = 4000;
 	public static final long IDLE_POLL_MILLIS = 15_000;
+	/** How long Flint may hold a poll for a change. */
+	public static final int HOLD_MILLIS = 20_000;
+	/** A held poll that came back with nothing new goes out again no sooner than this after it left. */
+	static final long HELD_GAP_MILLIS = 1000;
 	/** Asking about Friends is wanted for this long after the last {@link #want}. */
 	private static final long INTEREST_MILLIS = 2500;
 	private static final int MAX_NOTICES = 8;
@@ -69,6 +82,15 @@ public final class FriendsClient {
 	/** The question each poll asks (the game link, or a test's stand-in). */
 	public interface Source {
 		Friends friends(String playing, @Nullable String chat) throws LinkException;
+
+		/**
+		 * The same, held until Flint's state is no longer revision {@code since} (or {@code waitMillis} pass); {@code since} -1:
+		 * at once. {@code call} cuts it short. A source that can't hold answers at once with revision -1.
+		 */
+		default Held friends(String playing, @Nullable String chat, long since, int waitMillis, LauncherLink.@Nullable Call call)
+			throws LinkException {
+			return new Held(friends(playing, chat), -1);
+		}
 	}
 
 	/** Work for the worker (an action): its answer, or a {@link LinkException} with Flint's code. */
@@ -80,6 +102,8 @@ public final class FriendsClient {
 
 	private final @Nullable Source source;
 	private final Executor worker;
+	/** Where polls run (a held poll must not hold the actions on {@link #worker} up). */
+	private final Executor polls;
 	private final LongSupplier clock;
 	private final Supplier<@Nullable String> playing;
 	private final ConcurrentLinkedQueue<Runnable> answers = new ConcurrentLinkedQueue<>();
@@ -99,10 +123,22 @@ public final class FriendsClient {
 	/** The answer notices compare with (the last ready one for this account). */
 	private @Nullable Friends compared;
 	private int pollGeneration;
+	/** Flint's revision of the last answer; -1: none yet, or a Flint that can't hold a poll. */
+	private long flintRevision = -1;
+	/** The next poll is answered at once (the chat or the screen changed): it shows what is wanted now. */
+	private boolean fresh;
+	/** The poll Flint is holding, to cut short when it asks for the wrong chat or account. */
+	private LauncherLink.@Nullable Call held;
 
 	public FriendsClient(@Nullable Source source, Executor worker, LongSupplier clock, Supplier<@Nullable String> playing) {
+		this(source, worker, worker, clock, playing);
+	}
+
+	/** {@code polls}: where polls run; {@code worker}: where actions run. */
+	public FriendsClient(@Nullable Source source, Executor worker, Executor polls, LongSupplier clock, Supplier<@Nullable String> playing) {
 		this.source = source;
 		this.worker = worker;
+		this.polls = polls;
 		this.clock = clock;
 		this.playing = playing;
 		this.reach = source == null ? Reach.NO_APP : Reach.LOADING;
@@ -116,18 +152,23 @@ public final class FriendsClient {
 				client = shared;
 				if (client == null) {
 					SocialLink link = SocialLink.get();
-					ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), task -> {
-						Thread thread = new Thread(task, "Flint friends");
-						thread.setDaemon(true);
-						return thread;
-					});
-					worker.allowCoreThreadTimeOut(true);
-					client = new FriendsClient(link == null ? null : link::friends, worker, System::currentTimeMillis, playing);
+					client = new FriendsClient(link, thread("Flint friends"), thread("Flint friends polls"), System::currentTimeMillis, playing);
 					shared = client;
 				}
 			}
 		}
 		return client;
+	}
+
+	/** One daemon thread, gone after 30 s with nothing to do. */
+	private static Executor thread(String name) {
+		ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), task -> {
+			Thread thread = new Thread(task, name);
+			thread.setDaemon(true);
+			return thread;
+		});
+		executor.allowCoreThreadTimeOut(true);
+		return executor;
 	}
 
 	/** The shared client if one was made (nothing is started by asking). */
@@ -178,7 +219,7 @@ public final class FriendsClient {
 
 	// ---------- what is wanted ----------
 
-	/** The Friends screen is open, showing {@code chatWith}'s chat (or none): polled every 4 s, the chat with it. */
+	/** The Friends screen is open, showing {@code chatWith}'s chat (or none): asked for with the chat. */
 	public void watch(@Nullable String chatWith) {
 		long now = clock.getAsLong();
 		boolean opened = openUntil < now;
@@ -186,6 +227,20 @@ public final class FriendsClient {
 		if (opened || !java.util.Objects.equals(chat, chatWith)) {
 			chat = chatWith;
 			nextPoll = Math.min(nextPoll, now);
+			// A poll Flint holds is for what was shown before: let it go, and have this one answered at once.
+			letGo();
+			fresh = true;
+		}
+	}
+
+	/** Cuts short the poll Flint is holding (its answer, if any, is dropped). */
+	private void letGo() {
+		LauncherLink.Call call = held;
+		if (call != null) {
+			call.cancel();
+			held = null;
+			polling = false;
+			pollGeneration++;
 		}
 	}
 
@@ -217,15 +272,12 @@ public final class FriendsClient {
 			answer.run();
 		}
 		Source asked = source;
-		if (asked == null || polling) {
+		if (asked == null) {
 			return;
 		}
 		long now = clock.getAsLong();
 		boolean open = openUntil >= now;
 		if (!open && idleUntil < now) {
-			return;
-		}
-		if (now < nextPoll) {
 			return;
 		}
 		String who = playing();
@@ -234,42 +286,70 @@ public final class FriendsClient {
 		}
 		if (!who.equals(account)) {
 			// The game switched accounts: nothing of the last one is shown, and nothing about it is news.
+			letGo();
 			account = who;
 			friends = null;
 			compared = null;
 			reach = Reach.LOADING;
+			flintRevision = -1;
+			nextPoll = Math.min(nextPoll, now);
 			revision++;
+		}
+		if (polling || now < nextPoll) {
+			return;
 		}
 		polling = true;
 		int generation = ++pollGeneration;
 		String askChat = open ? chat : null;
+		// Held until Flint's state changes, once Flint said it can hold (it gave a revision); at once otherwise.
+		long since = fresh ? -1 : flintRevision;
+		fresh = false;
+		LauncherLink.Call call = since >= 0 ? new LauncherLink.Call() : null;
+		held = call;
 		nextPoll = now + (open ? OPEN_POLL_MILLIS : IDLE_POLL_MILLIS);
 		try {
-			worker.execute(() -> {
-				Friends answer = null;
+			polls.execute(() -> {
+				Held answer = null;
 				LinkException failure = null;
 				try {
-					answer = asked.friends(who, askChat);
+					answer = asked.friends(who, askChat, since, call == null ? 0 : HOLD_MILLIS, call);
 				} catch (LinkException e) {
 					failure = e;
 				} catch (RuntimeException e) {
 					failure = new LinkException("invalid", false);
 				}
-				Friends got = answer;
+				Held got = answer;
 				LinkException failed = failure;
 				answers.add(() -> {
+					if (generation != pollGeneration) {
+						// Let go: a newer poll is on its way.
+						return;
+					}
 					polling = false;
-					if (generation == pollGeneration && who.equals(account)) {
-						if (got != null) {
-							took(got);
-						} else if (failed != null) {
-							failed(failed);
+					held = null;
+					if (!who.equals(account)) {
+						return;
+					}
+					if (got != null) {
+						boolean unchanged = since >= 0 && got.revision() == since;
+						flintRevision = got.revision();
+						if (!unchanged) {
+							took(got.friends());
 						}
+						if (got.revision() >= 0) {
+							// Flint holds polls: the next one goes out now (not straight away again if this one waited for nothing).
+							long at = clock.getAsLong();
+							nextPoll = unchanged ? Math.max(at, now + HELD_GAP_MILLIS) : at;
+						}
+					} else if (failed != null) {
+						flintRevision = -1;
+						failed(failed);
 					}
 				});
 			});
 		} catch (RuntimeException e) {
 			polling = false;
+			held = null;
 		}
 	}
 

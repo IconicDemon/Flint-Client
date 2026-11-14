@@ -7,14 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.module.account.LauncherLink;
 import com.flintclient.client.module.account.LauncherLink.LinkException;
 import com.flintclient.client.module.social.FriendsClient.Notice;
 import com.flintclient.client.module.social.FriendsClient.Reach;
 import com.flintclient.client.module.social.SocialLink.Friends;
+import com.flintclient.client.module.social.SocialLink.Held;
 import com.google.gson.JsonParser;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The game's Friends state: when it asks the Flint app, what it makes of each answer, and what is news. */
@@ -180,6 +183,110 @@ class FriendsClientTest {
 		List<String> words = FriendsClient.changes(before, after).stream().map(Notice::text).toList();
 		assertEquals(List.of("Kestrel wants to be friends", "Alex accepted your friend request"), words);
 		assertEquals(List.of(), FriendsClient.changes(null, after));
+	}
+
+	/** A Flint that holds polls (1.0.4): each call recorded as "since chat", answered from {@link #held}. */
+	private final List<String> holds = new ArrayList<>();
+	private final List<LauncherLink.Call> calls = new ArrayList<>();
+	private long heldRevision = 5;
+
+	private FriendsClient.Source holding() {
+		return new FriendsClient.Source() {
+			@Override
+			public Friends friends(String who, @Nullable String chat) {
+				throw new AssertionError("a Flint that holds polls is always asked with the revision");
+			}
+
+			@Override
+			public Held friends(String who, @Nullable String chat, long since, int waitMillis, LauncherLink.@Nullable Call call) throws LinkException {
+				holds.add(since + (chat == null ? "" : " " + chat) + (since >= 0 ? " hold " + waitMillis : ""));
+				calls.add(call);
+				if (call != null && call.cancelled()) {
+					throw new LinkException(LauncherLink.Call.CANCELLED, false);
+				}
+				if (next instanceof LinkException e) {
+					throw e;
+				}
+				return new Held((Friends) next, heldRevision);
+			}
+		};
+	}
+
+	@Test
+	void aFlintThatHoldsPollsIsAskedAgainAsSoonAsItAnswers() {
+		FriendsClient client = new FriendsClient(holding(), Runnable::run, () -> now, () -> playing);
+		next = friends("ready", alex("online", 0));
+		client.want();
+		client.tick();
+		assertEquals(List.of("-1"), holds, "the first at once");
+		client.tick();
+		assertEquals(List.of("-1", "5 hold " + FriendsClient.HOLD_MILLIS), holds, "then held with Flint's revision, straight away");
+		client.tick();
+		assertEquals(2, holds.size(), "it came back with nothing new: not again for a second");
+		now += FriendsClient.HELD_GAP_MILLIS;
+		client.want();
+		client.tick();
+		assertEquals(3, holds.size(), "a second, not 15");
+		// Flint's state changes (a message pushed to it): the held poll answers, the game hears of it, and asks again at once.
+		heldRevision = 6;
+		next = friends("ready", alex("online", 1));
+		client.tick();
+		now += FriendsClient.HELD_GAP_MILLIS;
+		client.want();
+		client.tick();
+		assertEquals(0, client.badge(), "on its way");
+		client.tick();
+		assertEquals(1, client.badge());
+		assertEquals(List.of(Notice.Kind.MESSAGE), client.takeNotices().stream().map(Notice::kind).toList());
+		assertEquals("6 hold " + FriendsClient.HOLD_MILLIS, holds.get(holds.size() - 1), "asked again at once, with the new revision");
+		// Flint closed: the usual wait before asking again, and at once (no revision) when it does.
+		next = new LinkException("Flint isn't reachable.", true);
+		client.tick();
+		now += FriendsClient.HELD_GAP_MILLIS;
+		client.want();
+		client.tick();
+		client.tick();
+		assertEquals(Reach.UNREACHABLE, client.reach());
+		int before = holds.size();
+		now += FriendsClient.IDLE_POLL_MILLIS;
+		client.want();
+		client.tick();
+		assertEquals(before + 1, holds.size());
+		assertEquals("-1", holds.get(holds.size() - 1));
+	}
+
+	@Test
+	void aHeldPollIsLetGoWhenTheChatOrTheAccountChanges() {
+		List<Runnable> queued = new ArrayList<>();
+		FriendsClient client = new FriendsClient(holding(), Runnable::run, queued::add, () -> now, () -> playing);
+		next = friends("ready", alex("online", 0));
+		client.want();
+		client.tick();
+		queued.remove(0).run();
+		client.tick();
+		assertEquals(1, queued.size(), "a held poll on its way");
+		// The Friends screen opens on Alex's chat: the held poll (without the chat) is let go, and a new one is answered at once.
+		client.watch(ALEX);
+		client.tick();
+		assertEquals(2, queued.size());
+		queued.remove(0).run();
+		assertTrue(calls.get(calls.size() - 1).cancelled(), "the old one was cut short");
+		queued.remove(0).run();
+		assertEquals("-1 " + ALEX, holds.get(holds.size() - 1));
+		client.tick();
+		assertEquals(Reach.READY, client.reach(), "the cut-short answer was dropped, the new one taken");
+		// Held again with the chat; then the game switches accounts: let go, and asked for the new one at once.
+		assertEquals(1, queued.size());
+		playing = ALEX;
+		client.watch(ALEX);
+		client.tick();
+		assertNull(client.friends());
+		assertEquals(Reach.LOADING, client.reach());
+		assertEquals(2, queued.size());
+		queued.remove(0).run();
+		queued.remove(0).run();
+		assertEquals("-1 " + ALEX, holds.get(holds.size() - 1));
+		assertTrue(calls.get(calls.size() - 2).cancelled());
 	}
 
 	@Test

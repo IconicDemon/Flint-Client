@@ -443,15 +443,53 @@ async fn switching_accounts_starts_over_and_signing_out_of_flint_ends_the_sessio
 async fn status_and_requests_settings_go_to_the_server() {
     let rig = rig().await;
     rig.friends().await;
-    let me = rig.steve.settings(&rig.steve_mc, Some("away"), Some(false)).await.unwrap();
+    let me = rig.steve.settings(&rig.steve_mc, Some("away"), Some(false), None, None).await.unwrap();
     assert_eq!((me.status.as_str(), me.allow_requests), ("away", false));
     assert_eq!(rig.steve.snapshot().me.unwrap().status, "away");
-    assert_eq!(rig.steve.settings(&rig.steve_mc, Some("sleeping"), None).await, Err(Fail::Refused("invalid_status".into())));
+    assert_eq!(rig.steve.settings(&rig.steve_mc, Some("sleeping"), None, None, None).await, Err(Fail::Refused("invalid_status".into())));
     rig.alex().await;
     assert_eq!(rig.alex.snapshot().friends[0].status, "away");
-    rig.steve.settings(&rig.steve_mc, Some("invisible"), None).await.unwrap();
+    rig.steve.settings(&rig.steve_mc, Some("invisible"), None, None, None).await.unwrap();
     rig.alex().await;
     assert_eq!(rig.alex.snapshot().friends[0].status, "offline");
+}
+
+#[tokio::test]
+async fn last_seen_and_gift_privacy_are_offered_only_by_a_server_that_has_them() {
+    let rig = rig().await;
+    rig.friends().await;
+    // Today's server: `me` names neither, so neither is offered, and a change naming one is refused whole by the server.
+    let me = rig.steve.snapshot().me.unwrap();
+    assert_eq!((me.last_seen.clone(), me.gifts.clone()), (None, None));
+    let shown = serde_json::to_value(&me).unwrap();
+    assert!(shown.get("lastSeen").is_none() && shown.get("gifts").is_none(), "left out, not null: {shown}");
+    assert_eq!(rig.steve.settings(&rig.steve_mc, None, None, Some("nobody"), None).await, Err(Fail::Unavailable));
+    // Values Flint doesn't know never reach the server.
+    let asked = rig.fake.with(|w| w.calls("flint_social_settings"));
+    assert_eq!(rig.steve.settings(&rig.steve_mc, None, None, Some("everyone"), None).await, Err(Fail::Refused("invalid_last_seen".into())));
+    assert_eq!(rig.steve.settings(&rig.steve_mc, None, None, None, Some("strangers")).await, Err(Fail::Refused("invalid_gifts".into())));
+    assert_eq!(rig.fake.with(|w| w.calls("flint_social_settings")), asked);
+
+    // A server with them: `me` carries them, and they change only when named.
+    rig.fake.with(|w| w.privacy = true);
+    let me = rig.steve.settings(&rig.steve_mc, Some("busy"), None, None, None).await.unwrap();
+    assert_eq!((me.last_seen.as_deref(), me.gifts.as_deref()), (Some("friends"), Some("everyone")));
+    let me = rig.steve.settings(&rig.steve_mc, None, None, Some("nobody"), Some("friends")).await.unwrap();
+    assert_eq!((me.status.as_str(), me.last_seen.as_deref(), me.gifts.as_deref()), ("busy", Some("nobody"), Some("friends")));
+    assert_eq!(rig.steve.snapshot().me.unwrap().gifts.as_deref(), Some("friends"));
+    let shown = serde_json::to_value(&me).unwrap();
+    assert_eq!((shown["lastSeen"].clone(), shown["gifts"].clone()), (json!("nobody"), json!("friends")));
+    // The server refusing a value: said as the setting it was about.
+    rig.fake.with(|w| w.refuse_privacy = true);
+    assert_eq!(rig.steve.settings(&rig.steve_mc, None, None, Some("friends"), None).await, Err(Fail::Refused("invalid_last_seen".into())));
+    assert_eq!(rig.steve.settings(&rig.steve_mc, None, None, None, Some("nobody")).await, Err(Fail::Refused("invalid_gifts".into())));
+    rig.fake.with(|w| w.refuse_privacy = false);
+    // A value the server sends that Flint doesn't know is left out, as if the setting weren't there.
+    let odd = parse_me(&json!({ "uuid": STEVE, "name": "Steve", "status": "online", "last_seen": "everyone", "gifts": "aliens" })).unwrap();
+    assert_eq!((odd.last_seen, odd.gifts), (None, None));
+    // From the game: the same action, with the new fields.
+    let action: game::GameAction = serde_json::from_value(json!({ "kind": "settings", "lastSeen": "friends", "gifts": "nobody" })).unwrap();
+    assert_eq!(action, game::GameAction::Settings { status: None, allow_requests: None, last_seen: Some("friends".into()), gifts: Some("nobody".into()) });
 }
 
 #[tokio::test]
@@ -825,9 +863,9 @@ async fn a_games_actions_run_as_the_pages_do() {
     assert_eq!(rig.steve.snapshot().friends[0].unread, 0);
     ask(GameAction::Pin { uuid: ALEX.into(), pinned: true }).await.unwrap();
     assert!(rig.steve.snapshot().friends[0].pinned);
-    let me = ask(GameAction::Settings { status: Some("busy".into()), allow_requests: Some(false) }).await.unwrap();
+    let me = ask(GameAction::Settings { status: Some("busy".into()), allow_requests: Some(false), last_seen: None, gifts: None }).await.unwrap();
     assert_eq!((me["me"]["status"].clone(), me["me"]["allowRequests"].clone()), (json!("busy"), json!(false)));
-    assert_eq!(ask(GameAction::Settings { status: Some("sleeping".into()), allow_requests: None }).await, Err(Fail::Refused("invalid_status".into())));
+    assert_eq!(ask(GameAction::Settings { status: Some("sleeping".into()), allow_requests: None, last_seen: None, gifts: None }).await, Err(Fail::Refused("invalid_status".into())));
     let found = ask(GameAction::Search { query: "ale".into() }).await.unwrap();
     assert_eq!(found["players"][0]["name"], "Alex");
     assert_eq!(found["players"][0]["relation"], "friend");

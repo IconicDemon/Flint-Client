@@ -66,7 +66,7 @@ fn unpack(index: usize) -> Result<&'static [u8], String> {
 pub const FILE_NAME: &str = "flint-runtime.jar";
 
 /// Minecraft versions the runtime is built against and tested on, with the line whose jar they get
-/// (that jar's fabric.mod.json requires ~line on 26.x, and exactly the versions listed here on 1.21.x). One
+/// (that jar's fabric.mod.json requires ~line on 26.x, and exactly the versions listed here on 1.21.x and 1.19.x). One
 /// 26.1 jar serves every 26.1 release. A release newer than all of them gets the newest line (see [NEWEST_LINE]).
 const SUPPORTED_VERSIONS: &[(&str, &str)] = &[
     ("26.3", "26.3"),
@@ -77,6 +77,8 @@ const SUPPORTED_VERSIONS: &[(&str, &str)] = &[
     ("1.21.11", "1.21.11"),
     ("1.21.10", "1.21.10"),
     ("1.21.1", "1.21.1"),
+    ("1.19.2", "1.19.2"),
+    ("1.19", "1.19"),
     // Its own code base (game-runtime/legacy189), on Fabric from Ornithe.
     ("1.8.9", "1.8.9"),
 ];
@@ -154,10 +156,10 @@ pub fn enabled(state: &AppState) -> bool {
 /// component used where Mojang has no build of the first for the computer).
 ///
 /// Every version runs on the Java the official Minecraft Launcher gives it (the owner's call on 2026-11-03, after crashes
-/// on Java 25): 26.x on Mojang's Java 25, 1.21.x on Mojang's Java 21 (its own; no entry here). The one exception is 1.8.9
-/// with Flint: Flint's 1.8.9 runtime shares Flint's Java 21 code (docs/LEGACY189_SHARED_MENU_PLAN.md), so it runs on
-/// Mojang's Java 21 (`java-runtime-delta`) instead of its own Java 8; vanilla 1.8.9, and 1.8.9 with the in-game menu
-/// turned off, keep Mojang's Java 8.
+/// on Java 25): 26.x on Mojang's Java 25, 1.21.x on Mojang's Java 21 and 1.19.x on Mojang's Java 17 (their own; no entry
+/// here). The one exception is 1.8.9 with Flint: Flint's 1.8.9 runtime shares Flint's Java 21 code
+/// (docs/LEGACY189_SHARED_MENU_PLAN.md), so it runs on Mojang's Java 21 (`java-runtime-delta`) instead of its own Java 8;
+/// vanilla 1.8.9, and 1.8.9 with the in-game menu turned off, keep Mojang's Java 8.
 ///
 /// Until then 1.21.x and 1.8.9 ran on Java 25, which reached the title screen sooner (1.21.11: 10.4-10.6 s on Java 21,
 /// 7.0-7.9 s on Java 25), but Java 25 is where the random crashes were.
@@ -224,7 +226,10 @@ fn verify_dir(mods: &Path, want: Want<'_>) -> CmdResult<()> {
 fn sync_profile(state: &AppState, profile: &Profile, jar: Option<&[u8]>, tuning: &LaunchTuning) -> CmdResult<()> {
     let game_dir = state.paths.profile_dir(&profile.id);
     sync_dir(&game_dir.join("mods"), jar)?;
-    let config = jar.map(|_| crate::perfcore::runtime_config(profile, tuning, crate::perfcore::hardware(), crate::perfcore::frame_stats_log_requested()));
+    let config = jar.map(|_| {
+        let config = crate::perfcore::runtime_config(profile, tuning, crate::perfcore::hardware(), crate::perfcore::frame_stats_log_requested());
+        crate::perfcore::with_ui_theme(config, &crate::data::load_settings(state))
+    });
     crate::perfcore::sync_runtime_config(&game_dir, config.as_ref())
 }
 
@@ -287,7 +292,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({ "id": "p", "name": "P", "gameVersion": version, "loader": loader })).unwrap()
     }
 
-    /// What a 1.21.x line's jar requires: the one release it serves, or the span of them
+    /// What a 1.21.x or 1.19.x line's jar requires: the one release it serves, or the span of them
     /// (game-runtime/legacy's -Pminecraft_range).
     fn minecraft_range(line: &str) -> String {
         let versions: Vec<&str> = SUPPORTED_VERSIONS.iter().filter(|(_, l)| *l == line).map(|(v, _)| *v).collect();
@@ -321,6 +326,12 @@ mod tests {
         assert!(!supports(&profile("1.21.1", "vanilla")));
         assert!(!supports(&profile("1.21", "fabric")));
         assert!(!supports(&profile("1.21.2", "fabric")));
+        for version in ["1.19.2", "1.19"] {
+            assert!(supports(&profile(version, "fabric")), "{version}");
+            assert!(!supports(&profile(version, "vanilla")), "{version}");
+        }
+        assert!(!supports(&profile("1.19.1", "fabric")));
+        assert!(!supports(&profile("1.19.4", "fabric")));
         assert!(supports(&profile("1.8.9", "fabric")));
         assert!(!supports(&profile("1.8.9", "vanilla")));
         assert!(!supports(&profile("1.8.8", "fabric")));
@@ -344,6 +355,9 @@ mod tests {
         assert_eq!(line("1.21.10"), Some("1.21.10"));
         assert_eq!(line("1.21.1"), Some("1.21.1"));
         assert_eq!(line("1.21"), None);
+        assert_eq!(line("1.19.2"), Some("1.19.2"));
+        assert_eq!(line("1.19"), Some("1.19"));
+        assert_eq!(line("1.19.1"), None);
         assert_eq!(line("1.8.9"), Some("1.8.9"));
         // Every supported version's line has an embedded slot (build.rs fills it, or leaves it empty).
         for (version, line) in SUPPORTED_VERSIONS {
@@ -366,13 +380,15 @@ mod tests {
         assert!(jar_for(&profile("1.21.11", "vanilla")).is_none());
         assert!(jar_for(&profile("1.21.1", "vanilla")).is_none());
         assert!(jar_for(&profile("1.21.2", "fabric")).is_none());
+        assert!(jar_for(&profile("1.19.2", "vanilla")).is_none());
         assert!(jar_for(&profile("1.8.9", "vanilla")).is_none());
     }
 
     #[test]
     fn the_embedded_jars_target_their_own_line() {
         // A jar built for one line must never be installed on another: each embedded jar's
-        // fabric.mod.json requires its own line (26.x: ~line, the newest >=line; 1.21.x: exactly the releases it serves).
+        // fabric.mod.json requires its own line (26.x: ~line, the newest >=line; 1.21.x and 1.19.x: exactly the releases it
+        // serves).
         for (line, _, _) in PACKED_LINES {
             let jar = embedded(line);
             if jar.is_empty() {
@@ -420,9 +436,9 @@ mod tests {
     fn every_version_keeps_the_official_launchers_java_but_1_8_9_with_flint_which_needs_21() {
         let java21 = Some(JavaChoice { component: "java-runtime-delta", major: 21, minimum: 21, fallback: "java-runtime-delta" });
         assert_eq!(java_override(true, &profile("1.8.9", "fabric")), java21, "1.8.9 with Flint's runtime: Mojang's Java 21");
-        for version in ["1.8.9", "1.21.1", "1.21.10", "1.21.11"] {
+        for version in ["1.8.9", "1.19", "1.19.2", "1.21.1", "1.21.10", "1.21.11"] {
             if version != "1.8.9" {
-                assert_eq!(java_override(true, &profile(version, "fabric")), None, "{version}: its own Java 21, as the official launcher");
+                assert_eq!(java_override(true, &profile(version, "fabric")), None, "{version}: its own Java (17 or 21), as the official launcher");
             }
             assert_eq!(java_override(false, &profile(version, "fabric")), None, "{version}: the in-game menu is off, the version's own Java");
             assert_eq!(java_override(true, &profile(version, "vanilla")), None, "vanilla {version}: the version's own Java");

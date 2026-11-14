@@ -146,6 +146,31 @@ export async function installAndRestart(gameRunning: boolean): Promise<void> {
   }
 }
 
+/**
+ * The release's name for the update panel: the first line of its notes (the release's title), plain text, at most
+ * {@link NAME_MAX} characters (cut at a word, with an ellipsis). Null when the notes have none. The panel shows only the
+ * version and this name; the full notes live in News and on flintclient.com.
+ */
+export function releaseName(notes: string | null | undefined): string | null {
+  const first = (notes ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[*_`#>]+/g, "").replace(/\s+/g, " ").trim())
+    .find((line) => line.length > 0);
+  if (!first) return null;
+  const name = first.replace(/[:.\s]+$/, "");
+  if (name.length <= NAME_MAX) return name;
+  const cut = name.slice(0, NAME_MAX);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > NAME_MAX / 2 ? cut.slice(0, space) : cut).replace(/[,;:\s]+$/, "")}…`;
+}
+
+const NAME_MAX = 72;
+
+/** Browser preview only (the desktop app ignores it): shows an update state, so the panel can be looked at without a release. */
+export function previewUpdate(next: UpdateState): void {
+  if (!isTauri()) set(next);
+}
+
 /** A downloaded update installs only while no game launched from Flint is starting or running. */
 export function canInstallNow(current: UpdateState, gameRunning: boolean): boolean {
   return current.phase === "ready" && !gameRunning;

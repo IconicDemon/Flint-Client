@@ -1,5 +1,6 @@
 package com.flintclient.client.control.store;
 
+import com.flintclient.client.FlintLog;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -26,6 +27,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -42,6 +44,10 @@ import org.jspecify.annotations.Nullable;
  * <p>Requests run off the game's thread with short timeouts, never follow redirects and read at most {@link #MAX_LOOKUP_BYTES}
  * of a lookup, {@link #MAX_ASSET_BYTES} of a poster and {@link CapeAnimation#MAX_STRIP_BYTES} of an animation strip. Sends no
  * credentials and no cookies. Pure Java; version-neutral.
+ *
+ * <p>For the 3D cosmetics (the other slots: {@code back, head, body, aura, pet, shield, hands}), a lookup also keeps each asked
+ * player's whole entry as the Store sent it ({@link Lookup#players}), read by {@code cosmetics/ModelItem}; and
+ * {@link #download(URI, int)} fetches their files on the same terms as a cape's.
  */
 public final class StoreCosmeticsClient {
 	/** The most players one lookup asks about (the Store reads no more). */
@@ -87,12 +93,18 @@ public final class StoreCosmeticsClient {
 	}
 
 	/**
-	 * A cosmetic's texture as the Store describes it: download {@code url}, check {@code sha256}; cache by id and version. An
-	 * animated cape has its {@code animation} (null: a static cape); {@code url} is then its poster, frame 0.
+	 * A cosmetic's texture as the Store describes it: download {@code cdnUrl} when given (Flint's CDN, the same file), else or
+	 * when that fails {@code url}; check {@code sha256}. An animated cape has its {@code animation} (null: a static cape);
+	 * {@code url} is then its poster, frame 0.
 	 */
-	public record Asset(String id, int version, URI url, String sha256, int width, int height, @Nullable CapeAnimation animation) {
+	public record Asset(String id, int version, URI url, String sha256, int width, int height, @Nullable CapeAnimation animation,
+		@Nullable URI cdnUrl) {
 		public Asset(String id, int version, URI url, String sha256, int width, int height) {
-			this(id, version, url, sha256, width, height, null);
+			this(id, version, url, sha256, width, height, null, null);
+		}
+
+		public Asset(String id, int version, URI url, String sha256, int width, int height, @Nullable CapeAnimation animation) {
+			this(id, version, url, sha256, width, height, animation, null);
 		}
 
 		@Override
@@ -107,7 +119,11 @@ public final class StoreCosmeticsClient {
 	 * be kept ({@code maxAgeSeconds}, -1 when the Store didn't say) and, for {@link Status#BUSY}, how long to wait
 	 * ({@code retryAfterSeconds}, -1 when it didn't say).
 	 */
-	public record Lookup(Status status, Map<UUID, Asset> capes, long maxAgeSeconds, long retryAfterSeconds) {
+	public record Lookup(Status status, Map<UUID, Asset> capes, long maxAgeSeconds, long retryAfterSeconds, Map<UUID, JsonObject> players) {
+		public Lookup(Status status, Map<UUID, Asset> capes, long maxAgeSeconds, long retryAfterSeconds) {
+			this(status, capes, maxAgeSeconds, retryAfterSeconds, Map.of());
+		}
+
 		static Lookup of(Status status, long retryAfter) {
 			return new Lookup(status, Map.of(), -1, retryAfter);
 		}
@@ -164,7 +180,7 @@ public final class StoreCosmeticsClient {
 	 * {@link #MAX_ASSET_BYTES}; with an {@link IOException} when the host can't be reached.
 	 */
 	public CompletableFuture<byte[]> download(Asset asset) {
-		return download(asset.url(), MAX_ASSET_BYTES);
+		return download(asset.cdnUrl(), asset.url(), MAX_ASSET_BYTES, asset.sha256());
 	}
 
 	/**
@@ -172,10 +188,51 @@ public final class StoreCosmeticsClient {
 	 * itself at most {@link CapeAnimation#MAX_STRIP_BYTES}), so a cape's strips never take more than the manifest said.
 	 */
 	public CompletableFuture<byte[]> download(CapeAnimation.Strip strip) {
-		return download(strip.url(), Math.min(strip.bytes(), CapeAnimation.MAX_STRIP_BYTES));
+		return download(strip.cdnUrl(), strip.url(), Math.min(strip.bytes(), CapeAnimation.MAX_STRIP_BYTES), strip.sha256());
 	}
 
-	private CompletableFuture<byte[]> download(URI url, int maxBytes) {
+	/**
+	 * A file the Store lists at {@code url} and, optionally, Flint's CDN at {@code cdn} (the same file: Store {@code cdn_url}):
+	 * from the CDN first, and from {@code url} when that fails in any way (no connection, an answer that isn't 200, more than
+	 * {@code maxBytes}, bytes that aren't {@code sha256}). Both are checked against {@code sha256}: the answer is the file the
+	 * Store hashed, or a failure ({@link Refused} for a mismatch or a refused address, an {@link IOException} offline), the
+	 * {@code url}'s when both fail. For any cosmetic file (textures, strips, 3D files).
+	 */
+	public CompletableFuture<byte[]> download(@Nullable URI cdn, URI url, int maxBytes, String sha256) {
+		if (cdn == null || cdn.equals(url)) {
+			return verified(download(url, maxBytes), sha256);
+		}
+		return verified(download(cdn, maxBytes), sha256).exceptionallyCompose(error -> {
+			cdnFallbacks.incrementAndGet();
+			if (!cdnWarned) {
+				cdnWarned = true;
+				Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+				FlintLog.LOGGER.info("Flint Store: {} didn't give {} ({}); using {} instead", cdn.getHost(),
+					sha256.substring(0, Math.min(12, sha256.length())), cause.getMessage(), url.getHost());
+			}
+			return verified(download(url, maxBytes), sha256);
+		});
+	}
+
+	/** Downloads that came from {@code url} because the CDN's failed (for the log and tests). */
+	public long cdnFallbacks() {
+		return cdnFallbacks.get();
+	}
+
+	private final AtomicLong cdnFallbacks = new AtomicLong();
+	private volatile boolean cdnWarned;
+
+	/** {@code download}'s bytes when they hash to {@code sha256}, else a {@link Refused} failure. */
+	private static CompletableFuture<byte[]> verified(CompletableFuture<byte[]> download, String sha256) {
+		return download.thenCompose(bytes -> AssetCache.sha256(bytes).equals(sha256) ? CompletableFuture.completedFuture(bytes)
+			: CompletableFuture.failedFuture(new Refused("its SHA-256 doesn't match the Store's")));
+	}
+
+	/**
+	 * The bytes at {@code url} (at most {@code maxBytes}; not checked against a hash: the caller does), from an address the
+	 * endpoint allows only: a 3D cosmetic's geometry, texture or animation.
+	 */
+	public CompletableFuture<byte[]> download(URI url, int maxBytes) {
 		if (!endpoint.allowsAsset(url)) {
 			return CompletableFuture.failedFuture(new Refused("address not allowed: " + url.getHost()));
 		}
@@ -220,11 +277,13 @@ public final class StoreCosmeticsClient {
 			return Lookup.of(Status.FAILED, -1);
 		}
 		Map<UUID, Asset> capes = new HashMap<>();
+		Map<UUID, JsonObject> entries = new HashMap<>();
 		for (Map.Entry<String, JsonElement> entry : players.getAsJsonObject().entrySet()) {
 			UUID player = uuid(entry.getKey());
 			if (player == null || !asked.contains(player) || !entry.getValue().isJsonObject()) {
 				continue;
 			}
+			entries.put(player, entry.getValue().getAsJsonObject());
 			JsonObject cape = JsonFields.object(entry.getValue().getAsJsonObject(), "cape");
 			String kind = JsonFields.string(cape, "kind");
 			if (cape == null || kind != null && !kind.equals("cape")) {
@@ -235,7 +294,7 @@ public final class StoreCosmeticsClient {
 				capes.put(player, asset);
 			}
 		}
-		return new Lookup(Status.OK, Collections.unmodifiableMap(capes), maxAge(response.cacheControl()), -1);
+		return new Lookup(Status.OK, Collections.unmodifiableMap(capes), maxAge(response.cacheControl()), -1, Collections.unmodifiableMap(entries));
 	}
 
 	/** An asset entry, or null when any part of it is missing or not what a cape texture can be. */
@@ -271,7 +330,8 @@ public final class StoreCosmeticsClient {
 			// A poster that isn't frame 0's texture: shown as it is, without the animation.
 			animation = null;
 		}
-		return new Asset(id.toLowerCase(Locale.ROOT), version.intValue(), uri, hash, width.intValue(), height.intValue(), animation);
+		return new Asset(id.toLowerCase(Locale.ROOT), version.intValue(), uri, hash, width.intValue(), height.intValue(), animation,
+			CapeAnimation.cdnUrl(asset, endpoint));
 	}
 
 	/** The scale of an animated cape's poster: the animation's, at most 16 (an HD frame is halved). */

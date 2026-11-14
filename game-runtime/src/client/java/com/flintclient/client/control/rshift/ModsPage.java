@@ -3,6 +3,8 @@ package com.flintclient.client.control.rshift;
 import static com.flintclient.client.control.rshift.MenuStyle.d;
 
 import com.flintclient.client.control.ControlState;
+import com.flintclient.client.control.feature.ServerRules;
+import com.flintclient.client.control.model.ModuleDescriptor;
 import com.flintclient.client.control.rshift.MenuStyle.Label;
 import com.flintclient.client.control.rshift.MenuStyle.Type;
 import com.flintclient.client.control.store.ControlSettings;
@@ -59,6 +61,8 @@ final class ModsPage extends Node {
 	private final Label emptyNote = new Label(Type.EMPTY_NOTE, "");
 	private final String summary;
 	private @Nullable FontFace searchFace;
+	/** The menu colours the search box was made with ({@link MenuStyle#version}): a change of theme remakes it. */
+	private int searchLook = -1;
 	private @Nullable SettingsList page;
 	private Catalog.@Nullable Mod pageMod;
 	private int shown;
@@ -199,9 +203,20 @@ final class ModsPage extends Node {
 		closePage();
 		pageMod = mod;
 		scrolled = scroll.model().target();
-		// Pack Organizer lists the packs themselves under its settings; Tier Tagger opens the TierTagger mod's own screens.
-		Node extra = mod.module() == null ? null : MenuHost.extraPanel(mod.module().id());
+		// Item Customizer's page is its own panel; Pack Organizer lists the packs themselves under its settings; Tier Tagger opens
+		// the TierTagger mod's own screens.
+		String id = mod.module() == null ? null : mod.module().id();
+		Node extra = id == null ? null : PagePanel.of(host, id);
+		if (extra == null && id != null) {
+			extra = MenuHost.extraPanel(id);
+		}
 		page = add(new SettingsList(host, mod.name(), mod.description(), note(mod), mod.sections(), this::closePage, extra, !works(mod), mod));
+		if (com.flintclient.client.control.model.mods.PlayerMods.Crosshair.ID.equals(id) && works(mod)) {
+			// Crosshair: a live preview kept in view while its settings scroll, and the pad to draw your own over the page.
+			CrosshairPad pad = new CrosshairPad();
+			page.pin(new CrosshairPreview(pad));
+			page.overlay(pad);
+		}
 		pageAt = Clock.millis();
 		setGridShown(false);
 		invalidate();
@@ -278,14 +293,23 @@ final class ModsPage extends Node {
 		favorites.setBounds(compact.x() - d(GAP) - bh, top, bh, bh);
 		float searchRight = favorites.x() - d(GAP);
 		float searchX = Math.max(at + d(GAP), searchRight - d(310));
-		search.setBounds(searchX, top, Math.max(d(120), searchRight - searchX), bh);
+		// A narrow window (the chips leave the search under 120): the search takes a row of its own under them, full width, so
+		// it never covers the Favourites and Compact buttons.
+		boolean searchBelow = searchRight - searchX < d(120);
+		float below = searchBelow ? bh + d(GAP) : 0;
+		if (searchBelow) {
+			search.setBounds(left, top + below, right - left, bh);
+		} else {
+			search.setBounds(searchX, top, searchRight - searchX, bh);
+		}
 		FontFace face = Type.SEARCH.face();
-		if (face != searchFace) {
+		if (face != searchFace || searchLook != MenuStyle.version()) {
+			searchLook = MenuStyle.version();
 			searchFace = face;
 			search.look(new TextField.Look(face, MenuStyle.SEARCH, MenuStyle.SEARCH_EDGE, MenuStyle.SEARCH_EDGE_HOVER, MenuStyle.SEARCH_FOCUS,
 				MenuStyle.radius(), d(16), d(16), d(16), MenuStyle.SEARCH_TEXT, MenuStyle.SEARCH_HINT, MenuStyle.SEARCH_HINT));
 		}
-		float gridY = y + d(ROW);
+		float gridY = y + d(ROW) + below;
 		scroll.flatBar(MenuStyle.SCROLL_THUMB, d(6), d(80));
 		scroll.setBounds(x, gridY, w, Math.max(0, y + h - gridY));
 		if (page != null) {
@@ -316,13 +340,22 @@ final class ModsPage extends Node {
 		private static final float ASPECT = 210F / 305F;
 		private static final float ROW_H = ROW_COMPACT;
 		private static final float TOP = 10;
+		/** A card's least width and a compact row's, in design pixels (Dawn's are 305 and 622). */
+		private static final float MIN_CARD = 250;
+		private static final float MIN_ROW = 440;
 
 		private boolean compact() {
 			return ControlState.settings().compactView();
 		}
 
+		/**
+		 * Four columns (compact: two) while each card keeps at least {@link #MIN_CARD} ({@link #MIN_ROW}) design pixels of width,
+		 * more where the text takes more room than the layout ({@link MenuStyle#textRoom}: a small window); fewer columns
+		 * otherwise, so a card's name and buttons are never cut or crowded.
+		 */
 		private int columns(float width) {
-			return compact() ? 2 : 4;
+			float least = (compact() ? d(MIN_ROW) : d(MIN_CARD)) * MenuStyle.textRoom();
+			return MenuMath.columns(width - 2 * d(PAD), d(GAP), least, compact() ? 2 : 4);
 		}
 
 		private float cellH(float width) {
@@ -548,6 +581,10 @@ final class ModsPage extends Node {
 		@Override
 		protected void paint(Canvas c) {
 			lit = MenuStyle.ease(lit, status.on());
+			if (mod.module() != null && hoverAmount() > 0.02F) {
+				// The menu outlines this mod where it sits on the HUD (ModMenuWindow), while it is on screen.
+				com.flintclient.client.control.hud.render.HudPreview.hover(mod.module().id(), hoverAmount());
+			}
 			float rad = MenuStyle.radius();
 			MenuStyle.block(c, x, y, w, h, rad, Math.max(hover, press), 0);
 			MenuStyle.pressed(c, x, y, w, h, rad, press);
@@ -641,7 +678,9 @@ final class ModsPage extends Node {
 
 	/**
 	 * The card's status, as Dawn's: Enabled (the green at 40%, green text) or Disabled (the text at 5%, grey text) switches
-	 * its Flint module; Coming soon and Unavailable are shown, not pressed. Also on the mod's settings page.
+	 * its Flint module; Coming soon and Unavailable are shown, not pressed. Where the server you play on doesn't allow the mod
+	 * ({@link ServerRules#reason}), it shows why instead, greyed ("Off on Hypixel", the whole reason as its tooltip), and
+	 * isn't pressed there: the mod's own setting stays as it was for every other server. Also on the mod's settings page.
 	 */
 	static final class Status extends Pressable {
 		private final Catalog.Mod mod;
@@ -650,6 +689,12 @@ final class ModsPage extends Node {
 		private final Label offLabel = new Label(Type.CARD_BUTTON, "Disabled");
 		private final Label fixed;
 		private float t = -1;
+		/** The server rules last read ({@link ServerRules#revision}); MIN_VALUE before the first. */
+		private int rulesSeen = Integer.MIN_VALUE;
+		/** Why the server you play on keeps this mod off ("Off on Hypixel: its rules don't allow it"), or null. */
+		private @Nullable String serverReason;
+		/** Its first part ("Off on Hypixel"), as the status shows it. */
+		private @Nullable Label serverLabel;
 
 		Status(Catalog.Mod mod) {
 			super(null);
@@ -665,12 +710,51 @@ final class ModsPage extends Node {
 			}
 		}
 
+		/** Whether the mod works now: switched on, and not kept off by the server you play on. */
 		boolean on() {
-			return access != null && (Boolean) access.get();
+			return access != null && serverReason() == null && (Boolean) access.get();
+		}
+
+		/**
+		 * Why the server you play on keeps this mod off, or null (read again only when the rules change). While there is one,
+		 * the status isn't pressed and says why in its tooltip.
+		 */
+		@Nullable String serverReason() {
+			int revision = ServerRules.revision();
+			if (access == null || revision == rulesSeen) {
+				return serverReason;
+			}
+			rulesSeen = revision;
+			ModuleDescriptor module = mod.module();
+			String reason = module == null ? null : ServerRules.reason(module.id());
+			if (reason == null ? serverReason != null : !reason.equals(serverReason)) {
+				serverReason = reason;
+				if (reason == null) {
+					serverLabel = null;
+					setEnabled(true);
+				} else {
+					int colon = reason.indexOf(':');
+					serverLabel = new Label(Type.CARD_BUTTON, colon > 0 ? reason.substring(0, colon) : reason);
+					setDisabled(reason);
+				}
+				// Its width may change with it (widthFor).
+				invalidate();
+			}
+			return serverReason;
+		}
+
+		/** The width it takes where there is room: {@code normal}, or wider while it says why a server keeps the mod off. */
+		float widthFor(float normal) {
+			Label server = serverReason() != null ? serverLabel : null;
+			return server == null ? normal : Math.max(normal, server.width(measure()) + d(32));
 		}
 
 		String word() {
-			return access == null ? fixed.text().toLowerCase(Locale.ROOT) : on() ? "enabled" : "disabled";
+			if (access == null) {
+				return fixed.text().toLowerCase(Locale.ROOT);
+			}
+			Label server = serverReason() != null ? serverLabel : null;
+			return server != null ? server.text().toLowerCase(Locale.ROOT) : on() ? "enabled" : "disabled";
 		}
 
 		float hoverAmount() {
@@ -679,15 +763,21 @@ final class ModsPage extends Node {
 
 		@Override
 		public String narration() {
-			return withReason(mod.name() + ", " + word() + (access != null ? ", switch" : ""));
+			return withReason(mod.name() + ", " + word() + (access != null && serverReason() == null ? ", switch" : ""));
 		}
 
 		@Override
 		protected void paint(Canvas c) {
 			float rad = Math.min(MenuStyle.radius(), h / 2);
-			if (access == null) {
+			Label server = serverReason() != null ? serverLabel : null;
+			if (access == null || server != null) {
 				MenuStyle.box(c, x, y, w, h, rad, MenuStyle.SOFT);
-				MenuStyle.centered(c, fixed, x + w / 2, y + h / 2, MenuStyle.NEUTRAL, w - d(16));
+				MenuStyle.centered(c, server != null ? server : fixed, x + w / 2, y + h / 2, MenuStyle.NEUTRAL, w - d(16));
+				if (server != null) {
+					// Off here whatever it is set to: the switch eases from off when the rules let it be again.
+					t = 0;
+					MenuStyle.focusRing(c, x, y, w, h, rad, focus);
+				}
 				return;
 			}
 			t = MenuStyle.ease(t, on());

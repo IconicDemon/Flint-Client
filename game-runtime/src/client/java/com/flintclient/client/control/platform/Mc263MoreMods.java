@@ -1,6 +1,7 @@
 package com.flintclient.client.control.platform;
 
 import com.flintclient.client.FlintClient;
+import com.flintclient.client.control.feature.ItemWear;
 import com.flintclient.client.control.feature.Mods;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.mods.MoreMods;
@@ -85,6 +86,8 @@ public final class Mc263MoreMods {
 	private static boolean backupKeyDown;
 	private static @Nullable Path worldDir;
 	private static @Nullable String worldName;
+	/** The singleplayer server {@link #worldDir} was worked out for: once per world, not every tick. */
+	private static @Nullable IntegratedServer worldServer;
 	private static boolean backupOnLeave;
 	private static long nextScheduleCheck;
 	private static final AtomicBoolean BACKING_UP = new AtomicBoolean();
@@ -229,9 +232,12 @@ public final class Mc263MoreMods {
 		boolean on = Mods.on(BACKUPS);
 		ModuleState state = Mods.state(BACKUPS);
 		if (server != null && mc.level != null) {
-			worldDir = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
-			Path name = worldDir.getFileName();
-			worldName = name == null ? "world" : name.toString();
+			if (server != worldServer || worldDir == null) {
+				worldServer = server;
+				worldDir = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+				Path name = worldDir.getFileName();
+				worldName = name == null ? "world" : name.toString();
+			}
 			backupOnLeave = on && state.bool(Backups.ON_LEAVE);
 			boolean down = on && Mc263Features.gameplay() && Mc263Features.keyHeld(state.text(Backups.SAVE_KEY));
 			if (down && !backupKeyDown) {
@@ -253,6 +259,7 @@ public final class Mc263MoreMods {
 			Path dir = worldDir;
 			String name = worldName;
 			worldDir = null;
+			worldServer = null;
 			if (backupOnLeave && on) {
 				zipLater(mc, dir, name, state, "Backed up ");
 			}
@@ -448,20 +455,28 @@ public final class Mc263MoreMods {
 
 	// ---------- elytras ----------
 
-	/** Elytras: an elytra's tooltip says how much flight it has left (one durability point a second, as Minecraft wears it). */
+	/**
+	 * Elytras: an elytra's tooltip says how much flight it has left, as Minecraft wears it ({@link ItemWear}: a point per second
+	 * of gliding, each one kept with Unbreaking's chance, none in creative or on an unbreakable elytra); with Unbreaking it's
+	 * the average.
+	 */
 	public static void elytraTooltip(ItemStack stack, Consumer<Component> builder) {
 		if (!GUARD.on() || !stack.is(Items.ELYTRA) || !Mods.on(ELYTRAS) || !Mods.state(ELYTRAS).bool(Elytras.TOOLTIP)) {
 			return;
 		}
-		int left = Math.max(0, stack.getMaxDamage() - stack.getDamageValue() - 1);
-		builder.accept(Component.literal("Flight left: " + flightTime(left)).withStyle(ChatFormatting.GRAY));
-	}
-
-	/** "7m 12s" for {@code seconds}. */
-	public static String flightTime(int seconds) {
-		int m = seconds / 60;
-		int s = seconds % 60;
-		return m > 0 ? m + "m " + s + "s" : s + "s";
+		int unbreaking = 0;
+		for (var entry : stack.getEnchantments().entrySet()) {
+			if (entry.getKey().is(net.minecraft.world.item.enchantment.Enchantments.UNBREAKING)) {
+				unbreaking = entry.getIntValue();
+			}
+		}
+		Player player = Minecraft.getInstance().player;
+		boolean creative = player != null && player.getAbilities().instabuild;
+		boolean armor = stack.is(net.minecraft.tags.ItemTags.ARMOR_ENCHANTABLE);
+		double seconds = ItemWear.flightSeconds(stack.getMaxDamage(), stack.getDamageValue(), stack.isDamageableItem(), unbreaking,
+			armor, creative, Mc263HudData.tickrate());
+		builder.accept(Component.literal(ItemWear.flightLine(seconds, unbreaking, creative && stack.isDamageableItem()))
+			.withStyle(ChatFormatting.GRAY));
 	}
 
 	/** Elytras: whether the wings sway as you move. */

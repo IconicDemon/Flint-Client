@@ -17,6 +17,8 @@ import org.joml.Matrix3x2fStack;
  */
 public final class Frame {
 	private static final Frame SHARED = new Frame();
+	/** While a Flint screen is drawn under another screen (see {@link #holdBlur}), its own blur stays off. */
+	private static boolean blurHeld;
 
 	private GuiGraphicsExtractor graphics;
 	private Font font;
@@ -173,15 +175,75 @@ public final class Frame {
 	}
 
 	/**
+	 * Holds Flint's blur back while a Flint screen is drawn under another one ({@code HostScreen} sets it). Minecraft's friends
+	 * list (26.2 and later) draws the screen it was opened over, then blurs it, and Minecraft allows one blur a frame: a
+	 * blur of the Flint screen's own first made the list's throw ("Can only blur once per frame") and crashed the game.
+	 */
+	public static void holdBlur(boolean held) {
+		blurHeld = held;
+	}
+
+	/**
 	 * Blurs everything drawn before this layer (Minecraft's menu blur), when the game draws one; false when something
-	 * blurred this frame already.
+	 * blurred this frame already, or this screen is drawn under another (whose blur it leaves to that one, {@link #holdBlur}).
 	 */
 	public boolean blurBehind() {
+		if (blurHeld) {
+			return false;
+		}
 		try {
 			graphics.blurBeforeThisStratum();
 			return true;
 		} catch (IllegalStateException alreadyBlurred) {
 			return false;
 		}
+	}
+
+	// ---------- a blur kept to rectangles ----------
+
+	/** At most this many rectangles keep a clipped blur. */
+	public static final int BLUR_CLIPS = 8;
+	/** The rectangles (window pixels from the top left: x0, y0, x1, y1), and how many; -1 while the blur isn't clipped. */
+	private static final int[] CLIPS = new int[4 * BLUR_CLIPS];
+	private static int clipCount = -1;
+
+	/**
+	 * Keeps the blur this frame's {@link #blurBehind} was granted to the rectangles {@link #clipBlurTo} adds (none yet: nothing
+	 * stays blurred), so the rest of the screen stays sharp: the Right Shift menu's frosted panel over a live game. Only after
+	 * {@code blurBehind} returned true in the same frame. The engine reads it where it runs the blur (26.3's {@code PanelBlur});
+	 * elsewhere the blur covers the screen as before.
+	 */
+	public static void clipBlur() {
+		clipCount = 0;
+	}
+
+	/** Adds a rectangle (window pixels from the top left) to this frame's clipped blur ({@link #clipBlur}); empty ones are left out. */
+	public static void clipBlurTo(int x0, int y0, int x1, int y1) {
+		if (clipCount < 0 || clipCount >= BLUR_CLIPS || x1 <= x0 || y1 <= y0) {
+			return;
+		}
+		int at = 4 * clipCount++;
+		CLIPS[at] = x0;
+		CLIPS[at + 1] = y0;
+		CLIPS[at + 2] = x1;
+		CLIPS[at + 3] = y1;
+	}
+
+	/** Drops a clip that was asked for (the screen that asked it closed before the blur ran). */
+	public static void clipBlurOff() {
+		clipCount = -1;
+	}
+
+	/**
+	 * Takes this frame's clip, once: its rectangles into {@code out} (four ints each, at least {@code 4 × BLUR_CLIPS} long) and how
+	 * many; -1 when the blur isn't clipped (it covers the screen).
+	 */
+	public static int takeBlurClip(int[] out) {
+		int n = clipCount;
+		clipCount = -1;
+		if (n > 0) {
+			System.arraycopy(CLIPS, 0, out, 0, 4 * n);
+		}
+		return n;
 	}
 }

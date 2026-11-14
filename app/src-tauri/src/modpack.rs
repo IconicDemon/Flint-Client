@@ -23,9 +23,9 @@ struct PlannedFile<'a> {
 
 /// One bundled override file, and all of them together (a pack can carry large resource packs and worlds).
 const MAX_FILE: u64 = 4 * 1024 * 1024 * 1024;
-const MAX_OVERRIDES: u64 = 32 * 1024 * 1024 * 1024;
+pub(crate) const MAX_OVERRIDES: u64 = 32 * 1024 * 1024 * 1024;
 
-fn relative_safe(path: &str) -> Option<PathBuf> {
+pub(crate) fn relative_safe(path: &str) -> Option<PathBuf> {
     let p = Path::new(path);
     if path.is_empty() || path.len() > 400 || p.is_absolute() || path.contains('\\') || path.contains(':') {
         return None;
@@ -43,7 +43,7 @@ fn relative_safe(path: &str) -> Option<PathBuf> {
 /// Files Flint keeps in a profile for itself: its content records (which name the files that roll back,
 /// update and removal act on), backups, staging and kept-aside folders. A modpack never ships these, and
 /// one that tries is ignored for them, so a pack can't plant records that point Flint at other files.
-fn flint_owned(rel: &Path) -> bool {
+pub(crate) fn flint_owned(rel: &Path) -> bool {
     let top_level_record = rel.components().count() == 1 && matches!(rel.to_str(), Some("flint-content.json" | "flint-mods.json"));
     top_level_record || rel.components().any(|c| c.as_os_str().to_str().is_none_or(|part| part.starts_with(".flint")))
 }
@@ -51,12 +51,17 @@ fn flint_owned(rel: &Path) -> bool {
 /// Writes the pack's `overrides/` and `client-overrides/` into `staging`. `limit` caps the bytes actually
 /// written (a file's declared size can lie), and no single file may exceed `MAX_FILE`.
 fn extract_overrides<R: Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, staging: &Path, limit: u64) -> CmdResult<()> {
+    extract_folders(archive, staging, limit, &["overrides/", "client-overrides/"])
+}
+
+/// Writes the pack's files under `prefixes` (folders ending in `/`) into `staging`, as `extract_overrides` does.
+pub(crate) fn extract_folders<R: Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, staging: &Path, limit: u64, prefixes: &[&str]) -> CmdResult<()> {
     let too_large = || "The modpack's bundled files are unexpectedly large.".to_string();
     let mut extracted: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|_| "The modpack file is damaged.".to_string())?;
         let name = entry.name().to_owned();
-        let rel = name.strip_prefix("overrides/").or_else(|| name.strip_prefix("client-overrides/"));
+        let rel = prefixes.iter().find_map(|p| name.strip_prefix(p));
         let Some(rel) = rel.and_then(relative_safe).filter(|r| !flint_owned(r)) else { continue };
         let target = staging.join(&rel);
         if entry.is_dir() {
@@ -206,6 +211,7 @@ async fn run(app: &AppHandle, state: &AppState, job: &str, project_id: &str, ver
         drop(archive);
         let _ = std::fs::remove_file(&pack_path);
         std::fs::create_dir_all(staging.join("mods")).map_err(err("Could not prepare the new profile"))?;
+        crate::ornithe::check_pack(&game_version, staging.join("mods")).await?;
         Ok::<(String, String, usize), String>((game_version, loader_version, installed_mods.len()))
     }
     .await;
@@ -218,7 +224,20 @@ async fn run(app: &AppHandle, state: &AppState, job: &str, project_id: &str, ver
         }
     };
     let title = project["title"].as_str().unwrap_or("Modpack").to_owned();
-    let profile_name: String = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| title.clone()).chars().take(40).collect();
+    let record = json!({
+        "projectId": project["id"],
+        "versionId": version["id"],
+        "title": title,
+        "versionNumber": version["version_number"],
+        "iconUrl": project["icon_url"],
+    });
+    finish(state, staging, id, &title, name, game_version, loader_version, record, mod_count).await
+}
+
+/// Turns a filled staging folder into a new Fabric profile named `name` (else the pack's `title`), recording the pack.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn finish(state: &AppState, staging: PathBuf, id: String, title: &str, name: Option<String>, game_version: String, loader_version: String, record: Value, mod_count: usize) -> CmdResult<Value> {
+    let profile_name: String = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| title.to_owned()).chars().take(40).collect();
     let mut profile = Profile {
         id: id.clone(),
         name: profile_name,
@@ -230,13 +249,7 @@ async fn run(app: &AppHandle, state: &AppState, job: &str, project_id: &str, ver
         installed: false,
         performance: None,
         memory_mb: None,
-        modpack: Some(json!({
-            "projectId": project["id"],
-            "versionId": version["id"],
-            "title": title,
-            "versionNumber": version["version_number"],
-            "iconUrl": project["icon_url"],
-        })),
+        modpack: Some(record),
         ..Profile::default()
     };
     let _guard = state.file_lock.lock().await;
@@ -253,13 +266,16 @@ async fn run(app: &AppHandle, state: &AppState, job: &str, project_id: &str, ver
 
 #[tauri::command]
 pub async fn modpack_install(app: AppHandle, state: State<'_, AppState>, project_id: String, version_id: Option<String>, name: Option<String>, title: String) -> CmdResult<String> {
-    if !valid_id(&project_id) {
+    if !crate::curseforge::valid_ref(&project_id) {
         return Err("Invalid modpack".into());
     }
     let (id, _) = state.jobs.create(&app, "modpack", None, &title, 0);
     jobs::spawn(&app, id.clone(), move |app, job| async move {
         let state = app.state::<AppState>();
-        run(&app, &state, &job, &project_id, version_id, name).await
+        match crate::curseforge::parse_ref(&project_id) {
+            Some(mod_id) => crate::curseforge::modpack::run(&app, &state, &job, mod_id, version_id, name).await,
+            None => run(&app, &state, &job, &project_id, version_id, name).await,
+        }
     });
     Ok(id)
 }

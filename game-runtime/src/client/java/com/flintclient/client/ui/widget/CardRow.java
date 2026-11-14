@@ -191,7 +191,7 @@ public final class CardRow extends FlintButton {
 			}
 			case ICON -> {
 				int y = center - size / 2;
-				int badge = accentIcon ? Palette.withAlpha(Palette.ACCENT, 0.9F * dim) : Palette.withAlpha(0x1CFFFFFF, dim);
+				int badge = accentIcon ? Palette.withAlpha(Palette.ACCENT, 0.9F * dim) : Palette.withAlpha(Palette.tint(0x1CFFFFFF), dim);
 				c.roundRect(x, y, size, size, size / 2, badge);
 				int iconPx = Math.round(size * 0.52F);
 				int ink = accentIcon ? Palette.ACCENT_INK : Palette.withAlpha(Palette.TEXT_DIM, dim);
@@ -224,7 +224,7 @@ public final class CardRow extends FlintButton {
 
 	/** The colour around the picture: the card with the row's hover on it. */
 	private int surfaceUnder() {
-		return Palette.over(Palette.withAlpha(0x12FFFFFF, Math.min(1.0F, Math.max(hover, focus) + press * 0.5F)), surface);
+		return Palette.over(Palette.withAlpha(Palette.tint(0x12FFFFFF), Math.min(1.0F, Math.max(hover, focus) + press * 0.5F)), surface);
 	}
 
 	/** Eight dots round a circle, the brightest one turning (one turn a second). */

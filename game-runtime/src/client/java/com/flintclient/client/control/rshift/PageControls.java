@@ -161,7 +161,7 @@ final class PageControls {
 				int fill = Palette.lerp(MenuStyle.SOFT, MenuStyle.ACCENT, t);
 				MenuStyle.box(c, left, y, sw, h, rad, fill);
 				MenuStyle.halo(c, left, y, sw, h, rad, lit, t >= 0.5F ? Palette.withAlpha(MenuStyle.ACCENT, 0.30F) : Palette.withAlpha(MenuStyle.TEXT, 0.03F));
-				int ink = Palette.lerp(i == hot ? MenuStyle.TEXT : MenuStyle.NEUTRAL, MenuStyle.TEXT, t);
+				int ink = Palette.lerp(i == hot ? MenuStyle.TEXT : MenuStyle.NEUTRAL, MenuStyle.ON_ACCENT, t);
 				MenuStyle.centered(c, labels[i], left + sw / 2, y + h / 2, ink, sw);
 				left += sw + r(GAP);
 			}
@@ -196,9 +196,13 @@ final class PageControls {
 		private boolean refocusing;
 		private final StringBuilder typed = new StringBuilder();
 		private final Label typedLabel = new Label(Type.RANGE, "");
-		/** The value box's width, and the scale it was measured at ({@link #box}). */
+		/**
+		 * The value box's width, and the layout scale and type it was measured at ({@link #box}): both, as two windows can share a
+		 * layout scale with text at different sizes (1440p and 4K).
+		 */
 		private float boxWidth = -1;
 		private float boxAt;
+		private @Nullable Object boxFace;
 
 		Slider(int min, int max, int step, String unit, IntSupplier value, IntConsumer set) {
 			super(null);
@@ -232,11 +236,12 @@ final class PageControls {
 
 		/** The value box: wide enough for the widest value shown ("24 blocks"), never narrower than the reference's. */
 		private float box() {
-			if (boxWidth < 0 || boxAt != r(1)) {
+			if (boxWidth < 0 || boxAt != r(1) || boxFace != Type.RANGE.face()) {
 				Canvas c = measure();
 				float widest = Math.max(new Label(Type.RANGE, format.apply(min)).width(c), new Label(Type.RANGE, format.apply(max)).width(c));
 				boxWidth = Math.max(r(BOX), widest + r(24));
 				boxAt = r(1);
+				boxFace = Type.RANGE.face();
 			}
 			return boxWidth;
 		}

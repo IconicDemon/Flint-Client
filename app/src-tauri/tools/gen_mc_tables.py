@@ -4,7 +4,8 @@ read from the real game jars instead of written by hand.
 
 What it reads, for each version, from the Mojang-named jars Fabric Loom keeps in the Gradle cache
 (~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}-deobf/<v>/ for 26.x, and
-minecraft-{clientonly,common}/<v>-loom.mappings.<...>/ for the 1.21.x builds, which use layered Mojang mappings):
+minecraft-{clientonly,common}/<v>-loom.mappings.<...>/ for the 1.21.x and 1.19.x builds, which use layered Mojang
+mappings):
   - version.json: the data version (`world_version`), which options.txt's `version:` line holds.
   - net.minecraft.client.Options (javap -c): the option keys `processOptions` reads and writes, the vanilla key
     mappings created in the constructor with their default keys, and a normalised fingerprint of how each
@@ -17,8 +18,8 @@ minecraft-{clientonly,common}/<v>-loom.mappings.<...>/ for the 1.21.x builds, wh
   - The enums whose serialised values options.txt stores (graphics preset, clouds, particles, ...).
   - assets/minecraft/lang/en_us.json: English labels for key names and key mappings.
 
-Versions with identical tables form one family (26.1, 26.1.1 and 26.1.2 are one; each 1.21.x release is its
-own); the script refuses to group versions whose tables differ. Nothing is downloaded and nothing outside the
+Versions with identical tables form one family (26.1, 26.1.1 and 26.1.2 are one; each 1.21.x and 1.19.x release is
+its own); the script refuses to group versions whose tables differ. Nothing is downloaded and nothing outside the
 output file is written. 1.8.9 isn't read here: its options.txt is a different format, translated by
 `legacy189.rs`.
 
@@ -37,7 +38,7 @@ import subprocess
 import sys
 from collections import OrderedDict
 
-VERSIONS = ["1.21.1", "1.21.10", "1.21.11", "26.1", "26.1.1", "26.1.2", "26.2", "26.3"]
+VERSIONS = ["1.19", "1.19.2", "1.21.1", "1.21.10", "1.21.11", "26.1", "26.1.1", "26.1.2", "26.2", "26.3"]
 DEFAULT_LOOM = os.path.expanduser("~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft")
 
 # Enums whose serialised form options.txt stores: (classes it has lived in, oldest place last; "string"|"int";
@@ -139,7 +140,8 @@ def normalise(line):
     return re.sub(r"\s+", " ", text).strip()
 
 
-PRESENTATION = (r"(Lnet/minecraft/client/OptionInstance\$TooltipSupplier;|Lnet/minecraft/client/OptionInstance\$CaptionBasedToString;"
+PRESENTATION = (r"(Lnet/minecraft/client/OptionInstance\$TooltipSupplier;|Lnet/minecraft/client/OptionInstance\$TooltipSupplierFactory;"
+                r"|Lnet/minecraft/client/OptionInstance\$CaptionBasedToString;"
                 r"|Lnet/minecraft/network/chat/Component;|Lnet/minecraft/client/gui/components/Tooltip;)")
 
 
@@ -159,13 +161,16 @@ def comparable(segment):
     """How one option is constructed (its normalised instructions), without what doesn't change what options.txt
     holds:
     - presentation: the caption key (the first text the option loads; options.txt names the option by the key in
-      `processOptions`, compared on its own), tooltips, caption functions and the translation keys they load;
+      `processOptions`, compared on its own), tooltips, caption functions (with the `this` one captures) and the
+      translation keys they load;
     - listeners, with the `this` a listener lambda captures, and whether the option has one at all;
     - an enum's id codec written inline (`Codec.INT.xmap(byId, getId)`, 1.21.10 and older) or as the enum's own
       `LEGACY_CODEC`, which 26.x defines as exactly that (both read and write the id with the same WRAP strategy;
       the ids themselves are compared through the enum tables), and an enum's package move;
     - the `discrete` flag 26.x passes to `IntRange.xmap`, which only decides how the slider steps with the arrow
-      keys (the codec and validation don't read it);
+      keys (the codec and validation don't read it), and the `applyValueImmediately` flag of `new IntRange` (1.21+),
+      which only decides whether a slider applies its value while it is dragged;
+    - 1.19.x's tooltip factories (`OptionInstance.TooltipSupplierFactory`), presentation like later tooltips;
     - a value used only while a `SharedConstants.DEBUG_*` switch is on, which is always off in released games."""
     kept = []
     caption_seen = False
@@ -176,7 +181,7 @@ def comparable(segment):
         i += 1
         if line.startswith("<presentation") or line == "<listener>":
             continue
-        if line == "aload_0" and following == "<listener>":
+        if line == "aload_0" and following in ("<listener>", "<presentation>"):
             continue
         if re.fullmatch(r"ldc(_w)? // String [\w.]+", line):
             if following == "<presentation(String)>":
@@ -197,6 +202,9 @@ def comparable(segment):
             continue
         if line in ("iconst_0", "iconst_1") and "IntRange.xmap:(Ljava/util/function/IntFunction;Ljava/util/function/ToIntFunction;Z)" in following:
             continue
+        if line in ("iconst_0", "iconst_1") and 'IntRange."<init>":(IIZ)V' in following:
+            continue
+        line = line.replace('IntRange."<init>":(IIZ)V', 'IntRange."<init>":(II)V')
         line = line.replace("ToIntFunction;Z)", "ToIntFunction;)").replace("<listener>", "")
         for old, new in MOVED_CLASSES.items():
             line = line.replace(old, new)
@@ -207,6 +215,63 @@ def comparable(segment):
 def fingerprint(segment):
     """A short hash of `comparable(segment)`: equal when two versions construct the option the same way."""
     return hashlib.sha256("\n".join(comparable(segment)).encode()).hexdigest()[:16]
+
+
+LOCAL = re.compile(r"^(\s*\d+:\s*)([adfil])(load|store)(?:_(\d)|\s+(\d+))\s*$")
+
+
+def assume_64bit(lines):
+    """The constructor's instructions without what only runs on a 32-bit Java (`Minecraft.is64Bit()` false: 1.19.x's
+    render and simulation distances), which Flint never starts: it is built for 64-bit systems only and runs Mojang's
+    64-bit Java. The flag's local variable goes too, so the ones after it are numbered as in versions without it."""
+    def offset(line):
+        return int(re.match(r"\s*(\d+):", line).group(1))
+
+    def instr(line):
+        return re.sub(r"^\s*\d+:\s*", "", line).split("//")[0].strip()
+
+    at = next((i for i, line in enumerate(lines) if "Method net/minecraft/client/Minecraft.is64Bit:()Z" in line), None)
+    if at is None:
+        return lines
+    store = re.fullmatch(r"istore(?:_(\d)|\s+(\d+))", instr(lines[at + 1]))
+    if not store or not instr(lines[at - 1]).startswith("aload"):
+        sys.exit("Minecraft.is64Bit() isn't kept in a local variable as expected")
+    slot = int(store.group(1) or store.group(2))
+    out = lines[:at - 1] + lines[at + 2:]
+    i = 0
+    while i < len(out):
+        load = re.fullmatch(r"iload(?:_(\d)|\s+(\d+))", instr(out[i]))
+        if not load or int(load.group(1) or load.group(2)) != slot:
+            i += 1
+            continue
+        jump = re.fullmatch(r"ifeq\s+(\d+)", instr(out[i + 1]))
+        if not jump:
+            sys.exit("Minecraft.is64Bit() is used other than as a condition")
+        target = int(jump.group(1))
+        start = next(k for k, line in enumerate(out) if offset(line) == target)
+        body = out[i + 2:start]
+        tail = re.fullmatch(r"goto\s+(\d+)", instr(body[-1])) if body else None
+        # `is64Bit && x` jumps to x's own false value; `is64Bit ? a : b` jumps to b, after a's goto.
+        shared = any(re.fullmatch(rf"if\w*\s+{target}", instr(line)) for line in body)
+        if shared or not tail:
+            out = out[:i] + out[i + 2:]
+        else:
+            after = next(k for k, line in enumerate(out) if offset(line) == int(tail.group(1)))
+            out = out[:i] + body[:-1] + out[after:]
+
+    def renumber(line):
+        m = LOCAL.match(line)
+        if not m:
+            return line
+        n = int(m.group(4) or m.group(5))
+        if n == slot:
+            sys.exit("Minecraft.is64Bit()'s variable is used other than as a condition")
+        if n < slot:
+            return line
+        n -= 1
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}{'_' + str(n) if n <= 3 else ' ' + str(n)}"
+
+    return [renumber(line) for line in out]
 
 
 def read_version_json(client_jar):
@@ -247,7 +312,7 @@ def options_tables(client_jar):
                 getter_field[m.group(1)] = f.group(1)
 
     # Constructor: a fingerprint per OptionInstance field, and the vanilla key mappings.
-    init = next((b for h, b in all_methods.items() if h.startswith("public net.minecraft.client.Options(")), [])
+    init = assume_64bit(next((b for h, b in all_methods.items() if h.startswith("public net.minecraft.client.Options(")), []))
     field_print, segment = {}, []
     mappings = []
     current = None
@@ -396,7 +461,9 @@ def options_fixers(common_jar):
 
 
 def enum_values(jars, classes, kind, index):
-    """The enum's serialised values from whichever of its classes the version has (in either jar), or None."""
+    """The enum's serialised values from whichever of its classes the version has (in either jar), or None. None too
+    where the enum has no serialised form yet (1.19.x's `HumanoidArm` and `CloudStatus` carry only translation keys
+    there, and `Options` writes those settings with codecs of its own)."""
     text = cls = None
     for candidate in classes:
         for jar_path in jars.values():
@@ -428,6 +495,8 @@ def enum_values(jars, classes, kind, index):
         if re.search(r"invokespecial .*\"<init>\"", line):
             values.append(strings[index] if kind == "string" else str(ints[index]))
             strings = ints = None
+    if kind == "string" and any("." in v for v in values):
+        return None
     return values
 
 

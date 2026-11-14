@@ -4,7 +4,7 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The Right Shift menu's theme: one of the Flint app's own looks (Ember, Flint's own, then the launcher's themes, with its colours)
+ * The Right Shift menu's theme: one of the Flint app's own looks (Orange, Flint's own, then the launcher's themes, with its colours)
  * and the menu's font. Saved in Flint's settings (the same in every profile); the menu derives every colour it draws from
  * the look (see {@code MenuStyle}). Version-neutral; immutable.
  *
@@ -15,19 +15,35 @@ public record MenuTheme(Look look, Font font) {
 	/** The launcher's themes, colour for colour (app/src/styles/tokens.css). */
 	public enum Look implements Labelled {
 		/**
-		 * Shown as "Ember". Its id stays {@code flint} so saved choices keep it; the older, near-identical Ember look was
-		 * folded into it ({@link #byId} reads {@code ember} as this one).
+		 * Shown as "Orange" (it was "Ember"). Its id stays {@code flint} so saved choices keep it; the older, near-identical Ember
+		 * look was folded into it ({@link #byId} reads {@code ember} as this one).
 		 */
-		FLINT("Ember", "Slate black, white and orange", 0x0D0F12, 0x0A0C0E, 0x0F1215, 0x171B20, 0x1E2329, 0x2C3033, 0xEDEDED, 0xF97316, 0xFA8A3C,
+		FLINT("Orange", "Slate black, white and orange", 0x0D0F12, 0x0A0C0E, 0x0F1215, 0x171B20, 0x1E2329, 0x2C3033, 0xEDEDED, 0xF97316, 0xFA8A3C,
 			0xDB6410, 0xFFFFFF, 0xFB923C),
-		OBSIDIAN("Obsidian", "Graphite, neutral", 0x080809, 0x040405, 0x0F0F11, 0x151517, 0x1B1B1E, 0x242427, 0xD6D7DC, 0xA8ABB6, 0xB8BBC4, 0x8F929C,
-			0x0C0C0E, 0xC4C7CF),
-		MOSS("Moss", "Forest and sage", 0x0B0C0B, 0x060706, 0x121412, 0x171A17, 0x1D211D, 0x262B26, 0xE4EAE0, 0x76986A, 0x87A979, 0x61815A, 0x0B130A,
-			0xA5C196),
-		BLOODSTONE("Bloodstone", "Deep crimson", 0x0D0A0A, 0x070505, 0x141010, 0x1A1515, 0x211B1B, 0x2B2323, 0xF0E5E3, 0xAC383E, 0xBF4A50, 0x93303A,
+		/**
+		 * The light theme (it replaced Obsidian, whose saved id {@code obsidian} reads as it): vanilla cream, cocoa text, a strawberry
+		 * accent. Its accent as text is deepened for contrast on cream.
+		 */
+		ICE_CREAM("Ice Cream", "Strawberry & vanilla", 0xFBF6EE, 0xF4ECDF, 0xFFFDF9, 0xF8F1E6, 0xF4ECDF, 0xE6DACB, 0x2A211C, 0xE07A93, 0xD2667F,
+			0xC25570, 0x2A211C, 0xAE4159),
+		/** Shown as "Mint" (saved as {@code moss}, its old name): a cool mint green on a charcoal page with a hint of green. */
+		MOSS("Mint", "Cool mint on charcoal", 0x0A0E0D, 0x060908, 0x0F1513, 0x141B19, 0x1A2421, 0x24322D, 0xE4F2EC, 0x3EB489, 0x5CC6A0, 0x31986F,
+			0x04150E, 0x98E2C6),
+		/** Shown as "Cherry" (saved as {@code bloodstone}, its old name). */
+		BLOODSTONE("Cherry", "Deep crimson", 0x0D0A0A, 0x070505, 0x141010, 0x1A1515, 0x211B1B, 0x2B2323, 0xF0E5E3, 0xAC383E, 0xBF4A50, 0x93303A,
 			0xFFF4F2, 0xDC7F82),
-		DUSK("Dusk", "Plum violet", 0x0B0A0E, 0x060509, 0x131119, 0x19161F, 0x1F1B27, 0x292432, 0xE8E4F0, 0x9276BA, 0xA287C7, 0x7A619F, 0x120D1C,
-			0xB9A3DC);
+		/** Shown as "Passion Fruit" (saved as {@code dusk}, its old name). */
+		DUSK("Passion Fruit", "Plum violet", 0x0B0A0E, 0x060509, 0x131119, 0x19161F, 0x1F1B27, 0x292432, 0xE8E4F0, 0x9276BA, 0xA287C7, 0x7A619F, 0x120D1C,
+			0xB9A3DC),
+		/**
+		 * Shown as "Blueberry" (saved as {@code aurora}, its old name): a soft blueberry accent on a deep indigo page, one solid colour
+		 * (no gradient).
+		 */
+		AURORA("Blueberry", "Blueberry on deep indigo", 0x0B0D1C, 0x070814, 0x111427, 0x161A31, 0x1E233F, 0x283052, 0xE6E9F7, 0x6B7FE3, 0x8396EA,
+			0x5568CC, 0x0A0E26, 0xA7B4F2);
+
+		/** The id Obsidian was saved under; read as {@link #ICE_CREAM}, which replaced it. */
+		private static final String REMOVED_OBSIDIAN = "obsidian";
 
 		/** The id of the Ember look that was removed (it matched Flint's own); read as {@link #FLINT}. */
 		private static final String REMOVED_EMBER = "ember";
@@ -80,12 +96,40 @@ public record MenuTheme(Look look, Font font) {
 		}
 
 		public String id() {
-			return name().toLowerCase(Locale.ROOT);
+			return name().toLowerCase(Locale.ROOT).replace("_", "");
+		}
+
+		/** Whether this is a light theme (dark text on a light page): the menus draw their light variants. */
+		public boolean light() {
+			return (((background >> 16) & 255) + ((background >> 8) & 255) + (background & 255)) > 3 * 128;
+		}
+
+		/** The name the Flint app gives this theme (its Settings › Appearance; {@code ember} for Flint's own). */
+		public String launcherId() {
+			return this == FLINT ? REMOVED_EMBER : id();
+		}
+
+		/**
+		 * The look for a theme the Flint app names ({@code ember}, {@code icecream}, {@code moss}, {@code bloodstone}, {@code dusk}, {@code aurora},
+		 * and the older names it reads as Obsidian); null for one this game doesn't know (a newer app's), which leaves the look as it is.
+		 */
+		public static @Nullable Look forLauncher(@Nullable String launcherId) {
+			if (launcherId == null) {
+				return null;
+			}
+			String id = launcherId.trim().toLowerCase(Locale.ROOT);
+			return switch (id) {
+				case "mono", "slate", "frost" -> ICE_CREAM;
+				default -> byId(id);
+			};
 		}
 
 		static @Nullable Look byId(@Nullable String id) {
 			if (REMOVED_EMBER.equals(id)) {
 				return FLINT;
+			}
+			if (REMOVED_OBSIDIAN.equals(id)) {
+				return ICE_CREAM;
 			}
 			for (Look l : values()) {
 				if (l.id().equals(id)) {

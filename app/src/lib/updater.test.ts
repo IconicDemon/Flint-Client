@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { canInstallNow, checkForUpdates, friendlyError, installAndRestart, progressLabel, updateState } from "./updater.ts";
+import { canInstallNow, checkForUpdates, friendlyError, installAndRestart, progressLabel, releaseName, updateState } from "./updater.ts";
 
 const appRoot = new URL("../../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, appRoot), "utf8");
@@ -82,4 +82,15 @@ test("updates are signed and come only over HTTPS", () => {
   assert.equal(updater.dangerousInsecureTransportProtocol, undefined, "release builds never allow plain HTTP");
   assert.equal(updater.requireSignedVersion, true, "an older signed build can't be replayed as a newer version");
   assert.notEqual(updater.allowDowngrades, true, "no downgrades");
+});
+
+test("the update panel names a release by its title only: the first line of its notes, plain and short", () => {
+  const notes = "**Real elytra wings, smooth motion blur and instant cape changes**\nYour Flint cape now covers…\n• Cape design on elytra…";
+  assert.equal(releaseName(notes), "Real elytra wings, smooth motion blur and instant cape changes");
+  assert.equal(releaseName("\n\n  Faster Friends.  \nMore"), "Faster Friends");
+  assert.equal(releaseName(""), null);
+  assert.equal(releaseName(null), null);
+  const long = releaseName("A very long release title that keeps going and going well past what fits in the small update panel");
+  assert.ok(long !== null && long.length <= 73 && long.endsWith("…"), String(long));
+  assert.ok(!long.includes("  "));
 });

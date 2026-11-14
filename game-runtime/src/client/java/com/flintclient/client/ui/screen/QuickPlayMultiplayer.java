@@ -99,7 +99,8 @@ public final class QuickPlayMultiplayer {
 	}
 
 	private static void notice(Component message) {
-		Minecraft minecraft = Minecraft.getInstance();
-		SystemToast.addOrUpdate(minecraft.gui.toastManager(), NOTICE, Component.translatable("flintclient.quickplay.toast.title"), message);
+		// Flint's own notice (one style for every Flint notification): "Quick Play · <what happened>".
+		com.flintclient.client.control.platform.Mc263NoticeToast.show(Component.translatable("flintclient.quickplay.toast.title").getString() + " · "
+			+ message.getString());
 	}
 }

@@ -520,8 +520,8 @@ fn clean_modpack(value: Option<&Value>) -> Option<Value> {
     let text = |key: &str| v.get(key).and_then(Value::as_str).map(|s| s.chars().take(200).collect::<String>());
     let title = text("title")?;
     Some(json!({
-        "projectId": text("projectId").filter(|id| crate::modrinth::valid_id(id)),
-        "versionId": text("versionId").filter(|id| crate::modrinth::valid_id(id)),
+        "projectId": text("projectId").filter(|id| crate::curseforge::valid_ref(id)),
+        "versionId": text("versionId").filter(|id| crate::curseforge::valid_ref(id)),
         "title": title,
         "versionNumber": text("versionNumber"),
         "iconUrl": text("iconUrl").filter(|u| u.starts_with("https://")),

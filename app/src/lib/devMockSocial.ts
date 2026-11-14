@@ -134,6 +134,8 @@ export function createSocialMock(params: URLSearchParams, me: () => { uuid: stri
       syncedAt: ready ? Date.now() : null,
       focus,
       stale: false,
+      live: ready,
+      typing: [],
     };
   };
   const publish = () => emit("social:update", snapshot());
@@ -160,6 +162,8 @@ export function createSocialMock(params: URLSearchParams, me: () => { uuid: stri
         return snapshot();
       case "social_focus":
         focus = args.chat ?? null;
+        return;
+      case "social_typing":
         return;
       case "social_refresh":
         return;

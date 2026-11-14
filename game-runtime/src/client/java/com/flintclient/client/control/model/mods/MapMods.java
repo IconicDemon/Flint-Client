@@ -132,7 +132,8 @@ public final class MapMods {
 			.hud(HudPlacement.of(Anchor.TOP_RIGHT, 4, 24)).needs(Requirement.WORLD)
 			.note("Built from the chunks Minecraft has loaded around you, a few at a time, and kept on this computer per world or "
 				+ "server (flint/maps in the game folder), so places you've been show again when you come back. The terrain's look is "
-				+ "the World Map's.").build();
+				+ "the World Map's. On a server it keeps to fair play, as Xaero's Fair-Play minimap: no entity radar and no cave "
+				+ "layers (in your own worlds you get both). Off on Hypixel and Hoplite, whose rules don't allow minimaps.").build();
 	}
 
 	public static final class WorldMap {
@@ -182,6 +183,7 @@ public final class MapMods {
 			.needs(Requirement.WORLD)
 			.note("Press the key to open it: drag to move, scroll to zoom, right-click a place to make a waypoint there or teleport, and "
 				+ "right-click a waypoint to edit, share or delete it. It shows what you've explored with Flint on, per world or server "
-				+ "and per dimension, kept on this computer only.").build();
+				+ "and per dimension, kept on this computer only. On a server it shows the surface and no players or mobs (fair play); off "
+				+ "on Hypixel and Hoplite.").build();
 	}
 }

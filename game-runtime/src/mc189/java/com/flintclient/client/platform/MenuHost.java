@@ -107,9 +107,17 @@ public final class MenuHost {
 		sounds.play(net.minecraft.client.sound.instance.SimpleSoundInstance.of(new net.minecraft.resource.Identifier("random.orb"), 1.8F));
 	}
 
-	/** 1.8.9 has no menu blur. */
+	/** Flint blurs what is behind its menus on 1.8.9 itself (legacy/ui/MenuBlur189; Minecraft 1.8.9 has no menu blur). */
 	public static boolean menuBlurOn() {
-		return false;
+		return com.flintclient.legacy.ui.MenuBlur189.on();
+	}
+
+	/**
+	 * The Right Shift menu over a world shows the game and the HUD live around its panel, as on 26.3: the HUD mods stay sharp
+	 * (with sample values where they have nothing to show) and only the panel is frosted (Frame's clipped blur).
+	 */
+	public static boolean livePreview() {
+		return true;
 	}
 
 	/** 1.8.9's Motion Blur mod reads its own settings every frame: nothing to push. */
@@ -246,6 +254,26 @@ public final class MenuHost {
 		return false;
 	}
 
+	/** The in-game Library (Right Shift tile, Utilities row): offered when the Flint app started this game (Instant Swap is 1.8.9's too). */
+	public static boolean libraryOffered() {
+		return com.flintclient.client.module.social.InstantSwap.available();
+	}
+
+	/** Minecraft's Resource Packs screen over {@code parent} (Done applies the choice and comes back). */
+	public static @Nullable Object resourcePacksScreen(Object parent) {
+		return packsScreen(parent);
+	}
+
+	/** 1.8.9 has no shader loader (no Iris; OptiFine isn't a Fabric mod): the Library has no Shaders tab here. */
+	public static boolean shadersOffered() {
+		return false;
+	}
+
+	/** Not on 1.8.9 (no Iris here). */
+	public static @Nullable Object shaderPacksScreen(Object parent) {
+		return null;
+	}
+
 	public static @Nullable Object packsScreen(Object parent) {
 		return new net.minecraft.client.gui.screen.menu.resourcepacks.ResourcePacksScreen((net.minecraft.client.gui.screen.Screen) parent);
 	}
@@ -278,5 +306,73 @@ public final class MenuHost {
 	/** The menu failed this session (Right Shift then leaves it shut). */
 	public static boolean failed() {
 		return failed;
+	}
+
+	// ---------- the main menu's pages (Discover, Friends) ----------
+
+	/** This game's Minecraft version (the partner servers it can join). */
+	public static String minecraftVersion() {
+		return "1.8.9";
+	}
+
+	/** 1.8.9 has no online restrictions of Minecraft's own to report. */
+	public static @Nullable String multiplayerBlocked() {
+		return null;
+	}
+
+	/** Joins {@code address} through Minecraft's own connection screen, coming back to {@code parent} when it fails. */
+	public static void joinServer(Object parent, String name, String address) {
+		String host = address;
+		int port = 25565;
+		int colon = address.lastIndexOf(':');
+		if (colon > 0 && address.indexOf(']') < colon && (address.startsWith("[") || address.indexOf(':') == colon)) {
+			try {
+				port = Integer.parseInt(address.substring(colon + 1));
+				host = address.substring(0, colon);
+			} catch (NumberFormatException e) {
+				return;
+			}
+		}
+		if (host.startsWith("[") && host.endsWith("]")) {
+			host = host.substring(1, host.length() - 1);
+		}
+		// As the server list joins one (the game then knows the server it is on: Instant Swap rejoins it, the emote room opens).
+		show(new net.minecraft.client.gui.screen.menu.multiplayer.ConnectScreen((net.minecraft.client.gui.screen.Screen) parent,
+			Minecraft.getInstance(), new net.minecraft.client.options.ServerListEntry(name, address, false)));
+	}
+
+	/** 1.8.9 has no friends list of Minecraft's own. */
+	public static boolean minecraftFriends() {
+		return false;
+	}
+
+	public static void openMinecraftFriends(Object parent) {
+	}
+
+	/** Opens Flint's own Discord sign-in page (the launcher checked it, and the game checked it again) in the browser. */
+	public static void openTrusted(String url) {
+		Sys.openURL(url);
+	}
+
+	// ---------- the wardrobe ----------
+
+	/**
+	 * Draws the player as a whole 3D model in the pixel box ({@code x}, {@code y}, {@code w}, {@code h}) of the frame's canvas
+	 * (1.8.9's player model, lit as the inventory's doll; legacy/cosmetics/Wardrobe189), wearing {@code skin} (null: the
+	 * account's own) and {@code cape}, the wardrobe's selection and your emote.
+	 */
+	public static boolean previewPlayer(Frame frame, @Nullable Texture skin, boolean slim, @Nullable Texture cape, int x, int y, int w, int h,
+		float yaw, float capeLean) {
+		return com.flintclient.legacy.cosmetics.Wardrobe189.previewPlayer(frame, skin, slim, cape, x, y, w, h, yaw, capeLean);
+	}
+
+	/** 1.8.9 has the wardrobe (8 kinds, outfits, emotes, Skin Changer), as 26.3 does. */
+	public static boolean wardrobe() {
+		return true;
+	}
+
+	/** The wardrobe's Apply: the new skin on your own player at once, until the next join (legacy/cosmetics/OwnSkin189). */
+	public static boolean wearOwnSkin(Texture skin, boolean slim) {
+		return com.flintclient.legacy.cosmetics.OwnSkin189.wear(skin, slim);
 	}
 }

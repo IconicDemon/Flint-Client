@@ -7,6 +7,7 @@ import flintSparks from "../../assets/news/flint-sparks.jpg";
 import cover101 from "../../assets/news/flint-1.0.1-cover.png";
 import cover102 from "../../assets/news/flint-1.0.2-cover.png";
 import cover103 from "../../assets/news/flint-1.0.3-cover.png";
+import cover104 from "../../assets/news/flint-1.0.4-cover.png";
 import { RELEASE_NOTES } from "../../data/releaseNotes";
 import { api, errorText, type FeedRelease, type Profile, type ProfileState } from "../../lib/api";
 import { useDisplayedCape } from "../../lib/displayedCape";
@@ -23,6 +24,7 @@ import type { Navigate } from "../shell/Shell";
 import { useFriends } from "../friends/FriendsProvider";
 import { newsReleases, releasePage } from "../../lib/newsLinks";
 import { FeaturedPartner } from "../partners/FeaturedPartner";
+import { ShowcaseCard } from "./ShowcaseCard";
 import { preloadWallpapers, Wallpaper } from "./Wallpaper";
 
 const SkinStage = lazy(() => import("./SkinStage"));
@@ -68,17 +70,22 @@ export function Home({ navigate, active }: { navigate: Navigate; active: boolean
             </Suspense>
           ) : (
             <div className="home-signin">
-              <Icon name="user" size={22} />
+              <span className="home-signin-avatar" aria-hidden="true">
+                <Icon name="user" size={26} />
+              </span>
+              <h2 className="home-signin-title">{t("home.signIn.title")}</h2>
               <p>{t("home.signIn.prompt")}</p>
-              <Button variant="primary" icon="microsoft" onClick={() => navigate("settings", "accounts")}>
+              <Button variant="primary" icon="microsoft" className="home-signin-button" onClick={() => navigate("settings", "accounts")}>
                 {t("home.signIn.button")}
               </Button>
+              <span className="home-signin-note">{t("home.signIn.note")}</span>
             </div>
           )}
         </div>
         <aside className="home-side" aria-label={t("home.side.label")}>
           <NewsSection />
           <FeaturedPartner navigate={navigate} />
+          <ShowcaseCard active={active} />
           <FriendsRow navigate={navigate} />
         </aside>
       </div>
@@ -392,7 +399,7 @@ function LaunchPanel({ profile, navigate }: { profile: Profile | null; navigate:
  * for): a row's picture without the network. A newer release from the feed shows its cover from flintclient.com
  * (`NewsRelease.cover`); a release with neither, or one whose picture fails to load, has the sparks picture.
  */
-const RELEASE_COVERS: Record<string, string | undefined> = { "1.0.1": cover101, "1.0.2": cover102, "1.0.3": cover103 };
+const RELEASE_COVERS: Record<string, string | undefined> = { "1.0.1": cover101, "1.0.2": cover102, "1.0.3": cover103, "1.0.4": cover104 };
 
 /** A news row's picture: the release's cover, whole at 16:9 (never cropped), else Flint's own sparks and mark. */
 function NewsArt({ cover }: { cover: string | null | undefined }) {

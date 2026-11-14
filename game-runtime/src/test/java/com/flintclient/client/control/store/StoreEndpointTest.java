@@ -74,7 +74,11 @@ class StoreEndpointTest {
 		assertFalse(STORE.allowsAsset(null));
 		StoreEndpoint local = StoreEndpoint.parse("http://127.0.0.1:8787", "t");
 		assertTrue(local.allowsAsset(URI.create("http://127.0.0.1:8787/test-capes/ember-cape.png")));
-		assertFalse(local.allowsAsset(URI.create("http://127.0.0.1:9999/test-capes/ember-cape.png")));
+		// A Store on this computer may serve files from its local gateway on another port (development only)...
+		assertTrue(local.allowsAsset(URI.create("http://127.0.0.1:54321/storage/v1/object/public/cosmetic-assets/models/a.png")));
+		assertFalse(local.allowsAsset(URI.create("http://evil.example:54321/a.png")));
+		// ...a released Store never from this computer.
+		assertFalse(STORE.allowsAsset(URI.create("http://127.0.0.1:54321/storage/v1/object/public/cosmetic-assets/models/a.png")));
 		assertFalse(local.allowsAsset(URI.create("http://192.168.1.1/cape.png")));
 	}
 
@@ -85,5 +89,20 @@ class StoreEndpointTest {
 		assertTrue(StoreEndpoint.parse("http://127.0.0.1:8787", "t").loopback());
 		assertFalse(STORE.loopback());
 		assertEquals("https://store.flintclient.com/api/v1/players/cosmetics/", STORE.publicCosmeticsUrl());
+	}
+
+	@Test
+	void flintsAssetCdnIsAllowedOverHttpsOnly() {
+		assertTrue(STORE.allowsAsset(URI.create("https://assets.flintclient.com/cosmetic-assets/animated/a.png")));
+		assertTrue(STORE.allowsAsset(URI.create("https://ASSETS.flintclient.com/x.png")));
+		assertFalse(STORE.allowsAsset(URI.create("http://assets.flintclient.com/x.png")), "never http");
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com:443/x.png")), "no port");
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com:8443/x.png")));
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com/x.png?v=1")), "no query");
+		assertFalse(STORE.allowsAsset(URI.create("https://user:pw@assets.flintclient.com/x.png")), "no credentials");
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com/")), "the root isn't a file");
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com/a/../x.png")));
+		assertFalse(STORE.allowsAsset(URI.create("https://assets.flintclient.com.evil.example/x.png")));
+		assertFalse(STORE.allowsAsset(URI.create("https://evilassets.flintclient.com/x.png")));
 	}
 }

@@ -93,15 +93,6 @@ pub async fn skin_profile(app: AppHandle, state: State<'_, AppState>, uuid: Stri
     Ok(described)
 }
 
-fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || &bytes[12..16] != b"IHDR" {
-        return None;
-    }
-    let w = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
-    let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
-    Some((w, h))
-}
-
 /// Uploads a new skin with Mojang's documented skin endpoint. Only called after the user
 /// previews the file and confirms.
 #[tauri::command]
@@ -110,12 +101,17 @@ pub async fn skin_upload(app: AppHandle, state: State<'_, AppState>, uuid: Strin
     if bytes.len() > 64 * 1024 {
         return Err("Skin files must be smaller than 64 KB.".into());
     }
-    match png_size(&bytes) {
+    match crate::skin_library::png_size(&bytes) {
         Some((64, 64)) | Some((64, 32)) => {}
         _ => return Err("Minecraft skins must be 64×64 (or legacy 64×32) PNG images.".into()),
     }
-    let variant = if variant == "slim" { "slim" } else { "classic" };
-    let token = token_for(&app, &state, &uuid).await?;
+    upload(&app, &state, &uuid, bytes, if variant == "slim" { "slim" } else { "classic" }).await
+}
+
+/// Puts `bytes` (a checked 64×64 or 64×32 PNG) on the account as its skin with the `variant` arm model: the Skins page's
+/// and the wardrobe's Apply (`skin_library::apply`, from the launcher or a game). Answers the profile as described.
+pub async fn upload(app: &AppHandle, state: &AppState, uuid: &str, bytes: Vec<u8>, variant: &str) -> CmdResult<Value> {
+    let token = token_for(app, state, uuid).await?;
     let part = reqwest::multipart::Part::bytes(bytes).file_name("skin.png").mime_str("image/png").map_err(|e| e.to_string())?;
     let form = reqwest::multipart::Form::new().text("variant", variant.to_owned()).part("file", part);
     let response = state
@@ -127,10 +123,10 @@ pub async fn skin_upload(app: AppHandle, state: State<'_, AppState>, uuid: Strin
         .await
         .map_err(|e| friendly_network(&e))?;
     let profile = response_json(response, "Minecraft didn't accept the skin").await?;
-    forget_skin(&state, &uuid);
-    crate::auth::update_skin(&state, &uuid, variant, Some(&profile))?;
-    let described = describe(&state, &profile).await;
-    remember_profile(&state, &uuid, &described);
+    forget_skin(state, uuid);
+    crate::auth::update_skin(state, uuid, variant, Some(&profile))?;
+    let described = describe(state, &profile).await;
+    remember_profile(state, uuid, &described);
     Ok(described)
 }
 

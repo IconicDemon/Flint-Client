@@ -22,37 +22,39 @@ fn set(name: &str) -> Value {
 }
 
 #[derive(Clone)]
-struct Reply {
-    status: u16,
-    headers: Vec<(&'static str, String)>,
-    body: Vec<u8>,
-    delay: Duration,
+pub(crate) struct Reply {
+    pub(crate) status: u16,
+    pub(crate) headers: Vec<(&'static str, String)>,
+    pub(crate) body: Vec<u8>,
+    pub(crate) delay: Duration,
 }
 
 impl Reply {
-    fn json(status: u16, body: &Value) -> Self {
+    pub(crate) fn json(status: u16, body: &Value) -> Self {
         Self { status, headers: vec![("Content-Type", "application/json".into())], body: serde_json::to_vec(body).unwrap(), delay: Duration::ZERO }
     }
-    fn header(mut self, name: &'static str, value: &str) -> Self {
+    pub(crate) fn header(mut self, name: &'static str, value: &str) -> Self {
         self.headers.push((name, value.into()));
         self
     }
 }
 
 type Handler = Box<dyn FnMut(&str, &HashMap<String, String>) -> Reply + Send>;
+/// Each request the fake Store saw: its path and headers.
+type Seen = Arc<Mutex<Vec<(String, HashMap<String, String>)>>>;
 
 /// A one-route-at-a-time HTTP server on this computer that records each request's path and headers.
-struct FakeStore {
-    url: Url,
-    seen: Arc<Mutex<Vec<(String, HashMap<String, String>)>>>,
+pub(crate) struct FakeStore {
+    pub(crate) url: Url,
+    seen: Seen,
     handler: Arc<Mutex<Handler>>,
 }
 
 impl FakeStore {
-    async fn start(handler: impl FnMut(&str, &HashMap<String, String>) -> Reply + Send + 'static) -> Self {
+    pub(crate) async fn start(handler: impl FnMut(&str, &HashMap<String, String>) -> Reply + Send + 'static) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
-        let seen: Arc<Mutex<Vec<(String, HashMap<String, String>)>>> = Arc::default();
+        let seen: Seen = Arc::default();
         let handler: Arc<Mutex<Handler>> = Arc::new(Mutex::new(Box::new(handler)));
         let (s, h) = (seen.clone(), handler.clone());
         tokio::spawn(async move {
@@ -88,20 +90,20 @@ impl FakeStore {
         Self { url, seen, handler }
     }
 
-    fn requests(&self) -> usize {
+    pub(crate) fn requests(&self) -> usize {
         self.seen.lock().unwrap().len()
     }
 
-    fn last_header(&self, name: &str) -> Option<String> {
+    pub(crate) fn last_header(&self, name: &str) -> Option<String> {
         self.seen.lock().unwrap().last().and_then(|(_, h)| h.get(name).cloned())
     }
 
-    fn answer(&self, handler: impl FnMut(&str, &HashMap<String, String>) -> Reply + Send + 'static) {
+    pub(crate) fn answer(&self, handler: impl FnMut(&str, &HashMap<String, String>) -> Reply + Send + 'static) {
         *self.handler.lock().unwrap() = Box::new(handler);
     }
 }
 
-fn state_for(dir: &TestDir, store: &Url) -> AppState {
+pub(crate) fn state_for(dir: &TestDir, store: &Url) -> AppState {
     let mut state = AppState::for_tests(dir.0.clone());
     state.store = StoreState::new(Endpoints { store: store.clone(), mojang: store.clone(), access: None });
     state

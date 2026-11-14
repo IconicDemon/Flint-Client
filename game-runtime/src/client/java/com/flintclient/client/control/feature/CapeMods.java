@@ -19,6 +19,12 @@ import org.jspecify.annotations.Nullable;
  * The launcher has the same list for its Store page (app/src-tauri/src/capemods.rs {@code CAPE_MODS}; its test
  * {@code the_game_has_the_same_list} reads the entries below, one {@code new Known(...)} per line, and fails when they
  * differ).
+ *
+ * <p>Not listed since Flint 1.0.4: the Capes mod (id {@code capes}, OptiFine, LabyMod, Cosmetica and MinecraftCapes capes). It
+ * sets its cape in {@code PlayerInfo.getSkin}, which Flint now wraps whole and decides after ({@code mixin/feature/PlayerInfoMixin}):
+ * a Flint Store cape's wearer shows only the Flint cape, and anyone else the Capes mod's, so it never hides a Flint cape. Checked
+ * in game with its own jars (1.5.10+26.3, 1.5.10+1.21.11, 1.5.4+1.21 on 1.21.1). The others are as read on 2026-11-06 and not
+ * tried in game since.
  */
 public final class CapeMods {
 	/** A mod by the name players know it by, and the Fabric mod ids its jars declare. */
@@ -30,7 +36,6 @@ public final class CapeMods {
 
 	public static final List<Known> KNOWN = List.of(
 		new Known("Essential", "essential", "essential-container"),
-		new Known("Capes", "capes"),
 		new Known("Cape Provider", "cape-provider"),
 		new Known("Better Capes", "bettercapes"),
 		new Known("Cosmetica", "cosmetica", "cosmetica-core"),

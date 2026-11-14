@@ -117,7 +117,31 @@ public final class ParityReasons {
 		return null;
 	}
 
+	/**
+	 * The rows fair play turns off on a server ({@code ServerRules.fairPlay}): the maps' entity radar and cave layers, as
+	 * Xaero's Fair-Play minimap, and Sound Physics' debug rays; null elsewhere.
+	 */
+	static @Nullable String fairPlay(SettingDescriptor<?> s) {
+		boolean minimapRow = s == MapMods.Minimap.RADAR || s == MapMods.Minimap.PLAYERS || s == MapMods.Minimap.HOSTILE
+			|| s == MapMods.Minimap.PASSIVE || s == MapMods.Minimap.ITEMS || s == MapMods.Minimap.OTHERS || s == MapMods.Minimap.CAVE_MODE
+			|| s == MapMods.Minimap.CAVE_KEY || s == MapMods.Minimap.LAYER || s == MapMods.Minimap.LAYER_UP_KEY
+			|| s == MapMods.Minimap.LAYER_DOWN_KEY;
+		boolean worldMapRow = s == MapMods.WorldMap.PLAYERS || s == MapMods.WorldMap.MOBS || s == MapMods.WorldMap.LAYER;
+		// Sound Physics' debug rays: where each sound comes from, through walls.
+		boolean soundRow = s == SoundPhysicsSettings.RENDER_BOUNCES || s == SoundPhysicsSettings.RENDER_OCCLUSION;
+		return (minimapRow || worldMapRow || soundRow) && com.flintclient.client.control.feature.ServerRules.fairPlay() ? "Off on servers (fair play)"
+			: null;
+	}
+
 	public static @Nullable String reason(ModuleState module, SettingDescriptor<?> setting) {
+		String fair = fairPlay(setting);
+		if (fair != null) {
+			return fair;
+		}
+		if (setting == LookMods.MobOverlay.ALWAYS) {
+			// The outline is Minecraft's glow, seen through walls: only ever on the mob you look at.
+			return module.option(LookMods.MobOverlay.MODE) == 0 ? "Outlines show on the mob you look at only" : null;
+		}
 		if (LookMods.LootBeams.ID.equals(module.id())) {
 			return lootBeams(module, setting);
 		}
@@ -201,15 +225,70 @@ public final class ParityReasons {
 		if (s == VisualMods.ItemPhysics.STATIC) {
 			return style == 2 ? null : "The physics style already stops the bob";
 		}
-		if (s == VisualMods.ItemPhysics.CUSTOM_ITEMS) {
-			return m.decimal(VisualMods.ItemPhysics.CUSTOM_SCALE) != 0 ? null : "Set a custom item scale first";
+		return null;
+	}
+
+	/** Crosshair's styles ({@code PlayerMods.Crosshair.TYPE}'s indices). */
+	private static final int XH_VANILLA = 0;
+	private static final int XH_CROSS = 1;
+	private static final int XH_CIRCLE = 2;
+	private static final int XH_SQUARE = 3;
+	private static final int XH_DEBUG = 6;
+	private static final int XH_DRAWN = 7;
+
+	/**
+	 * Crosshair's rows the chosen style doesn't use, so the page lists only what changes the crosshair: Minecraft's own and
+	 * debug crosshairs take none of the shape, the drawn one is its own shape, a circle's size is its gap; colour gives way to
+	 * adaptive colour on the filled styles (Cross, Square, Drawn), which the line styles don't invert.
+	 */
+	private static @Nullable String crosshairStyle(ModuleState m, SettingDescriptor<?> s) {
+		int style = m.option(PlayerMods.Crosshair.TYPE);
+		boolean minecraft = style == XH_VANILLA || style == XH_DEBUG;
+		boolean filled = style == XH_CROSS || style == XH_SQUARE || style == XH_DRAWN;
+		if (s == PlayerMods.Crosshair.WIDTH || s == PlayerMods.Crosshair.HEIGHT || s == PlayerMods.Crosshair.GAP
+			|| s == PlayerMods.Crosshair.THICKNESS) {
+			if (minecraft) {
+				return "Minecraft's own crosshair has a size of its own";
+			}
+			if (style == XH_DRAWN) {
+				return "Your drawing is its shape";
+			}
+			return style == XH_CIRCLE && s != PlayerMods.Crosshair.GAP && s != PlayerMods.Crosshair.THICKNESS ? "A circle's size is its gap" : null;
+		}
+		if (s == PlayerMods.Crosshair.COLOR || s == PlayerMods.Crosshair.ALPHA || s == PlayerMods.Crosshair.INVERT
+			|| s == PlayerMods.Crosshair.OUTLINE || s == PlayerMods.Crosshair.DOT) {
+			if (minecraft) {
+				return "Minecraft's own crosshair keeps its look";
+			}
+			if (s == PlayerMods.Crosshair.INVERT) {
+				return filled ? null : "Lines take the crosshair color";
+			}
+			if ((s == PlayerMods.Crosshair.COLOR || s == PlayerMods.Crosshair.ALPHA) && filled && m.bool(PlayerMods.Crosshair.INVERT)
+				&& !m.bool(PlayerMods.Crosshair.RAINBOW)) {
+				return "Adaptive color is on: it inverts what's behind";
+			}
+		}
+		if (s == PlayerMods.Crosshair.ROTATION && style == XH_DEBUG) {
+			return "Minecraft's debug crosshair turns with you";
 		}
 		return null;
 	}
 
 	private static @Nullable String crosshair(ModuleState m, SettingDescriptor<?> s) {
+		String style = crosshairStyle(m, s);
+		if (style != null) {
+			return style;
+		}
 		if (s == PlayerMods.Crosshair.OUTLINE_COLOR || s == PlayerMods.Crosshair.OUTLINE_ALPHA) {
+			if (m.option(PlayerMods.Crosshair.TYPE) == XH_VANILLA || m.option(PlayerMods.Crosshair.TYPE) == XH_DEBUG) {
+				return "Minecraft's own crosshair keeps its look";
+			}
 			return m.bool(PlayerMods.Crosshair.OUTLINE) ? null : "Turn on Enable outline first";
+		}
+		if (s == PlayerMods.Crosshair.DOT_COLOR || s == PlayerMods.Crosshair.DOT_ALPHA) {
+			if (m.option(PlayerMods.Crosshair.TYPE) == XH_VANILLA || m.option(PlayerMods.Crosshair.TYPE) == XH_DEBUG) {
+				return "Minecraft's own crosshair keeps its look";
+			}
 		}
 		if (s == PlayerMods.Crosshair.DOT_COLOR || s == PlayerMods.Crosshair.DOT_ALPHA) {
 			return m.bool(PlayerMods.Crosshair.DOT) ? null : "Turn on Enable dot first";

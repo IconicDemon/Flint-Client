@@ -11,6 +11,7 @@ import net.minecraft.network.chat.Component;
 import org.joml.Matrix4fc;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 
 /**
  * Nametags: their size, and how each text part is drawn (opacity, background, hurt tint, chat bubbles; the shadow is
@@ -20,10 +21,20 @@ import org.spongepowered.asm.mixin.injection.At;
  */
 @Mixin(NameTagFeatureRenderer.Storage.class)
 abstract class SubmitNodeCollectionMixin {
-	@WrapOperation(method = "add", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;scale(FFF)V"))
-	private void flint$size(PoseStack pose, float x, float y, float z, Operation<Void> original) {
-		float k = Mc263Nametags.size();
-		original.call(pose, x * k, y * k, z * k);
+	// The nametag's size: each of the three scale factors, as values (a wrapped call would box them for every nametag, every frame).
+	@ModifyArg(method = "add", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;scale(FFF)V"), index = 0)
+	private float flint$sizeX(float x) {
+		return x * Mc263Nametags.size();
+	}
+
+	@ModifyArg(method = "add", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;scale(FFF)V"), index = 1)
+	private float flint$sizeY(float y) {
+		return y * Mc263Nametags.size();
+	}
+
+	@ModifyArg(method = "add", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;scale(FFF)V"), index = 2)
+	private float flint$sizeZ(float z) {
+		return z * Mc263Nametags.size();
 	}
 
 	/** A visible-through-walls tag's solid text (the normal list, no background). */

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.flintclient.client.control.store.AssetCache;
 import com.flintclient.client.control.store.CapeAnimation;
 import com.flintclient.client.control.store.StoreCosmeticsClient;
 import com.flintclient.client.control.store.StoreCosmeticsClient.Response;
@@ -578,14 +579,14 @@ class StoreCapesAnimatedTest {
 		Game first = wearing(cache, STANDARD);
 		first.run(PLAYING);
 		for (byte[] strip : STANDARD.strips()) {
-			assertArrayEquals(strip, Files.readAllBytes(cache.resolve(StoreCapes.sha256(strip) + ".png")));
+			assertArrayEquals(strip, Files.readAllBytes(AssetCache.file(cache, StoreCapes.sha256(strip))));
 		}
 		Game second = new Game(cache, first.store, Runnable::run, StoreCapes.MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
 		second.run(PLAYING);
 		assertEquals(CapeFrames.bytes(10, 16), second.capes.framesInMemory());
 		assertEquals(2, first.store.stripDownloads(), "the next launch reads them from the cache");
 
-		Files.write(cache.resolve(StoreCapes.sha256(STANDARD.strips().get(0)) + ".png"), new byte[] {1, 2, 3});
+		Files.write(AssetCache.file(cache, StoreCapes.sha256(STANDARD.strips().get(0))), new byte[] {1, 2, 3});
 		Game third = new Game(cache, first.store, Runnable::run, StoreCapes.MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
 		third.run(PLAYING);
 		assertEquals(3, first.store.stripDownloads(), "a changed file is downloaded again");
@@ -615,5 +616,91 @@ class StoreCapesAnimatedTest {
 		game.frame(EPOCH + 40, STEVE);
 		String line = game.capes.describe();
 		assertTrue(line.contains("1 animated (1 playing, 3 MiB of frames, 1 frame writes of "), line);
+	}
+
+	@Test
+	void otherPlayersPlayTheCardPreviewAndYouTheFullStrips(@TempDir Path cache) {
+		int n = STANDARD.durations().length;
+		List<byte[]> previewStrips = AnimatedCapeFixture.strips(8, n);
+		String animation = AnimatedCapeFixture.withPreview(STANDARD.animation(),
+			AnimatedCapeFixture.previewJson(8, n, previewStrips, AnimatedCapeFixture.BUCKET));
+		Game game = new Game(cache);
+		game.store.serve(STANDARD);
+		List<String> previewUrls = new ArrayList<>();
+		for (byte[] strip : previewStrips) {
+			String url = AnimatedCapeFixture.BUCKET + "animated/" + StoreCapes.sha256(strip) + ".png";
+			game.store.files.put(url, strip);
+			previewUrls.add(url);
+		}
+		game.store.wearing.put(ALEX, STANDARD.asset(animation));
+		game.players = List.of(STEVE, ALEX);
+		game.run(PLAYING);
+		assertNotNull(game.capes.texture(ALEX));
+		List<String> fetched = game.store.downloads.stream().map(URI::toString).toList();
+		assertTrue(fetched.containsAll(previewUrls), "another player's cape: the preview strips " + fetched);
+		for (String full : STANDARD.stripUrls()) {
+			assertFalse(fetched.contains(full), "never the full strips for someone else");
+		}
+		assertEquals(CapeFrames.bytes(n, 8), game.capes.framesInMemory(), "kept at the preview's scale");
+		game.frame(EPOCH, ALEX);
+		game.frame(EPOCH + AnimatedCapeFixture.STANDARD[0], ALEX);
+		assertArrayEquals(STANDARD.frame(1, 8), game.gpu.written.get(game.gpu.written.size() - 1), "the same frames, on the same clock");
+
+		// You wear it too: yours plays the full strips (as the Cosmetics window shows it), theirs stays the preview.
+		Game both = new Game(cache.resolve("both"));
+		both.store.serve(STANDARD);
+		for (int k = 0; k < previewStrips.size(); k++) {
+			both.store.files.put(previewUrls.get(k), previewStrips.get(k));
+		}
+		both.store.wearing.put(STEVE, STANDARD.asset(animation));
+		both.store.wearing.put(ALEX, STANDARD.asset(animation));
+		both.players = List.of(STEVE, ALEX);
+		both.run(PLAYING + 1);
+		List<String> got = both.store.downloads.stream().map(URI::toString).toList();
+		assertTrue(got.containsAll(STANDARD.stripUrls()) && got.containsAll(previewUrls), got.toString());
+		assertEquals(1, got.stream().filter(u -> u.equals(STANDARD.posterUrl())).count(), "one poster download for both");
+		assertNotEquals(both.capes.texture(STEVE), both.capes.texture(ALEX));
+		assertEquals(CapeFrames.bytes(n, 16) + CapeFrames.bytes(n, 8), both.capes.framesInMemory());
+	}
+
+	@Test
+	void withoutAPreviewOtherPlayersPlayTheFullStrips(@TempDir Path cache) {
+		Game game = new Game(cache);
+		game.store.wear(ALEX, STANDARD);
+		game.players = List.of(STEVE, ALEX);
+		game.run(PLAYING);
+		assertEquals(2, game.store.stripDownloads());
+		assertEquals(CapeFrames.bytes(10, 16), game.capes.framesInMemory());
+	}
+
+	@Test
+	void aSecondProfileReadsWhatTheFirstDownloaded(@TempDir Path shared) {
+		Game first = wearing(shared, STANDARD);
+		first.run(PLAYING);
+		int downloads = first.store.downloads.size();
+		assertEquals(3, downloads, "a poster and two strips");
+		Game second = new Game(shared, first.store, Runnable::run, StoreCapes.MAX_FRAME_BYTES, CapeFrames.MAX_BYTES);
+		second.run(PLAYING);
+		assertNotNull(second.capes.texture(STEVE));
+		assertEquals(downloads, first.store.downloads.size(), "nothing downloaded again: one cache for every profile");
+		assertTrue(second.capes.describe().contains("0 downloads"), second.capes.describe());
+	}
+
+	@Test
+	void anyStoreFileComesThroughTheSharedCacheCdnFirst(@TempDir Path cache) throws Exception {
+		Game game = new Game(cache);
+		byte[] file = "{\"format_version\":\"1.12.0\"}".getBytes(StandardCharsets.UTF_8);
+		String sha = StoreCapes.sha256(file);
+		URI cdn = URI.create("https://assets.flintclient.com/cosmetic-assets/models/g.json");
+		URI url = URI.create(AnimatedCapeFixture.BUCKET + "models/g.json");
+		game.store.files.put(cdn.toString(), file);
+		assertArrayEquals(file, game.capes.file(cdn, url, sha, 1000, "3D file"));
+		assertArrayEquals(file, game.capes.file(cdn, url, sha, 1000, "3D file"), "kept");
+		assertEquals(List.of(cdn), game.store.downloads, "once, from the CDN");
+		Files.delete(AssetCache.file(cache, sha));
+		game.store.files.remove(cdn.toString());
+		game.store.files.put(url.toString(), file);
+		assertArrayEquals(file, game.capes.file(cdn, url, sha, 1000, "3D file"), "the CDN fails: the url");
+		assertEquals(List.of(cdn, cdn, url), game.store.downloads);
 	}
 }

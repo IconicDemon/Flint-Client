@@ -24,6 +24,8 @@ type Store = {
   refreshSkin: (uuid: string) => Promise<void>;
   touchContent: (profileId: string) => void;
   dismissJob: (id: string) => void;
+  /** Downloads → Clear all: the finished entries leave the history; what is still working stays. */
+  clearFinishedJobs: () => void;
 };
 
 /**
@@ -175,6 +177,11 @@ export function StoreProvider({ info, children }: { info: AppInfo; children: Rea
     void api.dismissJob(id).catch(() => {});
   }, []);
 
+  const clearFinishedJobs = useCallback(() => {
+    setJobs((prev) => prev.filter(jobActive));
+    void api.clearFinishedJobs().catch(() => {});
+  }, []);
+
   const refreshSkin = useCallback(async (uuid: string) => {
     const skin = await api.skin(uuid);
     setSkins((prev) => ({ ...prev, [uuid]: skin }));
@@ -220,8 +227,9 @@ export function StoreProvider({ info, children }: { info: AppInfo; children: Rea
       refreshSkin,
       touchContent,
       dismissJob,
+      clearFinishedJobs,
     };
-  }, [info, accounts, activeUuid, profiles, selectedId, states, skins, jobs, contentRevision, reloadAccounts, reloadProfiles, selectProfile, switchAccount, refreshSkin, touchContent, dismissJob]);
+  }, [info, accounts, activeUuid, profiles, selectedId, states, skins, jobs, contentRevision, reloadAccounts, reloadProfiles, selectProfile, switchAccount, refreshSkin, touchContent, dismissJob, clearFinishedJobs]);
 
   const current = useRef(value);
   const listeners = useRef(new Set<() => void>());

@@ -68,6 +68,9 @@ final class Rows {
 		if (!row.inFlint()) {
 			return new Missing(row.label(), row.unavailable());
 		}
+		if (Catalog.THEME.equals(row.action())) {
+			return new Line(row.label(), new Button("Flint's colours, here and in the Flint app: a pick shows at once in both"), new ThemeSwatches());
+		}
 		if (row.action() != null && !row.action().equals(Catalog.LINK)) {
 			return new Line(row.label(), new Button(actionNote(row.action())), new PageControls.TextButton(actionText(row.action()), Glyph.FOLDER,
 				PageControls.Look.PLAIN, () -> MenuHost.openFolder(row.action())));
@@ -712,39 +715,54 @@ final class Rows {
 			return new Switch(() -> (Boolean) a.get(), () -> a.set(!(Boolean) a.get()));
 		}
 		String name = row.label();
-		return switch (setting) {
-			case BoolSetting bool -> new Switch(() -> (Boolean) a.get(), () -> a.set(!(Boolean) a.get()));
-			case IntSetting number -> whole(a, number, a instanceof Vanilla);
-			case FloatSetting number -> decimal(a, number);
-			case RgbSetting rgb -> {
-				ColorSwatch[] swatch = new ColorSwatch[1];
-				ColorPicker.Clear clear = clearFor(a, rgb);
-				swatch[0] = new ColorSwatch(() -> (Integer) a.get(), clear == null ? null : clear.on(), () -> host.openColorPicker(swatch[0], name,
-					rgb.defaultValue(), () -> (Integer) a.get(), v -> a.set(v), clear));
-				yield swatch[0];
+		// Each kind of setting's control (an if chain, not a switch with patterns: the shared sources build for Java 17 too).
+		if (setting instanceof BoolSetting) {
+			return new Switch(() -> (Boolean) a.get(), () -> a.set(!(Boolean) a.get()));
+		}
+		if (setting instanceof IntSetting number) {
+			return whole(a, number, a instanceof Vanilla);
+		}
+		if (setting instanceof FloatSetting number) {
+			return decimal(a, number);
+		}
+		if (setting instanceof RgbSetting rgb) {
+			ColorSwatch[] swatch = new ColorSwatch[1];
+			ColorPicker.Clear clear = clearFor(a, rgb);
+			swatch[0] = new ColorSwatch(() -> (Integer) a.get(), clear == null ? null : clear.on(), () -> host.openColorPicker(swatch[0], name,
+				rgb.defaultValue(), () -> (Integer) a.get(), v -> a.set(v), clear));
+			return swatch[0];
+		}
+		if (setting instanceof ChoiceSetting<?> choice) {
+			return choice(host, a, choice, name);
+		}
+		if (setting instanceof OptionSetting option) {
+			String[] labels = option.labels().toArray(new String[0]);
+			if (a instanceof Vanilla) {
+				// Only the choices this Minecraft has (1.8.9's graphics: Fast and Fancy).
+				labels = java.util.Arrays.copyOf(labels, MinecraftOptions.choices(option));
 			}
-			case ChoiceSetting<?> choice -> choice(host, a, choice, name);
-			case OptionSetting option -> {
-				String[] labels = option.labels().toArray(new String[0]);
-				if (a instanceof Vanilla) {
-					// Only the choices this Minecraft has (1.8.9's graphics: Fast and Fancy).
-					labels = java.util.Arrays.copyOf(labels, MinecraftOptions.choices(option));
-				}
-				yield fits(labels) ? new Segmented(labels, () -> (Integer) a.get(), i -> a.set(i)) : longChoice(host, a, labels, name);
-			}
-			case KeySetting key -> new KeyBind(() -> (String) a.get(), v -> a.set(v));
-			case TextSetting text -> textField(a, text);
-			case IdSetting id -> {
-				PickField[] field = new PickField[1];
-				boolean sound = id.kind() == IdKind.SOUND;
-				field[0] = new PickField(() -> IdCatalog.name(id.kind(), (String) a.get()), () -> host.openChooser(field[0], name, IdCatalog.of(id.kind()),
-					true, () -> (String) a.get(), v -> a.set(v), sound ? v -> IdCatalog.preview(v, 1F) : null));
-				yield field[0];
-			}
-			case IdValuesSetting values -> valuesField(host, a, values, name);
-			case IdListSetting list -> listField(host, a, list, name);
-			default -> throw new IllegalArgumentException("no control for " + setting);
-		};
+			return fits(labels) ? new Segmented(labels, () -> (Integer) a.get(), i -> a.set(i)) : longChoice(host, a, labels, name);
+		}
+		if (setting instanceof KeySetting) {
+			return new KeyBind(() -> (String) a.get(), v -> a.set(v));
+		}
+		if (setting instanceof TextSetting text) {
+			return textField(a, text);
+		}
+		if (setting instanceof IdSetting id) {
+			PickField[] field = new PickField[1];
+			boolean sound = id.kind() == IdKind.SOUND;
+			field[0] = new PickField(() -> IdCatalog.name(id.kind(), (String) a.get()), () -> host.openChooser(field[0], name, IdCatalog.of(id.kind()),
+				true, () -> (String) a.get(), v -> a.set(v), sound ? v -> IdCatalog.preview(v, 1F) : null));
+			return field[0];
+		}
+		if (setting instanceof IdValuesSetting values) {
+			return valuesField(host, a, values, name);
+		}
+		if (setting instanceof IdListSetting list) {
+			return listField(host, a, list, name);
+		}
+		throw new IllegalArgumentException("no control for " + setting);
 	}
 
 	/**
@@ -865,7 +883,7 @@ final class Rows {
 	}
 
 	/** A decimal setting in whole steps of its step size, shown with the step's decimals. */
-	private static Slider decimal(Access a, FloatSetting number) {
+	static Slider decimal(Access a, FloatSetting number) {
 		int steps = Math.round((number.max() - number.min()) / number.step());
 		int decimals = MenuMath.decimals(number.step());
 		return new Slider(0, steps, 1, "", () -> Math.round(((Float) a.get() - number.min()) / number.step()),
@@ -1098,6 +1116,16 @@ final class Rows {
 		/** Never shows the reset arrow. */
 		void withoutReset() {
 			resettable = false;
+		}
+
+		/** Puts the setting back to its default (a panel's own reset of several rows at once). */
+		void resetValue() {
+			access.reset();
+		}
+
+		/** The width the row's control takes (a panel lining rows up in columns). */
+		float controlWidth() {
+			return control.prefWidth();
 		}
 
 		/** Draws item {@code id} before the name, as the game draws it in an inventory. */

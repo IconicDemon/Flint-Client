@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { IdleAnimation, SkinViewer, type PlayerObject } from "skinview3d";
+import { buildModel, frameDurations, modelTexture, partFor, showFrame, type BuiltModel } from "../../lib/bedrockModel";
 import type { ShownCape } from "../../lib/capeSource";
 import { createCapeDriver, type CapeDriver } from "../../lib/capeTexture";
 import { useT } from "../../lib/i18n";
@@ -15,6 +16,21 @@ const TURN_MS = 420;
 const AMBIENT_FPS = 30;
 const SETTLE_S = 0.6;
 const REST = { arm: Math.PI * 0.02, cape: Math.PI * 0.06 };
+/** The zoom the controls step through (the page scrolls under the wheel, so zoom is buttons only). */
+const ZOOM = { min: 0.4, max: 1.25, step: 0.12, initial: 0.7 };
+
+/** A 3D cosmetic worn on the preview (features/wardrobe/useModels.ts loads and checks it). */
+export type PreviewModel = {
+  key: string;
+  geometry: import("../../lib/bedrockModel").ParsedGeometry;
+  image: HTMLImageElement | null;
+  frames: number;
+  frameMs: number[];
+  anchor: import("../../lib/cosmeticTypes").Anchor;
+  mirror: boolean;
+  hidesCape: boolean;
+};
+const NO_MODELS: PreviewModel[] = [];
 
 /** Blends the joints the idle pose moves toward rest: `s` = 1 keeps the pose, 0 is rest (as on the Skins page). */
 function blendToRest(player: PlayerObject, s: number) {
@@ -55,6 +71,16 @@ type Props = {
   label: string;
   /** Over the character while it shows something other than what the account wears (an item pointed at); null otherwise. */
   tag: ReactNode;
+  /** 3D cosmetics worn (wings, headwear… one per slot), drawn on the player's parts. */
+  models?: PreviewModel[];
+  /** Offers zoom buttons beside the turn controls. */
+  zoomable?: boolean;
+  /** Which way the character faces first. */
+  initialView?: "back" | "front";
+  /** The camera's first zoom (a taller, narrower stage wants less, so wings fit). */
+  initialZoom?: number;
+  /** Turns the character to face this way whenever it changes (the wardrobe: the back for capes and wings). */
+  facing?: "back" | "front";
 };
 
 /**
@@ -64,13 +90,16 @@ type Props = {
  * pose rests when the window is behind another or nobody has used it for a minute. Its few controls (turn, front and
  * back, pause) show while the pointer or keyboard focus is on it.
  */
-export const StorePreview = memo(function StorePreview({ skin, model, cape, motion, label, tag }: Props) {
+export const StorePreview = memo(function StorePreview({ skin, model, cape, motion, label, tag, models = NO_MODELS, zoomable = false, initialView = "back", initialZoom = ZOOM.initial, facing }: Props) {
   const t = useT();
   const host = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<SkinViewer | null>(null);
   const stage = useRef<Stage>(INERT);
   const [failed, setFailed] = useState(false);
-  const [view, setView] = useState<"back" | "front">("back");
+  const [view, setView] = useState<"back" | "front">(initialView);
+  const [zoom, setZoom] = useState(initialZoom);
+  /** Width over height of the stage: a tall, narrow stage zooms out so wide cosmetics (wings, auras) still fit. */
+  const [aspect, setAspect] = useState(1);
   /** Extra turns from the arrow buttons, added to the view's angle. */
   const [turn, setTurn] = useState(0);
   /** Playing unless the player paused it; reduced motion starts paused. */
@@ -103,7 +132,7 @@ export const StorePreview = memo(function StorePreview({ skin, model, cape, moti
     viewer.controls.enablePan = false;
     // The page scrolls under the wheel; the character turns by dragging or with the buttons.
     viewer.controls.enableZoom = false;
-    viewer.playerWrapper.rotation.y = VIEWS.back;
+    viewer.playerWrapper.rotation.y = VIEWS[initialView];
     viewer.animation = null;
     viewerRef.current = viewer;
 
@@ -176,6 +205,7 @@ export const StorePreview = memo(function StorePreview({ skin, model, cape, moti
     const onDragEnd = () => (dragging = false);
     const onRestored = () => loop.request();
     const resize = new ResizeObserver(([entry]) => {
+      setAspect(entry.contentRect.height > 0 ? entry.contentRect.width / entry.contentRect.height : 1);
       viewer.setSize(Math.max(1, Math.round(entry.contentRect.width)), Math.max(1, Math.round(entry.contentRect.height)));
       viewer.render();
     });
@@ -264,13 +294,63 @@ export const StorePreview = memo(function StorePreview({ skin, model, cape, moti
   }, [view, turn]);
 
   useEffect(() => {
+    if (!facing) return;
+    setTurn(0);
+    setView(facing);
+  }, [facing]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    viewer.zoom = zoomable ? zoom * Math.min(1, Math.max(0.5, aspect / 0.9)) : zoom;
+    stage.current.wake();
+  }, [zoom, aspect, zoomable, failed]);
+
+  // The 3D cosmetics: built on the player's parts, their texture strips stepped on the wall clock while playing.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || failed) return;
+    const player = viewer.playerObject;
+    const built: BuiltModel[] = [];
+    const timers: number[] = [];
+    for (const m of models) {
+      const texture = m.image ? modelTexture(m.image, m.frames) : null;
+      const model = buildModel(m.geometry, texture, m.anchor, m.mirror);
+      for (const root of model.roots) partFor(player, root.anchor).add(root.group);
+      built.push(model);
+      if (texture && m.frames > 1 && playing) {
+        const durations = frameDurations(m.frames, m.frameMs);
+        let f = 0;
+        const step = () => {
+          f = (f + 1) % m.frames;
+          showFrame(texture, f, m.frames);
+          stage.current.wake();
+          timers.push(window.setTimeout(step, durations[f]));
+        };
+        timers.push(window.setTimeout(step, durations[0]));
+      }
+    }
+    player.cape.visible = !models.some((m) => m.hidesCape);
+    stage.current.wake();
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      built.forEach((b) => {
+        b.material.map?.dispose();
+        b.dispose();
+      });
+      player.cape.visible = true;
+      stage.current.wake();
+    };
+  }, [models, playing, failed]);
+
+  useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     viewer.animation = motion ? new IdleAnimation() : null;
     stage.current.wake();
   }, [motion, failed]);
 
-  const animated = cape.source === "flint" && !!cape.animation;
+  const animated = (cape.source === "flint" && !!cape.animation) || models.some((m) => m.frames > 1);
   if (failed)
     return (
       <div className="store-stage-fallback">
@@ -299,6 +379,13 @@ export const StorePreview = memo(function StorePreview({ skin, model, cape, moti
           }}
         />
         <IconButton icon="chevronRight" label={t("store.preview.turnRight")} onClick={() => setTurn(turn + Math.PI / 4)} />
+        {zoomable && (
+          <>
+            <span className="store-stage-sep" />
+            <IconButton icon="zoomOut" label={t("wardrobe.preview.zoomOut")} disabled={zoom <= ZOOM.min + 1e-6} onClick={() => setZoom((z) => Math.max(ZOOM.min, z - ZOOM.step))} />
+            <IconButton icon="zoomIn" label={t("wardrobe.preview.zoomIn")} disabled={zoom >= ZOOM.max - 1e-6} onClick={() => setZoom((z) => Math.min(ZOOM.max, z + ZOOM.step))} />
+          </>
+        )}
         {animated && (
           <>
             <span className="store-stage-sep" />

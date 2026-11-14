@@ -17,10 +17,16 @@ class CapeModsTest {
 
 	@Test
 	void aCapeModLoadedInTheGameIsNamed() {
-		assertEquals(List.of("Capes"), loadedWith("fabricloader", "minecraft", "flintclient", "capes"));
+		assertEquals(List.of("Cosmetica"), loadedWith("fabricloader", "minecraft", "flintclient", "cosmetica"));
 		assertEquals(List.of("Essential"), loadedWith("essential-container"), "Essential's mods-folder jar");
 		assertEquals(List.of("Essential"), loadedWith("essential", "essential-container", "essential-loader"), "named once");
 		assertEquals(List.of("MinecraftCapes"), loadedWith("minecraftcapes"), "its 1.8.9 (Ornithe) build has the same id");
+	}
+
+	@Test
+	void theCapesModNoLongerCountsFlintDecidesAfterIt() {
+		assertEquals(List.of(), loadedWith("capes", "fabric-api", "fabric-language-kotlin"), "the Capes mod gives way to a Flint cape");
+		assertEquals(List.of("MinecraftCapes"), loadedWith("capes", "minecraftcapes"));
 	}
 
 	@Test
@@ -33,21 +39,21 @@ class CapeModsTest {
 
 	@Test
 	void severalAreNamedInTheListsOrderEachOnce() {
-		assertEquals(List.of("Capes", "Cosmetica", "MinecraftCapes", "Custom Capes"),
-			loadedWith("minecraftcapes", "capesmod", "cosmetica-core", "cosmetica", "ep-custom-capes", "capes"));
+		assertEquals(List.of("Essential", "Cosmetica", "MinecraftCapes", "Custom Capes"),
+			loadedWith("minecraftcapes", "capesmod", "cosmetica-core", "cosmetica", "ep-custom-capes", "essential"));
 	}
 
 	@Test
 	void theNoticeSaysWhichModsAreOnAndWhatToDo() {
-		assertEquals("A cape mod is on", CapeMods.noticeTitle(List.of("Capes")));
-		assertEquals("The Capes mod is on in this game and can hide your Flint cape here. Turn that mod off in the Flint app to see your cape.",
-			CapeMods.notice(List.of("Capes")));
-		assertEquals("Cape mods are on", CapeMods.noticeTitle(List.of("Capes", "Essential")));
-		assertEquals("The Capes and Essential mods are on in this game and can hide your Flint cape here. Turn those mods off in the Flint app to "
-			+ "see your cape.", CapeMods.notice(List.of("Capes", "Essential")));
-		assertEquals("The Capes mod is on and can hide your Flint cape in this game.", CapeMods.hint(List.of("Capes")));
-		assertEquals("The Capes, Essential and SkinMC mods are on and can hide your Flint cape in this game.",
-			CapeMods.hint(List.of("Capes", "Essential", "SkinMC")));
+		assertEquals("A cape mod is on", CapeMods.noticeTitle(List.of("Cosmetica")));
+		assertEquals("The Cosmetica mod is on in this game and can hide your Flint cape here. Turn that mod off in the Flint app to see your cape.",
+			CapeMods.notice(List.of("Cosmetica")));
+		assertEquals("Cape mods are on", CapeMods.noticeTitle(List.of("Cosmetica", "Essential")));
+		assertEquals("The Cosmetica and Essential mods are on in this game and can hide your Flint cape here. Turn those mods off in the Flint app to "
+			+ "see your cape.", CapeMods.notice(List.of("Cosmetica", "Essential")));
+		assertEquals("The Cosmetica mod is on and can hide your Flint cape in this game.", CapeMods.hint(List.of("Cosmetica")));
+		assertEquals("The Cosmetica, Essential and SkinMC mods are on and can hide your Flint cape in this game.",
+			CapeMods.hint(List.of("Cosmetica", "Essential", "SkinMC")));
 	}
 
 	@Test

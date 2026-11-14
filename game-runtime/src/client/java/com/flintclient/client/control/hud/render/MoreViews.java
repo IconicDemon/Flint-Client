@@ -47,7 +47,7 @@ final class MoreViews {
 		@Override
 		void update(ModuleState state, int mode, long nowNanos) {
 			breaking = state.bool(MoreHudMods.BlockIndicator.BREAKING);
-			HudLooks.Block look = mode == HUD || mode == PREVIEW ? HudData.block(state.integer(MoreHudMods.BlockIndicator.RANGE)) : null;
+			HudLooks.Block look = mode == HUD || mode == PREVIEW ? HudData.block() : null;
 			if (look != null) {
 				visible = true;
 				icon = look.icon == null ? ItemPainter.none() : look.icon;

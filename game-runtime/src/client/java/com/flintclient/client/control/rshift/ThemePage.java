@@ -28,7 +28,7 @@ final class ThemePage extends Node {
 	private static final float THEME_H = 330;
 
 	private final Label title = new Label(Type.PAGE_TITLE, "Theme");
-	private final Label about = new Label(Type.EMPTY_NOTE, "Choose how the menu looks and sounds. A choice shows at once.");
+	private final Label about = new Label(Type.EMPTY_NOTE, "Choose how Flint looks and sounds. A theme shows at once, here and in the Flint app.");
 	private final Label themesTitle = new Label(Type.SECTION_TITLE, "Themes");
 	private final Label soundTitle = new Label(Type.SECTION_TITLE, "Sounds");
 	private final TextButton reset;
@@ -52,8 +52,13 @@ final class ThemePage extends Node {
 		return ControlState.settings().menuTheme();
 	}
 
+	/** The menu takes the pick, and the Flint app with it (one theme everywhere). */
 	private static void set(MenuTheme value) {
+		boolean newLook = value.look() != theme().look();
 		ControlState.settings().setMenuTheme(value);
+		if (newLook) {
+			com.flintclient.client.control.ThemeSync.chosenInGame(value.look());
+		}
 	}
 
 	@Override

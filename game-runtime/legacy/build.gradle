@@ -42,9 +42,13 @@ loom {
 // The overlays this line is made of, base first: an overlay may build on another one (src/mc12110/overlay.properties:
 // base=mc12111), so 1.21.10 is 1.21.11's overlay plus what 1.21.10 does differently.
 // An overlay's compileOnly (comma-separated coordinates): libraries the sources compile against that its Minecraft
-// doesn't bring (1.21.10 has no jspecify).
+// doesn't bring (1.21.10 has no jspecify). An overlay's bundle (the same form): libraries the jar carries inside it (Fabric
+// loads them beside it) because its Minecraft doesn't have them at all (1.19.2 predates JOML). An overlay's java: the Java its Minecraft runs on (the official launcher's runtime
+// for that release), which the jar targets: the nearest overlay's (1.19.x: 17), else 21.
 def layers = []
 def extraCompileOnly = []
+def bundled = []
+def javaLevel = null
 for (def name = mcOverlay; name != null;) {
 	if (name in layers) {
 		throw new GradleException("overlay ${name} builds on itself")
@@ -56,9 +60,14 @@ for (def name = mcOverlay; name != null;) {
 		propsFile.withInputStream { props.load(it) }
 	}
 	extraCompileOnly += (props.getProperty("compileOnly") ?: "").split(",").collect { it.trim() }.findAll { it }
+	bundled += (props.getProperty("bundle") ?: "").split(",").collect { it.trim() }.findAll { it }
+	if (javaLevel == null && props.getProperty("java") != null) {
+		javaLevel = props.getProperty("java").trim().toInteger()
+	}
 	name = props.getProperty("base")
 }
-if (!extraCompileOnly.isEmpty()) {
+javaLevel = javaLevel ?: 21
+if (!extraCompileOnly.isEmpty() || !bundled.isEmpty()) {
 	repositories {
 		mavenCentral()
 	}
@@ -66,6 +75,10 @@ if (!extraCompileOnly.isEmpty()) {
 		extraCompileOnly.each {
 			compileOnly it
 			clientCompileOnly it
+		}
+		bundled.each {
+			implementation it
+			include it
 		}
 	}
 }
@@ -190,19 +203,24 @@ processResources {
 	inputs.property "version", modVersion
 	inputs.property "builtFor", mcVersion
 	inputs.property "minecraftRange", minecraftRange
+	def java = javaLevel
+	inputs.property "javaLevel", java
 
 	filesMatching("fabric.mod.json") {
 		expand "version": modVersion, "minecraftRange": minecraftRange, "builtFor": mcVersion
-		// 1.21.x runs on Java 21.
-		filter { it.replace('"java": ">=25"', '"java": ">=21"') }
+		// 1.21.x runs on Java 21, 1.19.x on Java 17 (the overlay's java).
+		filter { it.replace('"java": ">=25"', '"java": ">=' + java + '"') }
 	}
 }
 
 processClientResources {
 	dependsOn generateFlintResources
-	// Mixin refuses a compatibility level above the running Java: 1.21.x runs on Java 21.
+	// Mixin refuses a compatibility level above the running Java: 1.21.x runs on Java 21, 1.19.x on Java 17 (an overlay's own
+	// mixin config may say JAVA_21 too).
+	def java = javaLevel
+	inputs.property "javaLevel", java
 	filesMatching("*.mixins.json") {
-		filter { it.replace('"JAVA_25"', '"JAVA_21"') }
+		filter { it.replace('"JAVA_25"', '"JAVA_' + java + '"').replace('"JAVA_21"', '"JAVA_' + java + '"') }
 	}
 	// A shared mixin the line leaves out (a "skip" in its rules: its Minecraft doesn't have what the mixin changes) leaves
 	// the shared mixin config too.
@@ -238,7 +256,7 @@ tasks.configureEach { task ->
 }
 
 tasks.withType(JavaCompile).configureEach {
-	options.release = 21
+	options.release = javaLevel
 	// -Pmaxerrs=N: javac reports up to N errors (100 by default), for measuring a line's port.
 	if (project.hasProperty("maxerrs")) {
 		options.compilerArgs += ["-Xmaxerrs", project.property("maxerrs").toString()]

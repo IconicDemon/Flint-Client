@@ -83,7 +83,7 @@ pub struct JavaOverview {
 }
 
 /// The Java a version's own file asks for: the cached version file when there is one, else what Mojang's files for
-/// each line say (1.8.9 Java 8, 1.21.x Java 21, 26.x and anything newer Java 25).
+/// each line say (1.8.9 Java 8, 1.19.x Java 17, 1.21.x Java 21, 26.x and anything newer Java 25).
 fn version_java(game_root: &Path, version: &str) -> (String, u64) {
     let file = game_root.join("versions").join(version).join(format!("{version}.json"));
     let cached: Option<Value> = read_json_opt(&file);
@@ -94,6 +94,8 @@ fn version_java(game_root: &Path, version: &str) -> (String, u64) {
     }
     let (component, major) = if version.starts_with("1.8") {
         ("jre-legacy", 8)
+    } else if version.starts_with("1.19") {
+        ("java-runtime-gamma", 17)
     } else if version.starts_with("1.21") {
         ("java-runtime-delta", 21)
     } else {
@@ -296,7 +298,7 @@ pub fn review_args(text: &str, plans: &[VersionJava], custom_java: Option<u32>) 
     }
     let mut notes = Vec::new();
     if let Some(collector) = perfcore::chosen_collector(&args) {
-        notes.push(format!("Minecraft runs with {collector} instead of the collector the official launcher uses (ZGC on 26.x, G1 on 1.21 and 1.8.9), which is left out while this is here."));
+        notes.push(format!("Minecraft runs with {collector} instead of the collector the official launcher uses (ZGC on 26.x, G1 on 1.21, 1.19 and 1.8.9), which is left out while this is here."));
     } else {
         // Flint's own flags the player's replace (theirs come later, so they win).
         let flint = perfcore::tuning_args(JvmPolicy::CompactHeaders);
@@ -354,6 +356,11 @@ mod tests {
             let p = of(v);
             assert_eq!((p.with_menu.major, p.with_menu.minimum, p.with_menu.fallback), (21, 21, None), "{v}: its own Java 21 with Flint's menu, as the official launcher");
             assert_eq!((p.without_menu.major, p.without_menu.component.as_str()), (21, "java-runtime-delta"));
+        }
+        for v in ["1.19.2", "1.19"] {
+            let p = of(v);
+            assert_eq!((p.with_menu.major, p.with_menu.minimum, p.with_menu.fallback), (17, 17, None), "{v}: its own Java 17 with Flint's menu, as the official launcher");
+            assert_eq!((p.without_menu.major, p.without_menu.component.as_str()), (17, "java-runtime-gamma"));
         }
         let legacy = of("1.8.9");
         assert_eq!((legacy.with_menu.major, legacy.with_menu.minimum), (21, 21), "1.8.9 with Flint's menu: Mojang's Java 21");
@@ -424,6 +431,7 @@ mod tests {
         let review = review_args("-XX:+UseCompactObjectHeaders", &plans, None).unwrap();
         let note = &review.notes[0];
         assert!(note.contains("Java 21 (1.21.11, 1.21.10 and 1.21.1, and 1.8.9 with Flint's in-game menu)") && note.contains("Java 8 (1.8.9 without Flint's in-game menu)"), "{note}");
+        assert!(note.contains("Java 17 (1.19.2 and 1.19)"), "{note}");
         // A custom Java runs every launch: only its version counts.
         assert!(review_args("-XX:+UseZGC", &plans, Some(21)).unwrap().notes.iter().all(|n| !n.contains("needs Java")));
         assert!(review_args("-XX:+UseCompactObjectHeaders", &plans, Some(21)).unwrap().notes[0].contains("your custom Java is Java 21"));

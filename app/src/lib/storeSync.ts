@@ -5,21 +5,49 @@
  * Merit is Flint's one balance: the Store's wallet, which the game's Rewards page shows too (Backend migration 5100).
  */
 import type { CapeAnimation } from "./capeAnimation.ts";
+import { STORE_SLOTS, slotOf, type StoreSlot } from "./cosmeticTypes.ts";
 import { number } from "./format.ts";
-import { formatLocale, t, type MessageKey } from "./i18n.ts";
+import { formatLocale, t } from "./i18n.ts";
 
-export type StoreSlot = "cape" | "back" | "head" | "aura";
-export const STORE_SLOTS: StoreSlot[] = ["cape", "back", "head", "aura"];
-/** Each slot's name, as a message key (shown with `t`). */
-export const SLOT_LABELS: Record<StoreSlot, MessageKey> = { cape: "store.slot.cape", back: "store.slot.back", head: "store.slot.head", aura: "store.slot.aura" };
+// The kinds, slots and their names live in lib/cosmeticTypes.ts (one place, so a Store rename is a one-line change).
+export { SLOT_LABELS, STORE_SLOTS, type StoreSlot } from "./cosmeticTypes.ts";
 
-/** `animation`: an animated cape's frames and timing (lib/capeAnimation.ts); none for a static cape. */
-export type StoreAsset = { id: string; version: number; width?: number | null; height?: number | null; animation?: CapeAnimation | null };
+/** One file of a 3D cosmetic, as Rust shows it (its address and hash stay in Rust; `store_model_file` gets it, checked). */
+export type ModelFileInfo = { bytes?: number | null; width?: number | null; height?: number | null };
+
+/** A 3D cosmetic's files (cosmetics v2: wings, headwear… emotes): which exist, its texture's frames and where it attaches. */
+export type StoreModel = {
+  geometry?: ModelFileInfo | null;
+  texture?: ModelFileInfo | null;
+  animation?: ModelFileInfo | null;
+  thumbnail?: ModelFileInfo | null;
+  textureFrames?: number | null;
+  frameMs?: number[];
+  attach?: { anchor: string; side?: "left" | "right" | null } | null;
+  hidesCape?: boolean;
+};
+
+/**
+ * `animation`: an animated cape's frames and timing (lib/capeAnimation.ts); none for a static cape. `model`: a 3D cosmetic's
+ * files. `hasTexture`: false when the item has only its model's files (no flat texture for `store_asset`).
+ */
+export type StoreAsset = {
+  id: string;
+  version: number;
+  width?: number | null;
+  height?: number | null;
+  animation?: CapeAnimation | null;
+  model?: StoreModel | null;
+  hasTexture?: boolean;
+};
 
 export type StoreItem = {
   cosmeticId: string;
   slug: string;
-  kind: StoreSlot;
+  /** The Store's kind (lib/cosmeticTypes.ts `CosmeticKind`), or one a newer Store sends that Flint doesn't know yet. */
+  kind: string;
+  /** The slot it is worn in, as Rust read it; null for an emote or an unknown kind. Use `slotOf(item)`. */
+  slot?: StoreSlot | null;
   name: string;
   source?: string | null;
   test: boolean;
@@ -39,6 +67,11 @@ export type StoreItem = {
   state?: "owned" | "eligible" | "unavailable" | null;
   /** Launcher only: a reward listed in the community catalog, not owned; its art comes from the catalog (lib/community.ts). */
   listed?: boolean;
+  /** Cosmetics v2 catalog fields, when the Store sends them. `rarity` isn't in the v2 contract yet: sorted by only if sent. */
+  priceCoins?: number | null;
+  directPriceMinor?: number | null;
+  directCurrency?: string | null;
+  rarity?: string | null;
 };
 
 export type StoreInventory = {
@@ -48,6 +81,8 @@ export type StoreInventory = {
   balance: number | null;
   owned: StoreItem[];
   equipped: Partial<Record<StoreSlot, string>>;
+  /** The emote wheel: 8 places, each an owned emote's id or null. Absent from a Store without emotes. */
+  emotes?: (string | null)[] | null;
 };
 
 /** One account's Store page, as `store_inventory` answers it. */
@@ -188,12 +223,13 @@ export function storeHost(url: string): string {
 }
 
 export function isWorn(inventory: StoreInventory, item: StoreItem): boolean {
-  return inventory.equipped[item.kind] === item.cosmeticId;
+  const slot = slotOf(item);
+  return !!slot && inventory.equipped[slot] === item.cosmeticId;
 }
 
 /** The slots this inventory has something for, in the Store's order. */
 export function slotsWithItems(inventory: StoreInventory): StoreSlot[] {
-  return STORE_SLOTS.filter((slot) => inventory.owned.some((o) => o.kind === slot));
+  return STORE_SLOTS.filter((slot) => inventory.owned.some((o) => slotOf(o) === slot));
 }
 
 /** "Updated just now", "Updated 4 min ago": how old the Store's last answer is. */

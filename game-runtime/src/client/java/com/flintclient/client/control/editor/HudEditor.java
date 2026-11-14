@@ -62,8 +62,6 @@ public final class HudEditor {
 	private static final int DOT = 0x08FFFFFF;
 	private static final int OUTLINE = Palette.withAlpha(Tokens2.TEXT, 0.45F);
 	private static final int REASON = Palette.withAlpha(Tokens2.TEXT, 0.75F);
-	/** Snapping guides: ember at 75 %, one pixel. */
-	private static final int GUIDE = Palette.withAlpha(Tokens2.EMBER, 0.75F);
 	/** The scale handle's side and its (slightly larger) hit area, in GUI units. */
 	static final float HANDLE = 8.0F;
 	private static final float HANDLE_HIT = 11.0F;
@@ -1057,11 +1055,12 @@ public final class HudEditor {
 		}
 		if (guideV) {
 			int x = Math.round(guideX * g);
-			c.fill(x, Math.round(guideVFrom * g), x + 1, Math.round(guideVTo * g), GUIDE);
+			// Snapping guides: the accent at 75 %, one pixel.
+			c.fill(x, Math.round(guideVFrom * g), x + 1, Math.round(guideVTo * g), Palette.withAlpha(Tokens2.EMBER, 0.75F));
 		}
 		if (guideH) {
 			int y = Math.round(guideY * g);
-			c.fill(Math.round(guideHFrom * g), y, Math.round(guideHTo * g), y + 1, GUIDE);
+			c.fill(Math.round(guideHFrom * g), y, Math.round(guideHTo * g), y + 1, Palette.withAlpha(Tokens2.EMBER, 0.75F));
 		}
 	}
 

@@ -573,8 +573,10 @@ public final class UtilityMods {
 	public static final class Reconnect {
 		public static final String ID = "reconnect";
 		public static final BoolSetting AUTO = new BoolSetting("auto", "Auto reconnect", "Off: a Reconnect button only", false);
-		public static final IntSetting ATTEMPTS = new IntSetting("attempts", "Attempts", "Tries in a row before it stops", 3, 1, 100, 1, "");
-		public static final FloatSetting DELAY = new FloatSetting("delay", "Delay", "Before the first try", 5, 1, 300, 0.5F, " s");
+		public static final IntSetting ATTEMPTS = new IntSetting("attempts", "Attempts", "Tries in a row before it stops (10 at most)", 3, 1, 10,
+			1, "");
+		public static final FloatSetting DELAY = new FloatSetting("delay", "Delay", "Before the first try (3 seconds at least)", 5, 3, 300,
+			0.5F, " s");
 		public static final BoolSetting INCREMENT_DELAY = new BoolSetting("incrementDelay", "Increment delay", "Wait longer after each failed try",
 			false);
 		public static final FloatSetting INCREMENT = new FloatSetting("increment", "Increment", null, 5, 1, 20, 0.5F, " s");

@@ -15,6 +15,12 @@ import java.util.function.Supplier;
  * zoom of {@code perStep^(steps)} that glides toward its target. Pure Java.
  */
 public final class ZoomifyZoom {
+	/**
+	 * The most the field of view is ever divided by, scroll and secondary zoom together: 50×, as Flint's zoom on every line
+	 * ({@link ZoomState#MAX}, 1.8.9's). Zoomify itself went to 500×.
+	 */
+	public static final double MAX_DIVISOR = 50.0;
+
 	private final Interpolator initial;
 	private final Interpolator scroll;
 	private final IntSupplier initialZoom;
@@ -79,11 +85,17 @@ public final class ZoomifyZoom {
 		lastScrollTier = scrollTiers;
 	}
 
+	/** The main zoom's and the secondary zoom's divisors together, at most {@link #MAX_DIVISOR}. */
+	public static double combined(double main, double secondary) {
+		double both = main * secondary;
+		return Double.isNaN(both) ? 1.0 : Math.clamp(both, 1.0, MAX_DIVISOR);
+	}
+
 	/** The divisor the field of view is divided by this frame, {@code tickDelta} into the tick. */
 	public double divisor(float tickDelta) {
 		double base = 1 / initialMultiplier(tickDelta);
 		double t = resetting ? 0.0 : scroll.isSmooth() ? scroll.modify(lerp(tickDelta, prevScroll, scrollT)) : scrollT;
-		double result = Math.clamp(base * Math.pow(zoomPerStep.getAsInt() / 100.0, t * maxScrollTiers.getAsInt()), 1.0, 500.0);
+		double result = Math.clamp(base * Math.pow(zoomPerStep.getAsInt() / 100.0, t * maxScrollTiers.getAsInt()), 1.0, MAX_DIVISOR);
 		if (initialT == 0.0 && scrollT == 0.0) {
 			resetting = false;
 		}

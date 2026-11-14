@@ -50,6 +50,14 @@ public final class HudEffects {
 		return n;
 	}
 
+	/**
+	 * Representative effects for the Right Shift menu's HUD preview, into {@code out}: fixed times that never tick, made once,
+	 * never applied to anyone. Returns how many (none on lines without the preview).
+	 */
+	public static int samples(Object[] out) {
+		return com.flintclient.client.compat.McCompat.sampleEffects(out);
+	}
+
 	/** How many effects the player has (shown or not; a cheap size, to notice a change), or -1 outside a world. */
 	public static int size() {
 		LocalPlayer player = Mc263HudData.player();

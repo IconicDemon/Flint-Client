@@ -1,0 +1,66 @@
+{
+  "about": "Showcase feed fixtures (GET /api/v1/showcase/?placement=launcher, store src/lib/server/showcase.ts) for the browser preview (devMockShowcase.ts) and the launcher's tests (src-tauri/src/showcase/tests.rs). Fictional sponsors; times are moved to now by the mock.",
+  "now": "2026-11-10T12:00:00.000Z",
+  "mediaProjects": ["vkqzlqjbpvxrskwpvijt"],
+  "sets": {
+    "slides": {
+      "slides": [
+        {
+          "id": "6f1c2a8e-3b4d-4e5f-9a0b-1c2d3e4f5a6b",
+          "image_url": "https://vkqzlqjbpvxrskwpvijt.supabase.co/storage/v1/object/public/showcase-media/slides/6f1c2a8e-3b4d-4e5f-9a0b-1c2d3e4f5a6b/1d3c5e7f9a0b2c4d6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d.webp",
+          "width": 2400,
+          "height": 800,
+          "title": "Emberfall SMP: season 4 opens Friday",
+          "link_url": "https://emberfall.example.com/season-4",
+          "alt": "A volcano at dusk over a blocky island, with the words Emberfall season 4",
+          "starts_at": "2026-11-08T00:00:00.000Z",
+          "ends_at": "2026-11-24T00:00:00.000Z",
+          "weight": 3
+        },
+        {
+          "id": "0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d",
+          "image_url": "https://vkqzlqjbpvxrskwpvijt.supabase.co/storage/v1/object/public/showcase-media/slides/0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d/9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d.png",
+          "width": 1200,
+          "height": 400,
+          "title": "New in the Flint Store: Aurora capes",
+          "link_url": "https://store.flintclient.com/",
+          "alt": "",
+          "starts_at": null,
+          "ends_at": null,
+          "weight": 1
+        },
+        {
+          "id": "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+          "image_url": "https://vkqzlqjbpvxrskwpvijt.supabase.co/storage/v1/object/public/showcase-media/slides/c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f/5a5b5c5d5e5f50515253545556575859505a5b5c5d5e5f5051525354555657a1.jpg",
+          "width": 3000,
+          "height": 1000,
+          "title": "Glasswing Games: build week",
+          "link_url": null,
+          "alt": "Glass towers over a calm lake at night",
+          "starts_at": "2026-11-01T00:00:00.000Z",
+          "ends_at": "2026-11-10T12:20:00.000Z",
+          "weight": 1
+        }
+      ],
+      "rotate_ms": 6000
+    },
+    "one": {
+      "slides": [
+        {
+          "id": "0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d",
+          "image_url": "https://vkqzlqjbpvxrskwpvijt.supabase.co/storage/v1/object/public/showcase-media/slides/0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d/9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d.png",
+          "width": 1200,
+          "height": 400,
+          "title": "New in the Flint Store: Aurora capes",
+          "link_url": "https://store.flintclient.com/",
+          "alt": "",
+          "starts_at": null,
+          "ends_at": null,
+          "weight": 1
+        }
+      ],
+      "rotate_ms": 6000
+    },
+    "none": { "slides": [], "rotate_ms": 6000 }
+  }
+}

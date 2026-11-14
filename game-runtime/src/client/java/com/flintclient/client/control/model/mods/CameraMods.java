@@ -87,6 +87,7 @@ public final class CameraMods {
 			.section("Third Person Distance", DISTANCE, SCROLL_KEY, INCREMENT, DISTANCE_UP, DISTANCE_DOWN)
 			.section("Camera Smooth Zoom", SMOOTH, EASING).needs(Requirement.WORLD)
 			.note("Only in third person. Walls still stop the camera, as in Minecraft. A distance changed with the keys or the wheel is "
-				+ "kept.").build();
+				+ "kept. Off on Hypixel, whose rules don't allow seeing over or around things: Minecraft's own camera is used there.")
+			.build();
 	}
 }

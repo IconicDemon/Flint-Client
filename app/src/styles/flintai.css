@@ -89,7 +89,7 @@
 }
 
 .fm-core {
-  fill: #fef3e2;
+  fill: var(--logo-core);
 }
 
 .fm-spark {

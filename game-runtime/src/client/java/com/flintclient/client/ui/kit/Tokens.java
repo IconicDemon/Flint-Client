@@ -38,13 +38,13 @@ public final class Tokens {
 	public static final int MUTED_HIGH_CONTRAST = 0xFFB5B0A8;
 	public static final int FAINT = 0xFF5E5A54;
 
-	public static final int ACCENT = Palette.ACCENT;
-	public static final int ACCENT_HOVER = Palette.ACCENT_HOVER;
-	public static final int ACCENT_PRESS = Palette.ACCENT_PRESS;
-	public static final int ACCENT_INK = Palette.ACCENT_INK;
-	public static final int ACCENT_TEXT = Palette.ACCENT_TEXT;
+	public static int ACCENT = Palette.ACCENT;
+	public static int ACCENT_HOVER = Palette.ACCENT_HOVER;
+	public static int ACCENT_PRESS = Palette.ACCENT_PRESS;
+	public static int ACCENT_INK = Palette.ACCENT_INK;
+	public static int ACCENT_TEXT = Palette.ACCENT_TEXT;
 	/** The accent at 16%: selected chips, active icon tiles. */
-	public static final int ACCENT_SOFT = Palette.withAlpha(Palette.ACCENT, 0.16F);
+	public static int ACCENT_SOFT = Palette.withAlpha(Palette.ACCENT, 0.16F);
 
 	public static final int WARNING = 0xFFDBA85C;
 	public static final int DANGER = 0xFFDE6C62;
@@ -56,18 +56,35 @@ public final class Tokens {
 
 	public static final int TOGGLE_OFF_TRACK = 0xFF2A2724;
 	public static final int TOGGLE_OFF_KNOB = 0xFF8B8E96;
-	public static final int TOGGLE_ON_KNOB = 0xFF1C1206;
+	/** The knob on an on switch's accent track: the accent's ink. */
+	public static int TOGGLE_ON_KNOB = Palette.ACCENT_INK;
 	public static final int SLIDER_TRACK = 0xFF2A2724;
 	public static final int SLIDER_KNOB = 0xFFF3ECE2;
 	/** Text selection in fields. */
-	public static final int SELECTION = Palette.withAlpha(Palette.ACCENT, 0.38F);
+	public static int SELECTION = Palette.withAlpha(Palette.ACCENT, 0.38F);
+
+	static {
+		Palette.follow(Tokens::followAccent);
+	}
+
+	/** Remakes the accent family from {@link Palette}'s (the player's theme). */
+	private static void followAccent() {
+		ACCENT = Palette.ACCENT;
+		ACCENT_HOVER = Palette.ACCENT_HOVER;
+		ACCENT_PRESS = Palette.ACCENT_PRESS;
+		ACCENT_INK = Palette.ACCENT_INK;
+		ACCENT_TEXT = Palette.ACCENT_TEXT;
+		ACCENT_SOFT = Palette.withAlpha(Palette.ACCENT, 0.16F);
+		SELECTION = Palette.withAlpha(Palette.ACCENT, 0.38F);
+		TOGGLE_ON_KNOB = Palette.ACCENT_INK;
+	}
 	/** The modal scrim: black at 50%. */
 	public static final int SCRIM = 0x80000000;
 	/** The in-world dim behind a kit screen: black at 45%. */
 	public static final int DIM = 0x73000000;
 	/** Tooltips, matching {@code FlintTooltip}. */
 	public static final int TOOLTIP_FILL = 0xF2181A1F;
-	public static final int TOOLTIP_BORDER = Palette.BORDER_HOVER;
+	public static final int TOOLTIP_BORDER = 0x38FFFFFF;
 
 	/** Radii in units. */
 	public static final float RADIUS_WINDOW = 6;

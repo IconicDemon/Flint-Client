@@ -97,9 +97,10 @@ public final class SoundPhysicsSettings {
 	public static final BoolSetting PERFORMANCE_LOGGING = new BoolSetting("performance_logging", "Performance logging",
 		"Writes how long the work takes to the log", false);
 	public static final BoolSetting RENDER_BOUNCES = new BoolSetting("render_sound_bounces", "Show sound bounces",
-		"Draws each sound's rays in the world", false);
+		"Draws each sound's rays in the world (your own worlds only)", false);
 	public static final BoolSetting RENDER_OCCLUSION = new BoolSetting("render_occlusion", "Show occlusion",
-		"Draws the path from each sound to you, green when clear, red when blocked", false);
+		"Draws the path from each sound to you, green when clear, red when blocked (your own worlds only: it shows through walls)",
+		false);
 
 	// ---------- Block reflectivity and occlusion ----------
 	/** Block sound types the mod's files list, in its order (Minecraft's {@code SoundType} constant names). */

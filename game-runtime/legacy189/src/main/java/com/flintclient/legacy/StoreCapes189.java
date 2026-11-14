@@ -4,6 +4,7 @@ import com.flintclient.client.control.feature.CapeChoices;
 import com.flintclient.client.control.feature.CapeFrames;
 import com.flintclient.client.control.feature.StoreCapes;
 import com.flintclient.client.control.model.GameOptions;
+import com.flintclient.client.control.store.AssetCache;
 import com.flintclient.client.control.store.StoreCosmeticsClient;
 import com.flintclient.client.control.store.StoreEndpoint;
 import com.flintclient.client.control.store.StoreHandoff;
@@ -108,7 +109,9 @@ public final class StoreCapes189 {
 			}
 			StoreEndpoint endpoint = h.endpoint();
 			Path cache = mc.gameDir.toPath().resolve("flint").resolve("cache").resolve("cosmetics");
-			service = new StoreCapes<>(new StoreCosmeticsClient(endpoint, StoreCosmeticsClient.http()), cache, TEXTURES, StoreCapes.loaderThread());
+			AssetCache files = AssetCache.forGame(h.assetCacheDir(), cache);
+			service = new StoreCapes<>(new StoreCosmeticsClient(endpoint, StoreCosmeticsClient.http()), files, TEXTURES,
+				StoreCapes.loaderThread());
 			Flint.LOG.info("Flint Store capes: using " + endpoint);
 			capes = service;
 			StoreCapes.share(service);
@@ -153,7 +156,7 @@ public final class StoreCapes189 {
 				NEAR.clear();
 			}
 			service = handoff(mc, service, self);
-			service.update(System.nanoTime(), Shared.settings().gameBool(GameOptions.STORE_CAPES), WANTED);
+			service.update(System.nanoTime(), Shared.settings().gameBool(GameOptions.STORE_CAPES), WANTED, self);
 		} catch (RuntimeException | LinkageError e) {
 			failed = true;
 			Flint.LOG.warn("Flint: Store capes failed; they're off for this session", e);

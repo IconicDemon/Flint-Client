@@ -85,10 +85,20 @@ public final class HudRenderer {
 	private static final float[] SPOT = new float[2];
 	/** Registry indices of the enabled modules, in registry order (the order they are drawn in). */
 	private static final int[] ENABLED = new int[MODULES];
+	/** The enabled modules that draw themselves from a hook of their own (Armor): only the menu's preview places them. */
+	private static final int[] ENABLED_OWN = new int[MODULES];
+	private static int enabledOwnCount;
+	/**
+	 * The views the menu's preview draws sample values with ({@link HudPreview}), made the first time one is needed: their own
+	 * state, so the HUD's views never switch between live and sample data from frame to frame.
+	 */
+	private static final @Nullable ModuleView[] SAMPLE_VIEWS = new ModuleView[MODULES];
 
 	private static @Nullable Layout bound;
 	private static long boundRevision = -1;
 	private static int boundSwitches = -1;
+	/** The server rules the enabled list was made under ({@code ServerRules.revision}). */
+	private static int boundRules = -1;
 	private static int boundScale = -1;
 	private static int enabledCount;
 	private static boolean effectsHideVanilla;
@@ -136,55 +146,59 @@ public final class HudRenderer {
 		for (int i = 0; i < MODULES; i++) {
 			ModuleDescriptor descriptor = ModuleRegistry.all().get(i);
 			String id = descriptor.id();
-			if (!descriptor.hud()) {
-				continue;
+			if (descriptor.hud()) {
+				views[i] = view(id, surface);
 			}
-			views[i] = switch (id) {
-				case ModuleId.FPS -> new FpsView(surface);
-				case ModuleId.PING -> new PingView(surface);
-				case ModuleId.CPS -> new CpsView(surface);
-				case ModuleId.KEYSTROKES -> new KeystrokesView(surface);
-				case ModuleId.COORDINATES -> new CoordinatesView(surface);
-				case ModuleId.DIRECTION -> new DirectionView(surface);
-				case ModuleId.EFFECTS -> new EffectsView(surface);
-				case ModuleId.ARMOR -> new ArmorView(surface);
-				case HudMods.MemoryUsage.ID -> new InfoViews.MemoryView(surface);
-				case HudMods.Playtime.ID -> new OriginalViews.PlaytimeView(surface);
-				case HudMods.DayCounter.ID -> new OriginalViews.DayView(surface);
-				case HudMods.ViewAngles.ID -> new InfoViews.AnglesView(surface);
-				case HudMods.HeightLimit.ID -> new InfoViews.HeightView(surface);
-				case HudMods.Saturation.ID -> new InfoViews.SaturationView(surface);
-				case HudMods.PotionCounter.ID -> new OriginalViews.PotionView(surface);
-				case HudMods.ReachDisplay.ID -> new OriginalViews.ReachView(surface);
-				case HudMods.ComboCounter.ID -> new InfoViews.ComboView(surface);
-				case HudMods.HorseStats.ID -> new InfoViews.HorseView(surface);
-				case HudMods.Clock.ID -> new InfoViews.ClockView(surface);
-				case HudMods.Tps.ID -> new InfoViews.TpsView(surface);
-				case HudMods.ServerAddress.ID -> new InfoViews.ServerAddressView(surface);
-				case HudMods.Stopwatch.ID -> new InfoViews.StopwatchView(surface);
-				case HudMods.Cooldowns.ID -> new ItemViews.CooldownView(surface);
-				case HudMods.ItemCounter.ID -> new ItemViews.CounterView(surface);
-				case PlayerMods.ToggleSprint.ID -> new InfoViews.SprintView(surface);
-				case com.flintclient.client.control.model.mods.VisualMods.Momentum.ID -> new InfoViews.MomentumView(surface);
-				case com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID -> new InventoryView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.ID -> new MoreViews.BlockView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.DamageIndicator.ID -> new MoreViews.TargetView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.PlayerModel.ID -> new MoreViews.PlayerView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.PackDisplay.ID -> new OriginalViews.PackView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.Mousestrokes.ID -> new MoreViews.MouseView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.JumpReset.ID -> new MoreViews.JumpView(surface);
-				case com.flintclient.client.control.model.mods.MoreHudMods.ItemInfo.ID -> new MoreViews.HeldView(surface);
-				case com.flintclient.client.control.model.mods.LookMods.TeamTracker.ID -> new MoreViews.CompassView(surface);
-				case com.flintclient.client.control.model.mods.MapMods.Minimap.ID -> new MinimapView(surface);
-				case com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID -> new MoreViews.VanillaSpotView(
-					com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID, surface, true);
-				case com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID -> new MoreViews.VanillaSpotView(
-					com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID, surface, false);
-				case com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID -> new MusicPlayerView(surface);
-				default -> throw new IllegalStateException("No renderer for HUD module " + id);
-			};
 		}
 		return views;
+	}
+
+	/** The view that draws HUD module {@code id} on {@code surface}. */
+	private static ModuleView view(String id, int surface) {
+		return switch (id) {
+			case ModuleId.FPS -> new FpsView(surface);
+			case ModuleId.PING -> new PingView(surface);
+			case ModuleId.CPS -> new CpsView(surface);
+			case ModuleId.KEYSTROKES -> new KeystrokesView(surface);
+			case ModuleId.COORDINATES -> new CoordinatesView(surface);
+			case ModuleId.DIRECTION -> new DirectionView(surface);
+			case ModuleId.EFFECTS -> new EffectsView(surface);
+			case ModuleId.ARMOR -> new ArmorView(surface);
+			case HudMods.MemoryUsage.ID -> new InfoViews.MemoryView(surface);
+			case HudMods.Playtime.ID -> new OriginalViews.PlaytimeView(surface);
+			case HudMods.DayCounter.ID -> new OriginalViews.DayView(surface);
+			case HudMods.ViewAngles.ID -> new InfoViews.AnglesView(surface);
+			case HudMods.HeightLimit.ID -> new InfoViews.HeightView(surface);
+			case HudMods.Saturation.ID -> new InfoViews.SaturationView(surface);
+			case HudMods.PotionCounter.ID -> new OriginalViews.PotionView(surface);
+			case HudMods.ReachDisplay.ID -> new OriginalViews.ReachView(surface);
+			case HudMods.ComboCounter.ID -> new InfoViews.ComboView(surface);
+			case HudMods.HorseStats.ID -> new InfoViews.HorseView(surface);
+			case HudMods.Clock.ID -> new InfoViews.ClockView(surface);
+			case HudMods.Tps.ID -> new InfoViews.TpsView(surface);
+			case HudMods.ServerAddress.ID -> new InfoViews.ServerAddressView(surface);
+			case HudMods.Stopwatch.ID -> new InfoViews.StopwatchView(surface);
+			case HudMods.Cooldowns.ID -> new ItemViews.CooldownView(surface);
+			case HudMods.ItemCounter.ID -> new ItemViews.CounterView(surface);
+			case PlayerMods.ToggleSprint.ID -> new InfoViews.SprintView(surface);
+			case com.flintclient.client.control.model.mods.VisualMods.Momentum.ID -> new InfoViews.MomentumView(surface);
+			case com.flintclient.client.control.model.mods.UtilityMods.Inventory.ID -> new InventoryView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.BlockIndicator.ID -> new MoreViews.BlockView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.DamageIndicator.ID -> new MoreViews.TargetView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.PlayerModel.ID -> new MoreViews.PlayerView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.PackDisplay.ID -> new OriginalViews.PackView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.Mousestrokes.ID -> new MoreViews.MouseView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.JumpReset.ID -> new MoreViews.JumpView(surface);
+			case com.flintclient.client.control.model.mods.MoreHudMods.ItemInfo.ID -> new MoreViews.HeldView(surface);
+			case com.flintclient.client.control.model.mods.LookMods.TeamTracker.ID -> new MoreViews.CompassView(surface);
+			case com.flintclient.client.control.model.mods.MapMods.Minimap.ID -> new MinimapView(surface);
+			case com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID -> new MoreViews.VanillaSpotView(
+				com.flintclient.client.control.model.mods.UtilityMods.Scoreboard.ID, surface, true);
+			case com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID -> new MoreViews.VanillaSpotView(
+				com.flintclient.client.control.model.mods.UtilityMods.BossBar.ID, surface, false);
+			case com.flintclient.client.control.model.mods.MusicMods.MusicPlayer.ID -> new MusicPlayerView(surface);
+			default -> throw new IllegalStateException("No renderer for HUD module " + id);
+		};
 	}
 
 	private static HudStyle[] styles() {
@@ -231,7 +245,9 @@ public final class HudRenderer {
 		}
 		// Subtitles' Nearby Sound Activity: drawn over the modules, in the same pass (nothing to do while its list is empty).
 		boolean sounds = SoundActivityView.wanted();
-		if (enabledCount == 0 && !sounds) {
+		// The Right Shift menu's live preview: a mod with nothing to show is drawn with sample values (HudPreview).
+		boolean preview = HudPreview.active();
+		if (enabledCount == 0 && !sounds && !(preview && enabledOwnCount > 0)) {
 			return;
 		}
 		holdsWorld = true;
@@ -244,12 +260,37 @@ public final class HudRenderer {
 				int i = ENABLED[k];
 				ModuleState state = layout.modules().get(i);
 				ModuleView view = HUD_VIEWS[i];
-				view.update(state, ModuleView.HUD, now);
-				// Each module in its own GUI stratum: Minecraft then checks a new piece for overlaps only against that
-				// module's pieces, not every piece of the HUD so far (with many modules on, that check cost a quarter of
-				// the frame). Modules don't overlap one another's drawing order in a way this changes.
-				frame.nextLayer();
-				drawPlaced(c, HUD_PEN.on(c, HUD_STYLES[i]), view, state, screenW, screenH, guiScale, null, i, true);
+				// One module that throws is switched off for the session (Faults; the HUD drops it at the next bind), and the
+				// others still draw this frame. The one try per module costs nothing until something throws.
+				try {
+					if (i == com.flintclient.client.control.feature.Faults.qaFailModule) {
+						throw com.flintclient.client.control.feature.Faults.qaFailure(state.id());
+					}
+					view.update(state, ModuleView.HUD, now);
+					// Each module in its own GUI stratum: Minecraft then checks a new piece for overlaps only against that
+					// module's pieces, not every piece of the HUD so far (with many modules on, that check cost a quarter of
+					// the frame). Modules don't overlap one another's drawing order in a way this changes.
+					frame.nextLayer();
+					if (!drawPlaced(c, HUD_PEN.on(c, HUD_STYLES[i]), view, state, screenW, screenH, guiScale, null, i, true) && preview) {
+						drawSampleOnHud(c, state, i, screenW, screenH, guiScale, now);
+					}
+				} catch (RuntimeException e) {
+					com.flintclient.client.control.feature.Faults.moduleFailed(i, "drawing on the HUD", e);
+				}
+			}
+			if (preview) {
+				// Armor draws itself from the hotbar's hook (with sample pieces while the menu is open); here it is only placed, so
+				// the menu can outline it.
+				for (int k = 0; k < enabledOwnCount; k++) {
+					int i = ENABLED_OWN[k];
+					ModuleState state = layout.modules().get(i);
+					try {
+						HUD_VIEWS[i].update(state, ModuleView.HUD, now);
+						drawPlaced(c, HUD_PEN.on(c, HUD_STYLES[i]), HUD_VIEWS[i], state, screenW, screenH, guiScale, null, i, true);
+					} catch (RuntimeException e) {
+						com.flintclient.client.control.feature.Faults.moduleFailed(i, "drawing on the HUD", e);
+					}
+				}
 			}
 			if (sounds) {
 				frame.nextLayer();
@@ -258,6 +299,26 @@ public final class HudRenderer {
 		} finally {
 			c.end();
 			FlintFrame.end();
+		}
+	}
+
+	/**
+	 * The menu's preview of a module that has nothing to show: its sample values ({@link ModuleView#SAMPLE}) in its own style,
+	 * where it sits, a touch faded so it reads as an example. Its rectangle is recorded as the HUD's, for the menu's outline.
+	 */
+	private static void drawSampleOnHud(Canvas c, ModuleState state, int i, float screenW, float screenH, int guiScale, long now) {
+		ModuleView sample = SAMPLE_VIEWS[i];
+		if (sample == null) {
+			sample = view(state.id(), HudText.HUD);
+			SAMPLE_VIEWS[i] = sample;
+		}
+		sample.update(state, ModuleView.SAMPLE, now);
+		float before = c.opacity();
+		c.setOpacity(before * HudPreview.SAMPLE_OPACITY);
+		try {
+			drawPlaced(c, HUD_PEN.on(c, HUD_STYLES[i]), sample, state, screenW, screenH, guiScale, null, i, true, false);
+		} finally {
+			c.setOpacity(before);
 		}
 	}
 
@@ -347,6 +408,9 @@ public final class HudRenderer {
 				HUD_VIEWS[i].forget();
 				PREVIEW_VIEWS[i].forget();
 			}
+			if (SAMPLE_VIEWS[i] != null) {
+				SAMPLE_VIEWS[i].forget();
+			}
 		}
 	}
 
@@ -376,19 +440,28 @@ public final class HudRenderer {
 	private static void bind(Layout layout) {
 		long revision = layout.revision();
 		int switches = ControlState.layouts().switchCount();
-		if (layout == bound && revision == boundRevision && switches == boundSwitches) {
+		int rules = com.flintclient.client.control.feature.ServerRules.revision();
+		if (layout == bound && revision == boundRevision && switches == boundSwitches && rules == boundRules) {
 			return;
 		}
 		bound = layout;
 		boundRevision = revision;
 		boundSwitches = switches;
+		boundRules = rules;
 		enabledCount = 0;
+		enabledOwnCount = 0;
 		for (int i = 0; i < MODULES; i++) {
-			// A module this line doesn't run (a profile from another line on 1.8.9) stays off the HUD.
+			// A module this line doesn't run (a profile from another line on 1.8.9) stays off the HUD, and so does one this
+			// server's rules keep off (the Minimap on Hypixel).
 			// A module that draws itself from its own hook (Armor) is the editor's only.
 			if (HUD_VIEWS[i] != null && !HUD_VIEWS[i].editorOnly() && layout.modules().get(i).enabled() && layout.modules().get(i).descriptor().status().usable()
+				&& !com.flintclient.client.control.feature.ServerRules.blocked(i)
 				&& com.flintclient.client.control.rshift.Catalog.runs(layout.modules().get(i).descriptor())) {
 				ENABLED[enabledCount++] = i;
+			} else if (HUD_VIEWS[i] != null && HUD_VIEWS[i].editorOnly() && layout.modules().get(i).enabled()
+				&& layout.modules().get(i).descriptor().status().usable() && !com.flintclient.client.control.feature.ServerRules.blocked(i)
+				&& com.flintclient.client.control.rshift.Catalog.runs(layout.modules().get(i).descriptor())) {
+				ENABLED_OWN[enabledOwnCount++] = i;
 			}
 		}
 		ModuleState effects = layout.modules().get(EFFECTS);
@@ -415,6 +488,12 @@ public final class HudRenderer {
 	 */
 	private static boolean drawPlaced(Canvas c, HudPen pen, ModuleView view, ModuleState state, float screenW, float screenH, int guiScale,
 		@Nullable HudScene scene, int index, boolean hud) {
+		return drawPlaced(c, pen, view, state, screenW, screenH, guiScale, scene, index, hud, hud);
+	}
+
+	/** As above; {@code fade}: the view's own fading applies ({@link ModuleView#opacity}: the HUD's live views). */
+	private static boolean drawPlaced(Canvas c, HudPen pen, ModuleView view, ModuleState state, float screenW, float screenH, int guiScale,
+		@Nullable HudScene scene, int index, boolean hud, boolean fade) {
 		view.measure(pen, state);
 		if (view.width <= 0 || view.height <= 0) {
 			return false;
@@ -463,7 +542,7 @@ public final class HudRenderer {
 			RECTS[4 * index + 3] = drawnH;
 			RECT_FRAME[index] = hudFrame;
 		}
-		float opacity = hud ? view.opacity() : 1;
+		float opacity = fade ? view.opacity() : 1;
 		float before = c.opacity();
 		if (opacity < 1) {
 			c.setOpacity(before * opacity);
@@ -537,7 +616,8 @@ public final class HudRenderer {
 		int guiScale = c.guiScale();
 		for (int i = 0; i < MODULES; i++) {
 			ModuleState state = layout.modules().get(i);
-			if (!state.enabled() || HUD_VIEWS[i] == null || !com.flintclient.client.control.rshift.Catalog.runs(state.descriptor())) {
+			if (!state.enabled() || HUD_VIEWS[i] == null || !com.flintclient.client.control.rshift.Catalog.runs(state.descriptor())
+				|| com.flintclient.client.control.feature.ServerRules.blocked(i)) {
 				scene.off(i);
 				continue;
 			}
@@ -621,6 +701,20 @@ public final class HudRenderer {
 		}
 		System.arraycopy(RECTS, 4 * index, out4, 0, 4);
 		return true;
+	}
+
+	/** {@link #lastRect} by the module's registry index (the menu goes over every module each frame). Allocation-free. */
+	public static boolean lastRectAt(int index, float[] out4) {
+		if (index < 0 || index >= MODULES || hudFrame == 0 || hudFrame - RECT_FRAME[index] > 1 || System.nanoTime() - hudFrameAt > RECT_STALE_NANOS) {
+			return false;
+		}
+		System.arraycopy(RECTS, 4 * index, out4, 0, 4);
+		return true;
+	}
+
+	/** How many modules there are to ask {@link #lastRectAt} about. */
+	public static int moduleCount() {
+		return MODULES;
 	}
 
 	/**

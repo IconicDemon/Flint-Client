@@ -59,6 +59,8 @@ public final class LayoutCodec {
 		for (ModuleState module : layout.modules()) {
 			readModule(module, JsonFields.object(modules, module.id()));
 		}
+		// Settings that moved between modules, once all of them are read.
+		ModuleMigrations.across(layout, modules);
 		return layout;
 	}
 

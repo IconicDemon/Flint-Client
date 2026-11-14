@@ -344,7 +344,7 @@ enum LoaderSource {
 
 impl LoaderSource {
     fn for_game(game: &str) -> Self {
-        if game == "1.8.9" {
+        if crate::ornithe::on_ornithe(game) {
             LoaderSource::Ornithe
         } else {
             LoaderSource::Fabric
@@ -380,6 +380,16 @@ impl LoaderSource {
         }
     }
 
+    /// Ornithe's library upgrades for a game version: the libraries its own installer adds to the loader profile, above all a
+    /// newer log4j for 1.8.9 (Mojang's 2.0-beta9 has no `Logger.debug(String, Object)`, which Mixin calls for Ornithe's
+    /// mods: Mod Menu Ornithe with OSL failed at start without it). None for official Fabric.
+    fn library_upgrades_url(self, game: &str) -> Option<String> {
+        match self {
+            LoaderSource::Fabric => None,
+            LoaderSource::Ornithe => Some(format!("{ORNITHE_META}/versions/libraries/{game}")),
+        }
+    }
+
     /// The version a profile may build on. Ornithe names its own copy of vanilla 1.8.9 (`1.8.9-vanilla`, which swaps in
     /// Legacy Fabric's LWJGL builds); Flint runs it on Mojang's own 1.8.9, which Fabric Loader runs as is.
     fn check_inherits(self, profile: &Value, game: &str) -> CmdResult<()> {
@@ -391,6 +401,35 @@ impl LoaderSource {
             Err(format!("{} returned a profile for another Minecraft version", self.name()))
         }
     }
+}
+
+/// Marks a kept loader profile that has Ornithe's library upgrades in it (a profile kept before Flint added them is fetched
+/// again).
+const LIBRARY_UPGRADES_APPLIED: &str = "flintLibraryUpgrades";
+
+/// Adds Ornithe's library upgrades (`[{name, url}]`, as its installer adds them) to a loader profile's libraries: a profile
+/// library takes the place of Mojang's with the same group and name, so Mojang's log4j 2.0-beta9 gives way. LWJGL is left as
+/// Mojang's (Flint runs Mojang's own 1.8.9 and its natives); a library already in the profile stays. Returns how many came in.
+fn add_library_upgrades(profile: &mut Value, upgrades: &Value) -> CmdResult<usize> {
+    let list = upgrades.as_array().ok_or("Ornithe's library upgrades aren't a list")?;
+    let libraries = profile["libraries"].as_array_mut().ok_or("Bad Fabric profile")?;
+    let mut keys: HashSet<String> = libraries.iter().filter_map(|l| l["name"].as_str()).map(library_key).collect();
+    let mut added = 0;
+    for upgrade in list {
+        let name = upgrade["name"].as_str().ok_or("Bad library upgrade")?;
+        maven_path(name).ok_or("Bad library upgrade name")?;
+        if name.starts_with("org.lwjgl") {
+            continue;
+        }
+        let url = upgrade["url"].as_str().unwrap_or("https://libraries.minecraft.net/");
+        check_host(url)?;
+        if keys.insert(library_key(name)) {
+            libraries.push(json!({ "name": name, "url": url }));
+            added += 1;
+        }
+    }
+    profile[LIBRARY_UPGRADES_APPLIED] = json!(true);
+    Ok(added)
 }
 
 /// A maven's `.sha1` file: the 40 hex digits it starts with (some mavens add the file name after them).
@@ -453,17 +492,46 @@ async fn fabric_profile(state: &AppState, game: &str, pinned: Option<&str>) -> C
         .join("versions")
         .join(source.profile_dir(game, &loader))
         .join("profile.json");
-    if let Some(value) = read_json_opt::<Value>(&path) {
-        return Ok((value, loader));
+    let kept = read_json_opt::<Value>(&path);
+    if let Some(value) = &kept {
+        if source.library_upgrades_url(game).is_none() || value[LIBRARY_UPGRADES_APPLIED].as_bool() == Some(true) {
+            return Ok((value.clone(), loader));
+        }
     }
-    let mut value = get_json(&state.http, &source.profile_url(game, &loader), &format!("Could not load the {} profile", source.name())).await?;
+    match download_fabric_profile(state, source, game, &loader).await {
+        Ok(value) => {
+            write_json(&path, &value)?;
+            Ok((value, loader))
+        }
+        // A profile kept from before Ornithe's library upgrades still launches while Ornithe can't be reached.
+        Err(error) => match kept {
+            Some(value) => {
+                eprintln!("[flint] Ornithe's profile couldn't be refreshed ({error}); launching with the kept one");
+                Ok((value, loader))
+            }
+            None => Err(error),
+        },
+    }
+}
+
+/// A loader profile fresh from its meta: checked, with Ornithe's library upgrades in it (when they can be had; without them
+/// it is fetched again next time) and every library's sha1.
+async fn download_fabric_profile(state: &AppState, source: LoaderSource, game: &str, loader: &str) -> CmdResult<Value> {
+    let mut value = get_json(&state.http, &source.profile_url(game, loader), &format!("Could not load the {} profile", source.name())).await?;
     if value["mainClass"].as_str().is_none() {
         return Err(format!("{} returned an incomplete profile", source.name()));
     }
     source.check_inherits(&value, game)?;
+    if let Some(url) = source.library_upgrades_url(game) {
+        match get_json(&state.http, &url, "Could not load Ornithe's library upgrades").await {
+            Ok(upgrades) => {
+                add_library_upgrades(&mut value, &upgrades)?;
+            }
+            Err(error) => eprintln!("[flint] {error}; the profile is fetched again next time"),
+        }
+    }
     fill_library_hashes(state, &mut value).await?;
-    write_json(&path, &value)?;
-    Ok((value, loader))
+    Ok(value)
 }
 
 fn runtime_platform(index: &Value, component: &str) -> Option<&'static str> {
@@ -692,47 +760,76 @@ impl Listed {
                 *per_folder.entry(parent).or_default() += 1;
             }
         }
+        let folders: Vec<&Path> = per_folder.into_iter().filter(|(_, count)| *count >= Self::MIN_FILES).map(|(folder, _)| folder).collect();
         let mut listed = Listed::default();
-        for (folder, count) in per_folder {
-            if count < Self::MIN_FILES {
-                continue;
-            }
-            let entries = match std::fs::read_dir(folder) {
-                Ok(entries) => entries,
-                // Not there yet (a first install): every file in it is missing.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    listed.folders.insert(folder.to_owned(), HashMap::new());
-                    continue;
-                }
-                Err(_) => continue,
-            };
-            let mut sizes = HashMap::new();
-            let mut whole = true;
-            for entry in entries {
-                let Ok(entry) = entry else {
-                    whole = false;
-                    break;
-                };
-                match entry.file_type() {
-                    Ok(kind) if kind.is_file() => match entry.metadata() {
-                        Ok(meta) => {
-                            sizes.insert(Self::key(&entry.file_name()), meta.len());
-                        }
-                        Err(_) => whole = false,
-                    },
-                    // A link (followed by the per-file check) or anything else unexpected: checked file by file.
-                    Ok(kind) if kind.is_dir() => {}
-                    _ => whole = false,
-                }
-            }
-            if whole {
+        for (folder, sizes) in folders.iter().zip(Self::list_all(&folders)) {
+            if let Some(sizes) = sizes {
                 if !cfg!(windows) {
-                    listed.folded.insert(folder.to_owned(), sizes.keys().map(|name| name.to_lowercase()).collect());
+                    listed.folded.insert(folder.to_path_buf(), sizes.keys().map(|name| name.to_lowercase()).collect());
                 }
-                listed.folders.insert(folder.to_owned(), sizes);
+                listed.folders.insert(folder.to_path_buf(), sizes);
             }
         }
         listed
+    }
+
+    /// The most folders listed at once: a version's ~4,000 assets sit in 256 folders, and listing them one after another
+    /// was most of the file check before every Play (0.25-0.35 s measured under load).
+    const LIST_THREADS: usize = 6;
+
+    /// Each folder's listing ([Self::list_one]), in order; several at a time when there are many.
+    fn list_all(folders: &[&Path]) -> Vec<Option<HashMap<String, u64>>> {
+        let threads = std::thread::available_parallelism().map_or(2, std::num::NonZeroUsize::get).clamp(2, Self::LIST_THREADS);
+        if folders.len() < 16 {
+            return folders.iter().map(|folder| Self::list_one(folder)).collect();
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let mut out: Vec<Option<HashMap<String, u64>>> = vec![None; folders.len()];
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut mine = Vec::new();
+                        loop {
+                            let i = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(folder) = folders.get(i) else { break };
+                            mine.push((i, Self::list_one(folder)));
+                        }
+                        mine
+                    })
+                })
+                .collect();
+            for worker in workers {
+                // A panic while listing goes on to the caller, as it did when the folders were listed here one by one.
+                for (i, sizes) in worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)) {
+                    out[i] = sizes;
+                }
+            }
+        });
+        out
+    }
+
+    /// One folder's files and sizes, when it could be read whole (an empty listing when it isn't there yet: a first install,
+    /// every file in it missing); `None` leaves its files to the per-file check.
+    fn list_one(folder: &Path) -> Option<HashMap<String, u64>> {
+        let entries = match std::fs::read_dir(folder) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(HashMap::new()),
+            Err(_) => return None,
+        };
+        let mut sizes = HashMap::new();
+        for entry in entries {
+            let entry = entry.ok()?;
+            match entry.file_type() {
+                Ok(kind) if kind.is_file() => {
+                    sizes.insert(Self::key(&entry.file_name()), entry.metadata().ok()?.len());
+                }
+                // A link (followed by the per-file check) or anything else unexpected: checked file by file.
+                Ok(kind) if kind.is_dir() => {}
+                _ => return None,
+            }
+        }
+        Some(sizes)
     }
 
     /// `Some(size)` for a file of a listed folder (`Some(None)`: missing); `None` when the per-file check must decide (its
@@ -1080,7 +1177,12 @@ struct Plan {
 }
 
 async fn install_inner(app: &AppHandle, state: &AppState, profile: &Profile, cancel: &Arc<AtomicBool>, deep: bool, steps: Option<&Steps>) -> CmdResult<Installed> {
-    let plan = until_cancelled(cancel, make_plan(app, state, profile, cancel, deep, false, steps)).await?;
+    install_inner_as(app, state, profile, cancel, deep, steps, false).await
+}
+
+/// `quiet`: for a standby game (swap.rs), whose profile is running: no states are shown for it.
+async fn install_inner_as(app: &AppHandle, state: &AppState, profile: &Profile, cancel: &Arc<AtomicBool>, deep: bool, steps: Option<&Steps>, quiet: bool) -> CmdResult<Installed> {
+    let plan = until_cancelled(cancel, make_plan(app, state, profile, cancel, deep, quiet, steps)).await?;
     let id = profile.id.as_str();
     // Downloads are SHA-1 checked before they're moved into place, so the jars fetched now are
     // remembered as verified: the first launch after an install doesn't hash them all again.
@@ -1095,7 +1197,9 @@ async fn install_inner(app: &AppHandle, state: &AppState, profile: &Profile, can
     cancelled(cancel)?;
     step(steps, "download");
 
-    emit_stage(app, state, id, "installing", "install", "Installing");
+    if !quiet {
+        emit_stage(app, state, id, "installing", "install", "Installing");
+    }
     #[cfg(unix)]
     for (link, target) in &plan.links {
         if std::fs::symlink_metadata(link).is_err() {
@@ -1608,13 +1712,27 @@ pub fn java_args_check(text: String) -> CmdResult<Vec<String>> {
 /// Java's arguments up to the main class: the heap and tuning flags (Flint Performance Core),
 /// Flint's brand, the player's extra arguments (after Flint's, so a flag set twice takes theirs), the
 /// version's and the loader's own arguments (classpath included) and the logging config.
+#[cfg(test)]
 fn jvm_args(installed: &Installed, policy: JvmPolicy, memory_mb: u64, extra: &[String], vars: &HashMap<&str, String>) -> Vec<String> {
+    jvm_args_with(installed, policy, memory_mb, extra, vars, crate::perfcore::MemoryCleaner::Official, None)
+}
+
+/// [jvm_args] with the memory cleaner the launch uses (`MemoryCleaner::for_launch`) and the major version of the Java it starts.
+fn jvm_args_with(
+    installed: &Installed,
+    policy: JvmPolicy,
+    memory_mb: u64,
+    extra: &[String],
+    vars: &HashMap<&str, String>,
+    cleaner: crate::perfcore::MemoryCleaner,
+    java: Option<u64>,
+) -> Vec<String> {
     let version = &installed.version;
     let mut args = crate::perfcore::heap_args(memory_mb);
     args.push("-Dminecraft.launcher.brand=flint".to_owned());
     match recommended_jvm(version, vars, memory_mb, extra) {
         Some(own) => args.extend(own),
-        None => args.extend(crate::perfcore::tuning_args_with(policy, extra)),
+        None => args.extend(crate::perfcore::tuning_args_for(policy, extra, cleaner, java)),
     }
     args.extend(extra.iter().cloned());
     if version.get("arguments").is_some() {
@@ -1656,6 +1774,13 @@ fn recommended_jvm(version: &Value, vars: &HashMap<&str, String>, memory_mb: u64
         }
     });
     Some(args)
+}
+
+/// A standby game's heap starts small and is never pre-touched (Mojang's 26.x set has -Xms2G and -XX:+AlwaysPreTouch,
+/// which would take 2 GB of the player's memory the moment Install is pressed): it grows as it loads. Same -Xmx.
+fn standby_heap(args: &mut Vec<String>) {
+    args.retain(|a| !a.starts_with("-Xms") && a != "-XX:+AlwaysPreTouch");
+    args.insert(0, "-Xms256m".to_owned());
 }
 
 /// A Java heap size ("2G", "512M", "1024m") in megabytes.
@@ -1761,6 +1886,8 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
     let steps = Steps::new();
     let profile = find_profile(state, &id)?;
     let account = active_account(state).ok_or("Connect a Minecraft account to play.")?;
+    // Mods the in-game Library took out while the last game ran leave before this one starts.
+    crate::content::ingame::settle_pending(state, &id).await;
     crate::content::launch_preflight(state, &id)?;
     let cancel = begin_job(state, &id)?;
     steps.step("preflight");
@@ -1769,7 +1896,7 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
     // Signing in (a token refresh is a few network round trips) runs beside the file check instead of after it.
     let sign_in = async {
         if account.qa {
-            Ok(("0".to_owned(), true))
+            Ok(("0".to_owned(), !qa_full_game(state)))
         } else {
             crate::auth::minecraft_token_explicit(&app, state, &account.uuid).await.map(|token| (token, false))
         }
@@ -1817,6 +1944,10 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
     let (token, demo) = signed_in.map_err(|e| fail(&app, state, &id, &e))?;
 
     let game_dir = state.paths.profile_dir(&id);
+    // Dynamic FPS without settings of its own: an unfocused game keeps drawing (recording, streaming, a second screen).
+    if profile.loader == "fabric" && crate::perfcore::ensure_dynamic_fps_defaults(&game_dir, &crate::perfcore::scan_mods(&game_dir.join("mods"))) {
+        eprintln!("[flint] Dynamic FPS: an unfocused game draws at 60 FPS (its settings file was missing)");
+    }
     let extra = parse_extra_jvm_args(load_settings(state)["jvmArgs"].as_str().unwrap_or_default())
         .map_err(|e| fail(&app, state, &id, &format!("The extra Java arguments in Settings → Java and memory can't be used: {e}")))?;
     // Java's start-up cache (see jvmcache.rs): Fabric profiles on Java 25+ run from an unsigned copy of the client jar, which
@@ -1881,7 +2012,22 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
     ]);
 
     // The flags follow the Java actually started (Java 21 where Mojang has no Java 25, or a custom Java).
-    let mut args = jvm_args(&installed, crate::perfcore::policy_for_java(tuning.policy, java_major.map(u64::from)), tuning.heap_max_mb, &extra, &vars);
+    // Settings → Java and memory → Memory cleaner: Generational ZGC instead of G1 on Minecraft 1.21.x when chosen (and the
+    // heap is at least 4 GB, the size it was measured at).
+    let cleaner = crate::perfcore::MemoryCleaner::from_setting(load_settings(state)["memoryCleaner"].as_str()).for_launch(
+        &profile.game_version,
+        java_major.map(u64::from),
+        tuning.heap_max_mb,
+    );
+    let mut args = jvm_args_with(
+        &installed,
+        crate::perfcore::policy_for_java(tuning.policy, java_major.map(u64::from)),
+        tuning.heap_max_mb,
+        &extra,
+        &vars,
+        cleaner,
+        java_major.map(u64::from),
+    );
     let java_flags = crate::perfcore::modern_java_args(java_major.map(u64::from), &args);
     args.extend(java_flags);
     // Decided on the final options, which the cache must match; the build after a recorded launch reuses them.
@@ -2023,6 +2169,8 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
                 }
             }
         };
+        // Handing over to a new game (swap.rs): the profile goes on running in it, so the launcher stays where it is.
+        let handing_over = state.game_link.swaps.handing_over(&id);
         state.running.lock().unwrap().remove(&id);
         if let Some(secret) = &link_secret {
             state.game_link.registry.unregister(secret);
@@ -2051,18 +2199,23 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
                     crate::gamewindow::bring_back(&app_handle);
                 }
             }
+            _ if handing_over => {}
             _ => emit(&app_handle, &state, &id, json!({ "state": "ready" })),
         }
         // A Flint hidden in the tray comes back when its last game ends (a minimized one stays in the taskbar).
-        if crate::gamewindow::hidden_in_tray(&app_handle) && state.running.lock().unwrap().is_empty() {
+        if !handing_over && crate::gamewindow::hidden_in_tray(&app_handle) && state.running.lock().unwrap().is_empty() {
             crate::gamewindow::bring_back(&app_handle);
         }
         // Auto Sync records what the player changed in this game (after a crash, only files that read back
         // whole). Nothing is written into any profile here.
         let synced = id.clone();
         let _ = crate::data::blocking(&app_handle, move |state| crate::gamesettings::autosync::after_exit(state, &synced, exit)).await;
-        // Renamed while it was playing: its folder takes the new name now.
-        crate::profilefolder::follow(&state, &id).await;
+        // Mods the in-game Library took out while it ran leave now that nothing has them loaded.
+        crate::content::ingame::settle_pending(&state, &id).await;
+        // Renamed while it was playing: its folder takes the new name now (not while a new game runs in it).
+        if !handing_over {
+            crate::profilefolder::follow(&state, &id).await;
+        }
         // A launch that recorded its classes builds Java's start-up cache now, in the background at low priority.
         let (cache_dir, java, cache_args) = cache_build;
         crate::jvmcache::after_exit(cache_dir, cache_plan, java, cache_args, clean_exit).await;
@@ -2070,10 +2223,288 @@ async fn launch(app: &AppHandle, state: &AppState, id: &str, join: Option<&crate
     Ok(listing)
 }
 
+/// QA builds only (`state.qa`, isolated data, `FLINT_QA_FULL=1`): the offline QA identity plays the full game, as the QA
+/// harness runs it, instead of the demo (end-to-end checks of the in-game Library and Instant Swap need a world of their own).
+fn qa_full_game(state: &AppState) -> bool {
+    state.qa && std::env::var("FLINT_QA_FULL").is_ok_and(|v| v == "1")
+}
+
+/// QA builds only: launches a profile as Play does (`FLINT_QA_LAUNCH`, end-to-end checks without clicking the window).
+pub async fn qa_launch(app: &AppHandle, state: &AppState, id: &str) -> CmdResult<()> {
+    if !state.qa {
+        return Err("Not available.".into());
+    }
+    let result = launch(app, state, id, None).await;
+    result.map(|_| ()).map_err(|e| settle(app, state, id, e))
+}
+
+/// Starts the standby game of an Instant Swap (swap.rs) for a profile whose game runs: the same Minecraft, account and
+/// settings, with the mods as they are now (those waiting to be removed left out), its window hidden by Flint's runtime
+/// (`FLINT_SWAP`), at the lowest priority, logging to its own files. Nothing in the profile folder is synced or changed: the
+/// running game owns it. Its end before it takes over is a failed swap, with the reason; after, it is the profile's game.
+/// `urgent`: the old game has already ended (not enough memory for two, swap.rs Deferred): the player waits for this one, so
+/// it starts at normal priority and doesn't step back.
+pub async fn launch_standby(app: &AppHandle, state: &AppState, id: &str, generation: u64, urgent: bool) -> CmdResult<()> {
+    let profile = find_profile(state, id)?;
+    let account = active_account(state).ok_or("Connect a Minecraft account to play.")?;
+    let game_dir = state.paths.profile_dir(id);
+    // What Fabric would refuse to start with is said now, and the player keeps the game they have.
+    crate::content::launch_preflight(state, id)?;
+    crate::content::dependency_check(state, id)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let installed = install_inner_as(app, state, &profile, &cancel, false, None, true).await?;
+    // Its own log files, named for this game alone: the running game has latest.log open, and a running game that was a
+    // standby itself still writes its own (a shared name was rolled over under it, its tail turned into NULs).
+    let tag = format!("{generation}-{}", random_hex(2));
+    let installed = Installed { logging_arg: standby_logging(&installed, &game_dir, &tag), ..installed };
+    let tuning = launch_tuning(state, &profile).await?;
+    let (token, demo) = if account.qa {
+        ("0".to_owned(), !qa_full_game(state))
+    } else {
+        (crate::auth::minecraft_token_explicit(app, state, &account.uuid).await?, false)
+    };
+    let extra = parse_extra_jvm_args(load_settings(state)["jvmArgs"].as_str().unwrap_or_default())?;
+    let java_major = crate::jvmcache::java_major(&installed.java);
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let mut seen = HashSet::new();
+    let mut classpath: Vec<String> =
+        installed.libraries.iter().filter(|l| l.native_extract.is_none() && seen.insert(l.path.clone())).map(|l| l.path.display().to_string()).collect();
+    classpath.push(installed.client_jar.display().to_string());
+    let version = &installed.version;
+    let modern = version.get("arguments").is_some();
+    let version_name = installed.fabric.as_ref().and_then(|f| f["id"].as_str()).unwrap_or(&profile.game_version).to_owned();
+    let vars: HashMap<&str, String> = HashMap::from([
+        ("auth_player_name", account.username.clone()),
+        ("version_name", version_name),
+        ("game_directory", game_dir.display().to_string()),
+        ("assets_root", state.paths.game().join("assets").display().to_string()),
+        ("game_assets", state.paths.game().join("assets").display().to_string()),
+        ("assets_index_name", version["assetIndex"]["id"].as_str().unwrap_or_default().to_owned()),
+        ("auth_uuid", account.uuid.clone()),
+        ("auth_access_token", token.clone()),
+        ("auth_session", format!("token:{token}:{}", account.uuid)),
+        ("clientid", MICROSOFT_CLIENT_ID.to_owned()),
+        ("auth_xuid", "0".to_owned()),
+        ("user_type", if modern { "msa" } else { "mojang" }.to_owned()),
+        ("user_properties", "{}".to_owned()),
+        ("version_type", "release".to_owned()),
+        ("natives_directory", installed.natives_dir.display().to_string()),
+        ("launcher_name", "flint".to_owned()),
+        ("launcher_version", env!("CARGO_PKG_VERSION").to_owned()),
+        ("classpath", classpath.join(separator)),
+        ("classpath_separator", separator.to_owned()),
+        ("library_directory", state.paths.game().join("libraries").display().to_string()),
+    ]);
+    let cleaner = crate::perfcore::MemoryCleaner::from_setting(load_settings(state)["memoryCleaner"].as_str()).for_launch(
+        &profile.game_version,
+        java_major.map(u64::from),
+        tuning.heap_max_mb,
+    );
+    let mut args = jvm_args_with(
+        &installed,
+        crate::perfcore::policy_for_java(tuning.policy, java_major.map(u64::from)),
+        tuning.heap_max_mb,
+        &extra,
+        &vars,
+        cleaner,
+        java_major.map(u64::from),
+    );
+    let java_flags = crate::perfcore::modern_java_args(java_major.map(u64::from), &args);
+    args.extend(java_flags);
+    standby_heap(&mut args);
+    // The mods the running game has loaded and the player took out stay out of this one.
+    let pending = crate::content::ingame::pending_names(state, id);
+    if let Some(folder) = crate::swap::mods_without_pending(&game_dir, &pending)? {
+        args.push(format!("-Dfabric.modsFolder={}", folder.display()));
+    }
+    let main_class = installed.fabric.as_ref().and_then(|f| f["mainClass"].as_str()).or_else(|| version["mainClass"].as_str()).ok_or("Version has no main class")?;
+    args.push(main_class.to_owned());
+    if modern {
+        collect_args(version["arguments"].get("game"), &vars, &mut args);
+    } else {
+        args.extend(version["minecraftArguments"].as_str().unwrap_or_default().split_whitespace().map(|a| substitute(a, &vars)));
+    }
+    if let Some(fabric) = &installed.fabric {
+        collect_args(fabric["arguments"].get("game"), &vars, &mut args);
+    }
+    if demo {
+        args.push("--demo".into());
+    }
+    crate::runtime::verify(state, &profile)?;
+    let logs = game_dir.join("logs");
+    std::fs::create_dir_all(&logs).map_err(err("Could not create the log folder"))?;
+    old_swap_logs(&logs);
+    let log_path = logs.join(format!("flint-swap-{tag}.log"));
+    let log = std::fs::File::create(&log_path).map_err(err("Could not create the launch log"))?;
+    let log_err = log.try_clone().map_err(|e| e.to_string())?;
+    let mut command = tokio::process::Command::new(&installed.java);
+    command.args(&args).current_dir(&game_dir).stdin(std::process::Stdio::null()).stdout(log).stderr(log_err).kill_on_drop(false);
+    #[cfg(windows)]
+    {
+        command.creation_flags(if urgent { crate::swap::URGENT_FLAGS } else { crate::swap::STANDBY_FLAGS });
+    }
+    let address = state.game_link.address(|| crate::gamelink::AppBackend { app: app.clone() }).await?;
+    let secret = state.game_link.registry.register(id, &account.uuid);
+    command
+        .env(crate::gamelink::ENV_ADDRESS, address.to_string())
+        .env(crate::gamelink::ENV_SECRET, &secret)
+        .env(crate::swap::ENV_STANDBY, if urgent { "urgent" } else { "1" });
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            state.game_link.registry.unregister(&secret);
+            return Err(format!("Could not start Java: {e}"));
+        }
+    };
+    let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
+    let taken = Arc::new(AtomicBool::new(false));
+    if !state.game_link.swaps.started(id, generation, secret.clone(), child.id(), kill_tx, taken.clone()) {
+        let _ = child.kill().await;
+        state.game_link.registry.unregister(&secret);
+        return Ok(());
+    }
+    eprintln!("[flint] instant swap: a new game with the changed mods is starting in the background");
+    let launched_wall = std::time::SystemTime::now();
+    let started = std::time::Instant::now();
+    let (app, id) = (app.clone(), id.to_owned());
+    tauri::async_runtime::spawn(async move {
+        use tauri::Manager;
+        let state = app.state::<AppState>();
+        let too_long = async {
+            tokio::time::sleep(crate::swap::READY_WITHIN).await;
+            while !state.game_link.swaps.still_warming(&id, generation) {
+                // Ready, handed over or replaced: no limit any more.
+                std::future::pending::<()>().await;
+            }
+        };
+        let mut timed_out = false;
+        let status = tokio::select! {
+            status = child.wait() => status.ok(),
+            _ = &mut kill_rx => {
+                let _ = child.kill().await;
+                None
+            }
+            _ = too_long => {
+                timed_out = true;
+                let _ = child.kill().await;
+                None
+            }
+        };
+        state.game_link.registry.unregister(&secret);
+        if !taken.load(Ordering::SeqCst) {
+            let reason = match status {
+                Some(s) if !s.success() => failure_state(&game_dir, &log_path, launched_wall, s.code(), true)["message"].as_str().unwrap_or("Minecraft closed").to_owned(),
+                _ if timed_out => "Minecraft took too long to start".to_owned(),
+                _ => "Minecraft closed before it was ready".to_owned(),
+            };
+            if state.game_link.swaps.failed(&id, generation, reason) {
+                crate::swapstill::close(&app);
+            }
+            return;
+        }
+        // It was the profile's game.
+        state.running.lock().unwrap().remove(&id);
+        if let Some(presence) = app.try_state::<crate::discord::Presence>() {
+            presence.ended(&id);
+        }
+        let played = started.elapsed().as_secs();
+        if played > 0 {
+            let _ = update_profile(&state, &id, |p| p.play_seconds = p.play_seconds.saturating_add(played)).await;
+        }
+        let clean = status.as_ref().is_some_and(|s| s.success());
+        if state.game_link.swaps.handing_over(&id) {
+            // It handed over in turn.
+        } else if let Some(s) = status.filter(|s| !s.success()) {
+            let failure = failure_state(&game_dir, &log_path, launched_wall, s.code(), false);
+            emit(&app, &state, &id, failure);
+        } else {
+            emit(&app, &state, &id, json!({ "state": "ready" }));
+        }
+        let exit = if clean { crate::gamesettings::autosync::Exit::Clean } else { crate::gamesettings::autosync::Exit::Unclean };
+        let synced = id.clone();
+        let _ = crate::data::blocking(&app, move |state| crate::gamesettings::autosync::after_exit(state, &synced, exit)).await;
+        crate::content::ingame::settle_pending(&state, &id).await;
+        if crate::gamewindow::hidden_in_tray(&app) && state.running.lock().unwrap().is_empty() {
+            crate::gamewindow::bring_back(&app);
+        }
+    });
+    Ok(())
+}
+
+/// Mojang's logging setup for a standby game, writing its own `logs/flint-swap-<tag>-latest.log` (the running game has latest.log open
+/// and would otherwise have it rolled over under it). The original when it can't be copied.
+fn standby_logging(installed: &Installed, game_dir: &std::path::Path, tag: &str) -> Option<String> {
+    let arg = installed.logging_arg.clone()?;
+    let (flag, path) = arg.split_once('=')?;
+    let xml = std::fs::read_to_string(path).ok()?;
+    let changed = standby_log_xml(&xml, tag);
+    let copy = game_dir.join(format!(".flint-swap-log4j-{tag}.xml"));
+    std::fs::write(&copy, changed).ok()?;
+    Some(format!("{flag}={}", copy.display()))
+}
+
+/// Mojang's log4j setup with a standby game's own file names (`flint-swap-<tag>-latest.log`, rolled to
+/// `flint-swap-<tag>-<date>-<n>.log.gz`).
+fn standby_log_xml(xml: &str, tag: &str) -> String {
+    xml.replace("logs/latest.log", &format!("logs/flint-swap-{tag}-latest.log"))
+        .replace("logs/%d{yyyy-MM-dd}-%i.log.gz", &format!("logs/flint-swap-{tag}-%d{{yyyy-MM-dd}}-%i.log.gz"))
+}
+
+/// Standby logs older than a day go (one set per swap); a file still open in a running game can't be removed and stays.
+fn old_swap_logs(logs: &std::path::Path) {
+    let day_ago = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
+    for entry in std::fs::read_dir(logs).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("flint-swap") && entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < day_ago) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    for entry in std::fs::read_dir(logs.parent().unwrap_or(logs)).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(".flint-swap-log4j") && entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < day_ago) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The new game of an Instant Swap took over and the old one has ended: it is the profile's running game now.
+pub fn took_over(app: &AppHandle, state: &AppState, id: &str, generation: u64) {
+    let Some((pid, kill)) = state.game_link.swaps.finish(id, generation) else { return };
+    state.running.lock().unwrap().insert(id.to_owned(), RunningGame { kill });
+    emit(app, state, id, json!({ "state": "running", "demo": false }));
+    if let (Some(pid), Some(presence), Ok(profile)) = (pid, tauri::Manager::try_state::<crate::discord::Presence>(app), find_profile(state, id)) {
+        presence.started(crate::discord::Session {
+            id: id.to_owned(),
+            pid,
+            version: profile.game_version.clone(),
+            loader: profile.loader.clone(),
+            started_at: now_secs(),
+            game_dir: Some(state.paths.profile_dir(id)),
+        });
+    }
+    eprintln!("[flint] instant swap: the new game took over");
+}
+
+/// The profile shows as ready to play.
+pub fn emit_ready(app: &AppHandle, state: &AppState, id: &str) {
+    emit(app, state, id, json!({ "state": "ready" }));
+}
+
 /// Readies a profile's own folder for a launch: Flint's in-game menu and its config (installed for supported profiles,
 /// removed from all others), then Auto Sync, which records this profile's own changes and brings in what changed in
 /// other profiles where it fits (its own failures are logged and never stop the launch).
 async fn prepare_folder(app: &AppHandle, state: &AppState, profile: &Profile, steps: &Steps) -> CmdResult<crate::perfcore::LaunchTuning> {
+    let tuning = launch_tuning(state, profile).await?;
+    crate::runtime::sync(state, profile, &tuning)?;
+    steps.step("flint runtime");
+    let profile = profile.clone();
+    let _ = crate::data::blocking(app, move |state| crate::gamesettings::autosync::before_launch(state, &profile)).await;
+    steps.step("options sync");
+    Ok(tuning)
+}
+
+/// The memory and garbage collector a launch of `profile` uses.
+async fn launch_tuning(state: &AppState, profile: &Profile) -> CmdResult<crate::perfcore::LaunchTuning> {
     let version = vanilla_version(state, &profile.game_version).await?;
     let automatic = crate::perfcore::automatic_optimization_enabled(state);
     // The Java the game will run on: Flint's own for the line (Java 25 before 26.x) unless a custom Java is set, whose
@@ -2086,11 +2517,6 @@ async fn prepare_folder(app: &AppHandle, state: &AppState, profile: &Profile, st
         policy: crate::perfcore::choose_policy_for_java(automatic, crate::perfcore::hardware(), java_major),
         heap_max_mb: crate::data::launch_memory_mb(profile, load_settings(state)["memoryMb"].as_u64(), crate::data::max_memory_mb()),
     };
-    crate::runtime::sync(state, profile, &tuning)?;
-    steps.step("flint runtime");
-    let profile = profile.clone();
-    let _ = crate::data::blocking(app, move |state| crate::gamesettings::autosync::before_launch(state, &profile)).await;
-    steps.step("options sync");
     Ok(tuning)
 }
 
@@ -2108,6 +2534,21 @@ mod tests {
     use super::*;
     use crate::core::TestDir;
     use crate::perfcore::HardwareInfo;
+
+    #[test]
+    fn each_standby_game_logs_to_its_own_files() {
+        let xml = r#"<File fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">"#;
+        let a = standby_log_xml(xml, "3-ab12");
+        assert_eq!(a, r#"<File fileName="logs/flint-swap-3-ab12-latest.log" filePattern="logs/flint-swap-3-ab12-%d{yyyy-MM-dd}-%i.log.gz">"#);
+        assert_ne!(a, standby_log_xml(xml, "4-cd34"), "a later standby never rolls the file a running former standby writes");
+    }
+
+    #[test]
+    fn a_standby_game_starts_small_and_untouched() {
+        let mut args: Vec<String> = ["-Xms2G", "-Xmx4096M", "-XX:+UseZGC", "-XX:+AlwaysPreTouch", "-XX:+UseStringDeduplication"].map(String::from).to_vec();
+        standby_heap(&mut args);
+        assert_eq!(args, ["-Xms256m", "-Xmx4096M", "-XX:+UseZGC", "-XX:+UseStringDeduplication"]);
+    }
 
     #[test]
     fn the_first_play_is_expected_on_the_selected_profile_else_the_last_played() {
@@ -2367,6 +2808,53 @@ mod tests {
     }
 
     #[test]
+    fn many_folders_listed_at_once_check_exactly_as_one_by_one() {
+        let dir = TestDir::new();
+        let cache = dir.0.join("verified.json");
+        let mut items = Vec::new();
+        // 40 asset folders (more than are listed one by one), each with 10 files; some files missing or of another size,
+        // one folder not there at all.
+        for f in 0..40 {
+            let folder = dir.0.join("assets/objects").join(format!("{f:02x}"));
+            if f != 17 {
+                std::fs::create_dir_all(&folder).unwrap();
+            }
+            for i in 0..10 {
+                let path = folder.join(format!("{f:02x}{i:038}"));
+                if f != 17 && (f + i) % 7 != 0 {
+                    std::fs::write(&path, vec![b'x'; i + 1]).unwrap();
+                }
+                items.push(asset(path, if (f * i) % 11 == 3 { 99 } else { i as u64 + 1 }));
+            }
+        }
+        let cancel = AtomicBool::new(false);
+        let pending = pending_downloads(items.clone(), &cache, false, &cancel, None::<fn(usize, usize)>).unwrap();
+        let expected: Vec<&PathBuf> = items.iter().filter(|i| needs_download(i, false, &mut VerifiedFiles::new(), true)).map(|d| &d.path).collect();
+        assert_eq!(pending.iter().map(|d| &d.path).collect::<Vec<_>>(), expected);
+        assert_eq!(pending.iter().filter(|d| d.path.parent().unwrap().ends_with("11")).count(), 10, "every file of the folder that isn't there");
+    }
+
+    /// Measurement only (`FLINT_TIME_ASSETS=<a game folder's assets/objects> cargo test time_listing -- --ignored --nocapture`):
+    /// the asset folders listed one by one, then several at a time, alternately, with the same results.
+    #[test]
+    #[ignore]
+    fn time_listing_asset_folders() {
+        let root = PathBuf::from(std::env::var("FLINT_TIME_ASSETS").expect("FLINT_TIME_ASSETS"));
+        let owned: Vec<PathBuf> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        let folders: Vec<&Path> = owned.iter().map(PathBuf::as_path).collect();
+        for round in 0..3 {
+            let t = std::time::Instant::now();
+            let one_by_one: Vec<_> = folders.iter().map(|folder| Listed::list_one(folder)).collect();
+            let sequential = t.elapsed();
+            let t = std::time::Instant::now();
+            let at_once = Listed::list_all(&folders);
+            let parallel = t.elapsed();
+            assert_eq!(one_by_one, at_once);
+            eprintln!("round {round}: {} folders, one by one {sequential:?}, several at a time {parallel:?}", folders.len());
+        }
+    }
+
+    #[test]
     fn natives_are_unpacked_once_and_kept_while_unchanged() {
         use std::io::Write;
         let dir = TestDir::new();
@@ -2403,6 +2891,62 @@ mod tests {
         std::fs::remove_file(dest.join("lwjgl.dll")).unwrap();
         extract_natives(&jar, &dest, &exclude, true).unwrap();
         assert_eq!(std::fs::read(dest.join("lwjgl.dll")).unwrap(), b"native one", "a missing native is unpacked again");
+    }
+
+    /// Settings → Memory cleaner on 1.21.x: Smooth is the official launch with the G1 set swapped for Generational ZGC's two
+    /// flags, in its place; nothing else moves (same heap, no -Xms, the same version and loader flags).
+    #[test]
+    fn memory_cleaner_smooth_swaps_only_the_collector_flags() {
+        use crate::perfcore::MemoryCleaner::{Official, Smooth};
+        let vars: HashMap<&str, String> = HashMap::from([
+            ("natives_directory", "/game/versions/v/natives".to_owned()),
+            ("launcher_name", "flint".to_owned()),
+            ("launcher_version", "1.0.4".to_owned()),
+            ("classpath", "/lib/a.jar:/game/versions/v/v.jar".to_owned()),
+        ]);
+        let jvm = json!(["-Djava.library.path=${natives_directory}", "-Dminecraft.launcher.brand=${launcher_name}", "-cp", "${classpath}"]);
+        let v1_21 = json!({ "javaVersion": { "component": "java-runtime-delta", "majorVersion": 21 }, "arguments": { "jvm": jvm, "game": [] } });
+        let fabric = json!({ "id": "fabric-loader-0.19.5-1.21.11", "arguments": { "jvm": ["-DFabricMcEmu= net.minecraft.client.main.Main "], "game": [] } });
+        let installed = installed_with(v1_21, Some(fabric), None);
+        let g1 = ["-XX:+UnlockExperimentalVMOptions", "-XX:+UseG1GC", "-XX:G1NewSizePercent=20", "-XX:G1ReservePercent=20", "-XX:MaxGCPauseMillis=50", "-XX:G1HeapRegionSize=32M"];
+        let tail = ["-Djava.library.path=/game/versions/v/natives", "-Dminecraft.launcher.brand=flint", "-cp", "/lib/a.jar:/game/versions/v/v.jar", "-DFabricMcEmu= net.minecraft.client.main.Main "];
+        let expect = |collector: &[&str]| -> Vec<String> {
+            ["-Xmx4096M", "-Dminecraft.launcher.brand=flint"].iter().chain(collector).chain(tail.iter()).map(|a| a.to_string()).collect()
+        };
+        let official = jvm_args_with(&installed, JvmPolicy::Legacy, 4096, &[], &vars, Official, Some(21));
+        assert_eq!(official, expect(&g1), "Official is exactly today's 1.21.x launch");
+        assert_eq!(official, jvm_args(&installed, JvmPolicy::Legacy, 4096, &[], &vars));
+        assert_eq!(jvm_args_with(&installed, JvmPolicy::Legacy, 4096, &[], &vars, Smooth, Some(21)), expect(&["-XX:+UseZGC", "-XX:+ZGenerational"]));
+        assert_eq!(jvm_args_with(&installed, JvmPolicy::Legacy, 2048, &[], &vars, Smooth, Some(21))[0], "-Xmx2048M", "the profile's heap, unchanged");
+        // A Java from 23 on has only the generational mode (24 removed the flag).
+        assert_eq!(jvm_args_with(&installed, JvmPolicy::Legacy, 4096, &[], &vars, Smooth, Some(25)), expect(&["-XX:+UseZGC"]));
+        // A collector the player chose wins: G1 keeps the official set, another leaves Flint's flags out (Java refuses two).
+        let g1_named = ["-XX:+UseG1GC".to_owned()];
+        let mut with_g1 = expect(&g1);
+        with_g1.insert(2 + g1.len(), "-XX:+UseG1GC".to_owned());
+        assert_eq!(jvm_args_with(&installed, JvmPolicy::Legacy, 4096, &g1_named, &vars, Smooth, Some(21)), with_g1);
+        let parallel = ["-XX:+UseParallelGC".to_owned()];
+        let mut with_parallel = expect(&[]);
+        with_parallel.insert(2, "-XX:+UseParallelGC".to_owned());
+        assert_eq!(jvm_args_with(&installed, JvmPolicy::Legacy, 4096, &parallel, &vars, Smooth, Some(21)), with_parallel);
+        // Only Minecraft 1.21.x on Java 21 or newer takes it.
+        for version in ["1.21.11", "1.21.10", "1.21.1", "1.21", "1.21.4"] {
+            assert_eq!(Smooth.for_launch(version, Some(21), 4096), Smooth, "{version}");
+            assert_eq!(Official.for_launch(version, Some(21), 4096), Official, "{version}");
+        }
+        for (version, java) in [("26.3", Some(25)), ("1.8.9", Some(21)), ("1.20.6", Some(21)), ("1.19.2", Some(17)), ("1.21.11", Some(17)), ("1.211", Some(21))] {
+            assert_eq!(Smooth.for_launch(version, java, 4096), Official, "{version} on Java {java:?}");
+        }
+        // Smooth needs a heap of at least 4 GB (the size it was measured at); a smaller one launches with Official.
+        assert_eq!(crate::perfcore::SMOOTH_MIN_HEAP_MB, 4096);
+        for (heap, expected) in [(4096, Smooth), (8192, Smooth), (4095, Official), (3072, Official), (2048, Official), (1024, Official)] {
+            assert_eq!(Smooth.for_launch("1.21.11", Some(21), heap), expected, "{heap} MB");
+            assert_eq!(Official.for_launch("1.21.11", Some(21), heap), Official, "{heap} MB");
+        }
+        assert_eq!(crate::perfcore::MemoryCleaner::from_setting(Some("smooth")), Smooth);
+        assert_eq!(crate::perfcore::MemoryCleaner::from_setting(Some("official")), Official);
+        assert_eq!(crate::perfcore::MemoryCleaner::from_setting(None), crate::perfcore::DEFAULT_MEMORY_CLEANER);
+        assert_eq!(crate::perfcore::MemoryCleaner::from_setting(Some("zgc")), crate::perfcore::DEFAULT_MEMORY_CLEANER);
     }
 
     fn installed_with(version: Value, fabric: Option<Value>, logging_arg: Option<&str>) -> Installed {
@@ -2664,7 +3208,7 @@ mod tests {
         assert_eq!(ornithe.loaders_url("1.8.9"), "https://meta.ornithemc.net/v3/versions/fabric-loader/1.8.9");
         assert_eq!(ornithe.profile_url("1.8.9", "0.20.1"), "https://meta.ornithemc.net/v3/versions/fabric-loader/1.8.9/0.20.1/profile/json");
         assert_eq!(ornithe.profile_dir("1.8.9", "0.20.1"), "fabric-loader-0.20.1-1.8.9-ornithe-gen2", "the profile's own id");
-        for game in ["26.3", "26.1.2", "1.21.11", "1.21.10", "1.21.1"] {
+        for game in ["26.3", "26.1.2", "1.21.11", "1.21.10", "1.21.1", "1.19.2", "1.19"] {
             let fabric = LoaderSource::for_game(game);
             assert_eq!(fabric, LoaderSource::Fabric, "{game}");
             assert_eq!(fabric.loaders_url(game), format!("https://meta.fabricmc.net/v2/versions/loader/{game}"));
@@ -2688,6 +3232,36 @@ mod tests {
         assert!(LoaderSource::Fabric.check_inherits(&json!({ "inheritsFrom": "26.3" }), "26.3").is_ok());
         assert!(LoaderSource::Fabric.check_inherits(&json!({ "inheritsFrom": "26.3-vanilla" }), "26.3").is_err(), "only Ornithe names vanilla that way");
         assert!(LoaderSource::Fabric.check_inherits(&json!({ "inheritsFrom": "26.2" }), "26.3").is_err());
+    }
+
+    #[test]
+    fn ornithes_library_upgrades_take_the_place_of_mojangs_log4j() {
+        assert_eq!(LoaderSource::Ornithe.library_upgrades_url("1.8.9").as_deref(), Some("https://meta.ornithemc.net/v3/versions/libraries/1.8.9"));
+        assert!(LoaderSource::Fabric.library_upgrades_url("26.3").is_none(), "official Fabric has none");
+        let mut profile = ornithe_189_profile();
+        let before = profile["libraries"].as_array().unwrap().len();
+        let upgrades = json!([
+            { "name": "org.apache.logging.log4j:log4j-api:2.19.0", "url": "https://libraries.minecraft.net/" },
+            { "name": "org.apache.logging.log4j:log4j-core:2.19.0" },
+            { "name": "org.lwjgl.lwjgl:lwjgl:2.9.4+legacyfabric.9", "url": "https://maven.legacyfabric.net/" },
+            { "name": "org.ow2.asm:asm:9.0", "url": "https://maven.fabricmc.net/" },
+        ]);
+        assert_eq!(add_library_upgrades(&mut profile, &upgrades).unwrap(), 2, "log4j's two; LWJGL stays Mojang's, asm the profile's own");
+        let libraries = profile["libraries"].as_array().unwrap();
+        assert_eq!(libraries.len(), before + 2);
+        let names: Vec<&str> = libraries.iter().filter_map(|l| l["name"].as_str()).collect();
+        assert!(names.contains(&"org.apache.logging.log4j:log4j-api:2.19.0"));
+        assert!(names.contains(&"org.apache.logging.log4j:log4j-core:2.19.0"));
+        assert!(!names.iter().any(|n| n.starts_with("org.lwjgl")));
+        // The launch takes a profile library in place of Mojang's with the same key: 2.0-beta9 gives way.
+        assert_eq!(library_key("org.apache.logging.log4j:log4j-api:2.19.0"), library_key("org.apache.logging.log4j:log4j-api:2.0-beta9"));
+        assert_eq!(libraries.last().unwrap()["url"], "https://libraries.minecraft.net/", "Mojang's maven when the upgrade names none");
+        assert_eq!(profile[LIBRARY_UPGRADES_APPLIED], true, "kept profiles from before are fetched again");
+        // Anything off: refused.
+        let mut other = ornithe_189_profile();
+        assert!(add_library_upgrades(&mut other, &json!([{ "name": "org.apache.logging.log4j:log4j-api:2.19.0", "url": "https://evil.example/" }])).is_err());
+        assert!(add_library_upgrades(&mut other, &json!([{ "name": "not a maven name" }])).is_err());
+        assert!(add_library_upgrades(&mut other, &json!({ "libraries": [] })).is_err());
     }
 
     #[test]

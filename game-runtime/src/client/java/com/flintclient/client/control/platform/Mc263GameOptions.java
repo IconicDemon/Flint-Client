@@ -4,6 +4,7 @@ import com.flintclient.client.FlintClient;
 import com.flintclient.client.control.ControlState;
 import com.flintclient.client.control.model.GameOptions;
 import com.flintclient.client.control.store.ControlSettings;
+import com.flintclient.client.perf.GpuPriority;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -27,13 +28,19 @@ public final class Mc263GameOptions {
 	private Mc263GameOptions() {
 	}
 
-	/** Each client tick: a fresh press of the Leave server key while playing leaves. */
+	/**
+	 * Each client tick: Smooth screen sharing as switched, while the game is in a window (in fullscreen the game keeps its normal
+	 * GPU priority: measured, a capture of a monitor-covering game got worse with it); Borderless fullscreen kept in step with
+	 * Minecraft's Exclusive Fullscreen (26.x); field checks unless something changed. The Leave server key.
+	 */
 	static void tick() {
 		if (!GUARD.on()) {
 			return;
 		}
 		try {
 			Minecraft mc = Minecraft.getInstance();
+			GpuPriority.apply(ControlState.settings().gameBool(GameOptions.SMOOTH_SHARING) && !mc.options.fullscreen().get());
+			FullscreenSync.tick(mc);
 			boolean down = Mc263Features.gameplay() && Mc263Features.keyHeld(ControlState.settings().game(GameOptions.LEAVE_KEY));
 			if (down && !leaveWas) {
 				leave(mc, null);
@@ -76,6 +83,11 @@ public final class Mc263GameOptions {
 	 * window is unfocused or there was no input since {@code latestInputMs} for the idle time (each when its option is on).
 	 */
 	public static int framerateLimit(int vanilla, long latestInputMs) {
+		// Instant Swap's standby game draws little until it takes over (once a second at its menu): the player's game keeps the GPU.
+		int swapCap = com.flintclient.client.module.social.InstantSwap.frameCap();
+		if (swapCap > 0) {
+			return Math.min(vanilla, swapCap);
+		}
 		if (!GUARD.on()) {
 			return vanilla;
 		}

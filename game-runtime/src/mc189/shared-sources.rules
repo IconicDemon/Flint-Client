@@ -17,6 +17,8 @@ include ClassWarmer.java
 include files/**
 # The saved settings and layouts every screen reads (the same files on every line).
 include control/ControlState.java
+# The player's theme from the Flint app (and back), which the palette's accent follows.
+include control/ThemeSync.java
 
 # The mod model: descriptors, settings, registry, migrations.
 include control/model/**
@@ -53,6 +55,9 @@ include control/hud/render/**
 include control/editor/**
 include control/platform/HookGuard.java
 include perf/FrameStats.java
+# Smooth screen sharing (the game's GPU priority), with its Windows calls (JNA, which 1.8.9 ships too).
+include perf/GpuPriority.java
+include perf/WinNative.java
 # Motion Blur's rules (its two modes, Smooth's trail, the scene resets; Natural Motion Blur's timing, passes and samples), the same
 # on every line: legacy/mods/MotionBlur draws them. ShaderPacks asks Iris by reflection (1.8.9 has none) for the page's note.
 include control/fx/BlurRules.java
@@ -63,7 +68,57 @@ include control/fx/ShaderPacks.java
 # under Flint's own package (legacy189/build.gradle relocateGson) so it never meets Minecraft's.
 replace com.google.gson. com.flintclient.shaded.gson.
 
+# Instant Swap's engine on 1.8.9 is its own (legacy/swap/SwapEngine189: LWJGL 2's window, 1.8.9's world and server joins).
+s-in module/social/InstantSwap.java "com\.flintclient\.client\.control\.platform\.Mc263SwapEngine" => "com.flintclient.legacy.swap.SwapEngine189"
+# The hot loader's rule (which mods go into the running game with no restart): pure. 1.8.9's loader is legacy/swap/HotLoader189.
+include hotload/HotLoadRule.java
+# The 3D cosmetics' shared model (Bedrock geometry and animation, Molang, the loading service, emote poses, thumbnails): pure.
+# 1.8.9 draws them itself (legacy/cosmetics).
+include cosmetics/**
+
 # Logging: 1.8.9 has log4j 2.0 and no slf4j. log4j's Logger takes the same {} placeholders and trailing exception.
 replace org.slf4j.LoggerFactory org.apache.logging.log4j.LogManager
 replace org.slf4j.Logger org.apache.logging.log4j.Logger
 word LoggerFactory LogManager
+
+# ---------- Flint's main menu (the title screen, its parts and its pages): the same code as on every line ----------
+# Flint's main menu, its controls and its pages are written against newer Minecraft's GUI (its Screen, widgets, Component,
+# key and mouse events). 1.8.9 compiles them unchanged: "adapt" keeps a file that is NOT platform-free (PlatformFreeSourcesTest
+# checks the includes only), and the rules below point the 26.x GUI types it names at stand-ins of the same names
+# (src/mc189/java/com/flintclient/client/mc) that do the same on 1.8.9. A file here that starts to name a newer Minecraft type
+# no stand-in has fails this build: add the stand-in (or a 1.8.9 overlay file of the same path for what differs).
+# What differs on 1.8.9 has an overlay file of its own: the artwork (ui/Backdrop), the blend with 1.8.9's own title screen and
+# the switch and cards on it (ui/screen/MenuBlend, VanillaTitleExtras), the demo world, multiplayer access, the account
+# switch and faces (module/account/SessionSwitch, AccountSkin), the server pings (module/servers/ServerShortcuts), the menu
+# key (control/ControlCenter), the log and versions (FlintClient, FlintPreLaunch, util/FlintInfo).
+adapt ui/screen/FlintTitleScreen.java
+adapt ui/screen/MenuLayout.java
+adapt ui/screen/MenuGeometry.java
+adapt ui/screen/WhatsNewScreen.java
+adapt ui/screen/MenuSizesScreen.java
+adapt ui/screen/UtilitiesScreen.java
+adapt ui/screen/FlintCreditsScreen.java
+adapt ui/screen/FlintPageScreen.java
+adapt ui/screen/ScreenshotsScreen.java
+adapt ui/widget/*.java
+skip ui/widget/SpriteButton.java
+adapt ui/MenuScale.java
+adapt ui/FlintTooltip.java
+adapt ui/UiFit.java
+adapt module/account/AccountSwitcher.java
+adapt module/news/WhatsNew.java
+adapt module/servers/QuickPlay.java
+adapt module/screenshots/*.java
+adapt config/FlintConfig.java
+adapt util/FlintCredits.java
+# Newer Minecraft's types, imported or written out, become the stand-ins of the same simple name.
+s-in {ui/screen/*.java,ui/widget/*.java,ui/MenuScale.java,ui/FlintTooltip.java,module/account/AccountSwitcher.java,module/screenshots/*.java} (?m)^import (?:net\.minecraft|com\.mojang)(?:\.\w+)*\.(\w+); => import com.flintclient.client.mc.$1;
+s-in {ui/screen/*.java,ui/widget/*.java,ui/MenuScale.java,module/account/AccountSwitcher.java} \b(?:net\.minecraft|com\.mojang)(?:\.[a-z][a-z0-9_]*)+\.(?=[A-Z]) => com.flintclient.client.mc.
+# fastutil isn't in 1.8.9: the screenshot list's int map is a plain map.
+s-in module/screenshots/Thumbnails.java import it\.unimi\.dsi\.fastutil\.ints\.Int2ObjectOpenHashMap; => import com.flintclient.client.mc.Int2ObjectOpenHashMap;
+# 1.8.9's Screen.init() is public (newer Minecraft's is protected).
+s-in {ui/screen/FlintTitleScreen.java,ui/screen/FlintPageScreen.java,ui/screen/MenuSizesScreen.java} protected (final )?void init\(\) \{ => public $1void init() {
+# Utilities: 1.8.9 has no accessibility settings.
+file ui/screen/UtilitiesScreen.java
+s import com\.flintclient\.client\.mc\.AccessibilityOptionsScreen;\n =>
+s \t\t\tnew Row\("flintclient\.utilities\.accessibility"[^\n]*\n =>

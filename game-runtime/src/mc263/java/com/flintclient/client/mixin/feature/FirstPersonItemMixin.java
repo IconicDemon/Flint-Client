@@ -18,8 +18,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * View Model: the held item is moved where Minecraft starts placing a hand (in view space, before its swing and bob), and
- * rotated and scaled about itself just before it is drawn. The empty hand is left alone. Nothing is allocated.
+ * Item Customizer (View Model): the held item is moved where Minecraft starts placing a hand (in view space, before its swing and bob), and
+ * rotated and scaled about itself just before it is drawn. The empty hand is placed where its pose starts. Nothing is allocated.
  */
 @Mixin(FirstPersonHandsAndItemsRenderer.class)
 abstract class FirstPersonItemMixin {
@@ -59,5 +59,12 @@ abstract class FirstPersonItemMixin {
 			pose.popPose();
 			com.flintclient.client.control.platform.Mc263LookMods.endHeld(tint);
 		}
+	}
+
+	/** Item Customizer's Rotationless Eat & Drink: food and drinks rise to your mouth without turning. */
+	@com.llamalad7.mixinextras.injector.v2.WrapWithCondition(method = "applyEatTransform", at = @At(value = "INVOKE",
+		target = "Lcom/mojang/blaze3d/vertex/PoseStack;rotateDegrees(Lcom/mojang/math/Axis;F)V"))
+	private boolean flint$eatTurn(PoseStack pose, com.mojang.math.Axis axis, float degrees) {
+		return Mc263ViewModel.eatRotation();
 	}
 }

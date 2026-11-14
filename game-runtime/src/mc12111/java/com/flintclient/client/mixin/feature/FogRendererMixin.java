@@ -24,6 +24,8 @@ abstract class FogRendererMixin {
 	private void flint$fog(Camera camera, int renderDistance, DeltaTracker delta, float darken, ClientLevel level, CallbackInfoReturnable<Vector4f> callback,
 		@Local FogData fog, @Local Vector4f color) {
 		McCompat.fogColor = color;
-		Mc263Features.fog(fog, camera.getFluidInCamera());
+		if (Mc263Features.fogOn()) {
+			Mc263Features.fog(fog, camera.getFluidInCamera());
+		}
 	}
 }

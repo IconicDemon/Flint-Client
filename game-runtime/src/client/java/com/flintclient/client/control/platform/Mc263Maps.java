@@ -3,6 +3,7 @@ package com.flintclient.client.control.platform;
 import com.flintclient.client.FlintClient;
 import com.flintclient.client.control.feature.Features;
 import com.flintclient.client.control.feature.Mods;
+import com.flintclient.client.control.feature.ServerRules;
 import com.flintclient.client.control.feature.WaypointStore;
 import com.flintclient.client.control.feature.map.MapShading;
 import com.flintclient.client.control.feature.map.MapWorld;
@@ -53,6 +54,8 @@ public final class Mc263Maps {
 	/** Chunk offsets around you out to 32, nearest first. */
 	private static final int[] RING = ring(32);
 	private static final int CAVES_KEPT = 4;
+	/** What the cave and layer keys say on a server ({@link ServerRules#fairPlay}). */
+	static final String FAIR_PLAY = "No cave layers on servers (fair play)";
 
 	private static final BlockPos.MutableBlockPos ROOF = new BlockPos.MutableBlockPos();
 	private static @Nullable String sessionKey;
@@ -126,7 +129,7 @@ public final class Mc263Maps {
 	 * or the world map's chosen height while the world map shows one here.
 	 */
 	public static @Nullable MapWorld caveLayer() {
-		return layerOn ? cave : null;
+		return layerOn && !ServerRules.fairPlay() ? cave : null;
 	}
 
 	/** The dimension the open map is of ("minecraft:overworld"), or null. */
@@ -308,7 +311,10 @@ public final class Mc263Maps {
 		enlarged = play && minimap && Mc263Features.keyHeld(mini.text(Minimap.ENLARGE_KEY));
 		zoomOutWas = out;
 		boolean caveKey = play && minimap && Mc263Features.keyHeld(mini.text(Minimap.CAVE_KEY));
-		if (caveKey && !caveKeyWas) {
+		boolean fair = ServerRules.fairPlay();
+		if (caveKey && !caveKeyWas && fair) {
+			Mc263Features.actionbar(Component.literal(FAIR_PLAY));
+		} else if (caveKey && !caveKeyWas) {
 			caveManual = !caveOn;
 			caveOn = caveManual;
 			caveTicks = 0;
@@ -318,7 +324,9 @@ public final class Mc263Maps {
 		// The layer keys: the minimap's height 16 blocks up or down (from Auto it starts where the map reads now, or your feet).
 		boolean up = play && minimap && Mc263Features.keyHeld(mini.text(Minimap.LAYER_UP_KEY));
 		boolean down = play && minimap && Mc263Features.keyHeld(mini.text(Minimap.LAYER_DOWN_KEY));
-		if (up && !layerUpWas || down && !layerDownWas) {
+		if ((up && !layerUpWas || down && !layerDownWas) && fair) {
+			Mc263Features.actionbar(Component.literal(FAIR_PLAY));
+		} else if (up && !layerUpWas || down && !layerDownWas) {
 			int next = stepLayer(level, player, mini.integer(Minimap.LAYER), up && !layerUpWas ? 16 : -16);
 			mini.set(Minimap.LAYER, next);
 			caveTicks = 0;
@@ -376,6 +384,14 @@ public final class Mc263Maps {
 	// ---------- cave mode ----------
 
 	private static void updateCave(ClientLevel level, LocalPlayer player) {
+		if (ServerRules.fairPlay()) {
+			// On a server, no cave layers (they show the caves under the ground and behind walls), as Xaero's Fair-Play minimap.
+			caveOn = false;
+			caveManual = false;
+			caveTicks = 0;
+			layerOn = false;
+			return;
+		}
 		ModuleState mini = Mods.state(MINIMAP);
 		int mode = Mods.on(MINIMAP) ? mini.option(Minimap.CAVE_MODE) : 0;
 		int roofed = mode == 0 && !caveManual ? Integer.MAX_VALUE : caving(level, player);

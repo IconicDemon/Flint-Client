@@ -2,7 +2,6 @@ package com.flintclient.client.control.rshift;
 
 import com.flintclient.client.FlintLog;
 import com.flintclient.client.control.ControlState;
-import com.flintclient.client.control.model.GameOptions;
 import com.flintclient.client.control.model.ToggleKeyLogic;
 import com.flintclient.client.control.store.ControlSettings;
 import com.flintclient.client.platform.Clock;
@@ -226,6 +225,8 @@ public final class ModMenuScreen extends KitScreen {
 	@Override
 	protected void hidden() {
 		super.hidden();
+		// A clip asked for in the frame that closed it never reaches the next screen's blur.
+		Frame.clipBlurOff();
 		save();
 		try {
 			// Minecraft's video options changed on the Graphics tab: textures reloaded if needed, options.txt written.
@@ -244,14 +245,9 @@ public final class ModMenuScreen extends KitScreen {
 		saveSoon();
 	}
 
-	/** General > UI Scaling resizes the open menu once its slider is let go (not under the cursor while it is dragged). */
+	/** General › Menu size resizes the open menu at once (once no control is held, so nothing moves under a press). */
 	private void rescaleIfChanged() {
-		float now;
-		try {
-			now = settings().game(GameOptions.MENU_SCALE);
-		} catch (RuntimeException | LinkageError e) {
-			return;
-		}
+		float now = MenuStyle.menuZoom();
 		if (Float.isNaN(zoom)) {
 			zoom = now;
 		} else if (now != zoom && captured() == null) {
@@ -363,7 +359,25 @@ public final class ModMenuScreen extends KitScreen {
 		}
 	}
 
-	/** The game (or Flint's artwork on the title screen) behind the window: blurred when that's on, and dimmed with the fade. */
+	/**
+	 * This frame: the window is over a live game ({@link MenuHost#livePreview}: the game and the HUD stay sharp and visible around
+	 * it, the HUD mods live with sample values where they have nothing to show), and the menu blur is kept to the window.
+	 */
+	private boolean live;
+	private boolean frosted;
+
+	boolean live() {
+		return live;
+	}
+
+	boolean frosted() {
+		return frosted;
+	}
+
+	/**
+	 * The game (or Flint's artwork on the title screen) behind the window: blurred when that's on, and dimmed with the fade. Over
+	 * a live game ({@link #live}) neither: only the window is frosted, so the HUD mods being switched on show where they really are.
+	 */
 	@Override
 	protected void paintBackdrop(Canvas c) {
 		try {
@@ -377,18 +391,33 @@ public final class ModMenuScreen extends KitScreen {
 			setOpacity(shown);
 			setContentShift(motion.offset(MenuStyle.r(RISE), MenuStyle.r(DROP)));
 			setContentZoom(motion.zoom(0.97F, 0.985F));
+			live = hostInWorld() && MenuHost.livePreview();
+			frosted = false;
+			if (live) {
+				// General › Menu blur strength: Minecraft's menu blur reads it while the menu shows (0: no blur).
+				ControlState.menuBlurFor(settings().game(com.flintclient.client.control.model.GameOptions.MENU_BLUR));
+			}
 			if (!hostInWorld()) {
 				hostPaintMenuBackdrop(c);
 				c.frame().nextLayer();
 			}
 			if (settings().transitionBlur() && MenuHost.menuBlurOn()) {
-				// False when something else blurred this frame already.
-				c.frame().blurBehind();
+				// False when something else blurred this frame already, or another screen draws this one under its own blur.
+				frosted = c.frame().blurBehind() && live;
+				if (frosted) {
+					// Over a live game only the window is frosted (ModMenuWindow names its rectangle); the rest stays sharp.
+					Frame.clipBlur();
+				}
 			}
-			float previous = c.opacity();
-			c.setOpacity(previous * shown);
-			c.fill(0, 0, c.px(hostGuiWidth()), c.px(hostGuiHeight()), MenuStyle.SCRIM);
-			c.setOpacity(previous);
+			// General › Menu transparency: the panels, cards and top row see-through over a live game (solid elsewhere).
+			MenuStyle.useSeeThrough(live ? MenuStyle.seeThroughFor(settings().game(com.flintclient.client.control.model.GameOptions.MENU_TRANSPARENCY),
+				frosted) : 1, live);
+			if (!live) {
+				float previous = c.opacity();
+				c.setOpacity(previous * shown);
+				c.fill(0, 0, c.px(hostGuiWidth()), c.px(hostGuiHeight()), MenuStyle.SCRIM);
+				c.setOpacity(previous);
+			}
 		} catch (RuntimeException | LinkageError e) {
 			broken(e);
 		}
@@ -406,6 +435,8 @@ public final class ModMenuScreen extends KitScreen {
 		} catch (RuntimeException | LinkageError e) {
 			FlintFrame.end();
 			broken(e);
+		} finally {
+			MenuStyle.endSeeThrough();
 		}
 	}
 

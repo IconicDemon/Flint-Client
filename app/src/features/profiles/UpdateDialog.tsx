@@ -18,6 +18,7 @@ import {
   versionsOf,
   type Choices,
 } from "../../lib/contentUpdates";
+import { filePage, isCurseForge } from "../../lib/contentSource";
 import { shortDate } from "../../lib/format";
 import { useT } from "../../lib/i18n";
 import { Markdown } from "../../lib/markdown";
@@ -366,9 +367,17 @@ function Changelog({ update, version, onPick, onBack }: { update: ContentUpdate;
         </p>
       )}
       <div className="upd-log-body">{version.changelog.trim() ? <Markdown source={version.changelog} className="is-small" /> : <p className="faint">{t("updates.changelog.none")}</p>}</div>
-      <button type="button" className="launch-link upd-log-link" onClick={() => void api.openExternal(`https://modrinth.com/project/${update.projectId}/version/${version.versionId}`)}>
-        {t("updates.changelog.onModrinth")}
-      </button>
+      {isCurseForge(update.projectId) ? (
+        filePage(update.websiteUrl, version.versionId) && (
+          <button type="button" className="launch-link upd-log-link" onClick={() => void api.openExternal(filePage(update.websiteUrl, version.versionId)!)}>
+            {t("updates.changelog.onCurseForge")}
+          </button>
+        )
+      ) : (
+        <button type="button" className="launch-link upd-log-link" onClick={() => void api.openExternal(`https://modrinth.com/project/${update.projectId}/version/${version.versionId}`)}>
+          {t("updates.changelog.onModrinth")}
+        </button>
+      )}
     </section>
   );
 }

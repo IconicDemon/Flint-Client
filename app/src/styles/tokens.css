@@ -26,7 +26,7 @@
   font-display: swap;
 }
 
-/* ---------- Flint Ember (default): charcoal, warm off-white, muted amber ---------- */
+/* ---------- Orange (id ember, the default): charcoal, warm off-white, muted amber ---------- */
 :root,
 [data-theme="ember"] {
   --bg-rgb: 12, 11, 10;
@@ -49,30 +49,87 @@
   --accent-press: #b3752f;
   --accent-ink: #1c1206;
   --accent-text: #e2a961;
+  /* Its own fill, so a theme preview inside another theme shows this one's (Ice Cream fills with a gradient). */
+  --accent-fill: rgb(var(--accent-rgb));
+
+  /* The Flint mark (ui/Logo.tsx): its brand amber on Orange; another theme draws it in its own accent. */
+  --logo-dark: #b45309;
+  --logo-light: #d97706;
+  --logo-core: #fef3e2;
 
   color-scheme: dark;
 }
 
-/* ---------- Flint Obsidian: layered black and graphite, no bright white ---------- */
-[data-theme="obsidian"] {
-  --bg-rgb: 8, 8, 9;
-  --ink-rgb: 214, 215, 220;
-  --accent-rgb: 168, 171, 182;
-  --danger-rgb: 214, 112, 104;
-  --warning-rgb: 206, 170, 106;
-  --success-rgb: 128, 178, 146;
-  --rail: #040405;
-  --surface-1: #0f0f11;
-  --surface-2: #151517;
-  --surface-3: #1b1b1e;
-  --surface-4: #242427;
-  --accent-hover: #b8bbc4;
-  --accent-press: #8f929c;
-  --accent-ink: #0c0c0e;
-  --accent-text: #c4c7cf;
+/* ---------- Ice Cream: the light theme. Vanilla cream, dark cocoa text, strawberry accent ---------- */
+[data-theme="icecream"],
+:root[data-theme="icecream"] {
+  --bg-rgb: 251, 246, 238;
+  --ink-rgb: 42, 33, 28;
+  --accent-rgb: 224, 122, 147;
+  /* Meanings deep enough to read on cream (WCAG AA). */
+  --danger-rgb: 186, 58, 48;
+  --warning-rgb: 135, 86, 10;
+  --success-rgb: 32, 110, 66;
+  --rail: #f4ecdf;
+  --surface-1: #fffdf9;
+  --surface-2: #f8f1e6;
+  --surface-3: #f4ecdf;
+  --surface-4: #e6dacb;
+  --accent-hover: #d2667f;
+  --accent-press: #c25570;
+  /* Cocoa on the strawberry-to-peach fill: white there is 2.1-2.9:1, under AA. */
+  --accent-ink: #2a211c;
+  /* The accent as text on cream, deepened for AA (4.5:1 on the raised panel). */
+  --accent-text: #ae4159;
+  --accent-fill: linear-gradient(135deg, #e07a93, #f2a97f);
+  --play-fill: var(--accent-fill);
+  --accent-fill-hover: linear-gradient(135deg, #d2667f, #eb9a6c);
+  --accent-fill-press: linear-gradient(135deg, #c25570, #df8c60);
+  --logo-dark: #c25570;
+  --logo-light: #e07a93;
+  --logo-core: #2a211c;
+  --text-3: rgba(var(--ink-rgb), 0.62);
+  --text-4: rgba(var(--ink-rgb), 0.42);
+  --hover: rgba(var(--ink-rgb), 0.045);
+  --press: rgba(var(--ink-rgb), 0.07);
+  --selected: rgba(var(--ink-rgb), 0.07);
+  --shadow-1: 0 1px 2px rgba(80, 50, 30, 0.08);
+  --shadow-2: 0 10px 28px rgba(80, 50, 30, 0.1);
+  --shadow-3: 0 28px 70px rgba(80, 50, 30, 0.14);
+  --scrim: rgba(60, 40, 28, 0.32);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(var(--accent-rgb), 0.4);
+  color-scheme: light;
 }
 
-/* ---------- Flint Bloodstone: near-black with deep, muted crimson ---------- */
+/* ---------- Blueberry (id aurora): deep indigo with a soft blueberry accent ---------- */
+[data-theme="aurora"],
+:root[data-theme="aurora"] {
+  --bg-rgb: 11, 13, 28;
+  --ink-rgb: 230, 233, 247;
+  --accent-rgb: 107, 127, 227;
+  --danger-rgb: 232, 112, 104;
+  --warning-rgb: 222, 176, 98;
+  --success-rgb: 120, 200, 140;
+  --rail: #070814;
+  --surface-1: #111427;
+  --surface-2: #161a31;
+  --surface-3: #1e233f;
+  --surface-4: #283052;
+  --accent-hover: #8396ea;
+  --accent-press: #5568cc;
+  --accent-ink: #0a0e26;
+  --accent-text: #a7b4f2;
+  /* Its own fill, so a theme preview inside another theme shows this one's (Ice Cream fills with a gradient). */
+  --accent-fill: rgb(var(--accent-rgb));
+  --play-fill: var(--accent-fill);
+  --accent-fill-hover: var(--accent-hover);
+  --accent-fill-press: var(--accent-press);
+  --logo-dark: var(--accent-press);
+  --logo-light: var(--accent-hover);
+  --logo-core: rgb(var(--ink-rgb));
+}
+
+/* ---------- Cherry (id bloodstone): near-black with deep, muted crimson ---------- */
 [data-theme="bloodstone"] {
   --bg-rgb: 13, 10, 10;
   --ink-rgb: 240, 229, 227;
@@ -91,9 +148,14 @@
   /* Light text on crimson: dark text on a deep red fails contrast. */
   --accent-ink: #fff4f2;
   --accent-text: #dc7f82;
+  /* Its own fill, so a theme preview inside another theme shows this one's (Ice Cream fills with a gradient). */
+  --accent-fill: rgb(var(--accent-rgb));
+  --logo-dark: var(--accent-press);
+  --logo-light: var(--accent-hover);
+  --logo-core: rgb(var(--ink-rgb));
 }
 
-/* ---------- Flint Dusk: deep charcoal with restrained plum-violet ---------- */
+/* ---------- Passion Fruit (id dusk): deep charcoal with restrained plum-violet ---------- */
 [data-theme="dusk"] {
   --bg-rgb: 11, 10, 14;
   --ink-rgb: 232, 228, 240;
@@ -110,29 +172,43 @@
   --accent-press: #7a619f;
   --accent-ink: #120d1c;
   --accent-text: #b9a3dc;
+  /* Its own fill, so a theme preview inside another theme shows this one's (Ice Cream fills with a gradient). */
+  --accent-fill: rgb(var(--accent-rgb));
+  --logo-dark: var(--accent-press);
+  --logo-light: var(--accent-hover);
+  --logo-core: rgb(var(--ink-rgb));
 }
 
-/* ---------- Flint Moss: charcoal, muted forest green, sage ---------- */
+/* ---------- Mint (id moss): charcoal with a cool, fresh mint ---------- */
 [data-theme="moss"] {
-  --bg-rgb: 11, 12, 11;
-  --ink-rgb: 228, 234, 224;
-  --accent-rgb: 118, 152, 106;
+  --bg-rgb: 10, 14, 13;
+  --ink-rgb: 228, 242, 236;
+  --accent-rgb: 62, 180, 137;
   --danger-rgb: 216, 110, 98;
   --warning-rgb: 210, 172, 98;
   --success-rgb: 124, 180, 128;
-  --rail: #060706;
-  --surface-1: #121412;
-  --surface-2: #171a17;
-  --surface-3: #1d211d;
-  --surface-4: #262b26;
-  --accent-hover: #87a979;
-  --accent-press: #61815a;
-  --accent-ink: #0b130a;
-  --accent-text: #a5c196;
+  --rail: #060908;
+  --surface-1: #0f1513;
+  --surface-2: #141b19;
+  --surface-3: #1a2421;
+  --surface-4: #24322d;
+  --accent-hover: #5cc6a0;
+  --accent-press: #31986f;
+  --accent-ink: #04150e;
+  --accent-text: #98e2c6;
+  /* Its own fill, so a theme preview inside another theme shows this one's (Ice Cream fills with a gradient). */
+  --accent-fill: rgb(var(--accent-rgb));
+  --logo-dark: var(--accent-press);
+  --logo-light: var(--accent-hover);
+  --logo-core: rgb(var(--ink-rgb));
 }
 
 :root {
   --scrim: rgba(var(--bg-rgb), 0.72);
+  /* The accent as a fill for large primary surfaces (Play, primary buttons, swatches): a gradient on Ice Cream. */
+  --accent-fill: var(--accent);
+  --accent-fill-hover: var(--accent-hover);
+  --accent-fill-press: var(--accent-press);
 
   --line: rgba(var(--ink-rgb), 0.07);
   --line-strong: rgba(var(--ink-rgb), 0.13);
@@ -212,7 +288,7 @@
   --content-left: calc(var(--rail-w) + var(--rail-inset) * 2);
   --gutter: clamp(18px, 1.6vw, 30px);
   --chrome-top: 0px;
-  /* --accent-text is each theme's legible accent tint; Bloodstone's base crimson is under 3:1 on its surfaces. */
+  /* --accent-text is each theme's legible accent tint; Cherry's base crimson is under 3:1 on its surfaces. */
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-text);
 }
 

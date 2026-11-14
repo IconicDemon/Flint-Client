@@ -27,6 +27,10 @@ public final class MenuButton extends FlintButton {
 	private final Style style;
 	private final Icon icon;
 	private final TextLine label;
+	/** A count shown at the button's right (Discover's partner servers); none while it is 0. */
+	private java.util.function.IntSupplier count = () -> 0;
+	private final TextLine countText = new TextLine(com.flintclient.client.render.PixelFace.of(FlintFonts.SMALL.size), "");
+	private int shownCount;
 
 	public MenuButton(Component message, Icon icon, Style style, Runnable action) {
 		super(message, action);
@@ -39,6 +43,12 @@ public final class MenuButton extends FlintButton {
 			case ACCENT -> new TextLine(FlintFonts.STRONG, text.toUpperCase(Locale.ROOT), 0.16F);
 			case DANGER -> new TextLine(FlintFonts.STRONG, text.toUpperCase(Locale.ROOT), 0.18F);
 		};
+	}
+
+	/** Shows {@code count} in a small pill at the button's right (in Minecraft's font), when it is above 0. */
+	public MenuButton count(java.util.function.IntSupplier count) {
+		this.count = count;
+		return this;
 	}
 
 	@Override
@@ -99,5 +109,17 @@ public final class MenuButton extends FlintButton {
 			c.icon(icon, left, center - iconPx / 2, iconPx, ink);
 		}
 		c.text(label, left + (icon == null ? 0 : iconPx + gap), c.baselineFor(label, center), ink);
+		int n = count.getAsInt();
+		if (n > 0) {
+			if (n != shownCount) {
+				shownCount = n;
+				countText.set(n > 999 ? "999+" : Integer.toString(n));
+			}
+			int ph = c.px(6.6F);
+			int pw = Math.max(ph, c.width(countText) + c.px(3.6F));
+			int px = x + w - c.px(3.4F) - pw;
+			c.roundRect(px, center - ph / 2, pw, ph, ph / 2, Palette.withAlpha(Palette.TEXT, 0.10F + 0.06F * hover));
+			c.text(countText, px + (pw - c.width(countText)) / 2, c.baselineFor(countText, center), Palette.lerp(Palette.TEXT_DIM, Palette.TEXT, hover));
+		}
 	}
 }

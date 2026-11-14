@@ -6,15 +6,13 @@
 package com.flintclient.client.control.platform;
 
 import com.flintclient.client.FlintClient;
-import com.flintclient.client.control.ControlState;
 import com.flintclient.client.control.feature.CrosshairDrawing;
+import com.flintclient.client.control.feature.CrosshairPicture;
 import com.flintclient.client.control.feature.Mods;
 import com.flintclient.client.control.model.IntSetting;
 import com.flintclient.client.control.model.ModuleState;
 import com.flintclient.client.control.model.RgbSetting;
 import com.flintclient.client.control.model.mods.PlayerMods.Crosshair;
-import java.nio.file.Path;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -49,8 +47,6 @@ public final class Mc263Crosshair {
 	private static final int DEBUG_STYLE = 6;
 	/** Drawing units are hundredths of a GUI unit, so the original's fractional edges (gap - 0.5, 2 x thickness - 0.2) keep. */
 	private static final float UNIT = 100;
-	private static final CrosshairDrawing DRAWING = new CrosshairDrawing();
-	private static boolean drawingLoaded;
 	private static boolean debugThisFrame;
 	private static boolean editWas;
 	private static int rainbowTicks;
@@ -80,41 +76,28 @@ public final class Mc263Crosshair {
 		return debugThisFrame;
 	}
 
+	/** The drawn crosshair (the Right Shift menu's pad draws on the same one). */
 	public static CrosshairDrawing drawing() {
-		if (!drawingLoaded) {
-			drawingLoaded = true;
-			DRAWING.load(drawingFile());
-		}
-		return DRAWING;
-	}
-
-	public static Path drawingFile() {
-		return FabricLoader.getInstance().getConfigDir().resolve("flintclient").resolve("crosshair-drawn.png");
+		return CrosshairDrawing.shared();
 	}
 
 	private static boolean debugScreen() {
 		return Minecraft.getInstance().debugEntries.isOverlayVisible();
 	}
 
-	/** Each client tick: the edit key (opens these settings) and the Draw crosshair row (opens the editor). */
+	/** Each client tick: the edit key (opens these settings). */
 	static void tick(boolean playing) {
 		if (!GUARD.on()) {
 			return;
 		}
 		try {
 			ModuleState s = Mods.state(CROSSHAIR);
-			Minecraft mc = Minecraft.getInstance();
 			boolean edit = playing && Mods.on(CROSSHAIR) && Mc263Features.keyHeld(s.text(Crosshair.EDIT_KEY));
 			if (edit && !editWas) {
 				com.flintclient.client.control.rshift.ModMenuScreen.showModule(Crosshair.ID);
 				com.flintclient.client.control.ControlCenter.openWindow(null);
 			}
 			editWas = edit;
-			if (s.option(Crosshair.DRAW) != 0) {
-				s.set(Crosshair.DRAW, 0);
-				ControlState.settings().recordChange(s.id());
-				mc.gui.setScreen(new CrosshairDrawScreen(mc.gui.screen()));
-			}
 		} catch (RuntimeException | LinkageError e) {
 			GUARD.fail(e);
 		}
@@ -245,8 +228,12 @@ public final class Mc263Crosshair {
 		return s.integer(alpha) << 24 | s.rgb(color);
 	}
 
+	/** Whether this frame's colour is one of its own (a highlight or the rainbow), which adaptive colour gives way to. */
+	private static boolean ownColor;
+
 	/** Players, then hostile and neutral mobs, then animals; else the rainbow or the crosshair's own color. */
 	private static int color(Minecraft mc, ModuleState s) {
+		ownColor = true;
 		Entity target = mc.crosshairPickEntity;
 		if (s.bool(Crosshair.PLAYERS) && target instanceof Player) {
 			return argb(s, Crosshair.PLAYERS_COLOR, Crosshair.PLAYERS_ALPHA);
@@ -261,6 +248,7 @@ public final class Mc263Crosshair {
 			rainbowTicks = rainbowTicks + 1 > 125000 ? 0 : rainbowTicks + 1;
 			return s.integer(Crosshair.ALPHA) << 24 | rainbow(0) << 16 | rainbow(2) << 8 | rainbow(4);
 		}
+		ownColor = false;
 		return argb(s, Crosshair.COLOR, Crosshair.ALPHA);
 	}
 
@@ -319,7 +307,8 @@ public final class Mc263Crosshair {
 	// ---------- the styles ----------
 
 	private static void drawStyle(GuiGraphicsExtractor g, Minecraft mc, ModuleState s, int style, int gap, int color) {
-		boolean invert = s.bool(Crosshair.INVERT);
+		// Adaptive colour inverts what is behind the crosshair, unless it has a colour of its own now (a highlight, the rainbow).
+		boolean invert = s.bool(Crosshair.INVERT) && !ownColor;
 		float width = s.integer(Crosshair.WIDTH);
 		float height = s.integer(Crosshair.HEIGHT);
 		float thickness = s.integer(Crosshair.THICKNESS);
@@ -345,7 +334,13 @@ public final class Mc263Crosshair {
 					rect(g, gap, -at, gap + width, at, color, invert);
 				}
 			}
-			case 2 -> arc(g, gap, 0, 360, color);
+			case 2 -> {
+				float lw = CrosshairPicture.strokeWidth(thickness);
+				if (outlined) {
+					arc(g, gap, 0, 360, outline, lw, 1);
+				}
+				arc(g, gap, 0, 360, color, lw, 0);
+			}
 			case 3 -> {
 				if (outlined) {
 					frame(g, -width - gap + 0.5F, -height - gap + 0.5F, width + gap - 0.5F, height + gap - 0.5F, outline);
@@ -361,28 +356,53 @@ public final class Mc263Crosshair {
 				float top = -height / 2.0F - gap;
 				float bottom = height / 2.0F + gap;
 				float side = width / 2.0F + gap;
-				line(g, 0, top, side, bottom, color);
-				line(g, side, bottom, -side, bottom, color);
-				line(g, -side, bottom, 0, top, color);
+				float lw = CrosshairPicture.strokeWidth(thickness);
+				for (int pass = outlined ? 0 : 1; pass < 2; pass++) {
+					int ink = pass == 0 ? outline : color;
+					line(g, 0, top, side, bottom, ink, lw, 1 - pass);
+					line(g, side, bottom, -side, bottom, ink, lw, 1 - pass);
+					line(g, -side, bottom, 0, top, ink, lw, 1 - pass);
+				}
 			}
 			case 5 -> {
-				line(g, -width, height, 0, 0, color);
-				line(g, 0, 0, width, height, color);
+				// A chevron pointing at the centre from below, its tip the gap away.
+				float lw = CrosshairPicture.strokeWidth(thickness);
+				for (int pass = outlined ? 0 : 1; pass < 2; pass++) {
+					int ink = pass == 0 ? outline : color;
+					line(g, -width, height + gap, 0, gap, ink, lw, 1 - pass);
+					line(g, 0, gap, width, height + gap, ink, lw, 1 - pass);
+				}
 			}
 			case DEBUG_STYLE -> debugThisFrame = true;
-			default -> drawn(g, color, invert);
+			default -> drawn(g, color, invert, outlined ? outline : 0);
 		}
 	}
 
-	/** The drawn crosshair: one GUI unit per pixel, centred. */
-	private static void drawn(GuiGraphicsExtractor g, int color, boolean invert) {
+	/**
+	 * The drawn crosshair: one GUI unit per pixel, centred; each row's runs of pixels as one rectangle. With an outline
+	 * ({@code outline} not 0), every run a screen pixel wider all round first, in its colour.
+	 */
+	private static void drawn(GuiGraphicsExtractor g, int color, boolean invert, int outline) {
 		CrosshairDrawing drawing = drawing();
-		float ox = drawing.width() / 2.0F;
+		int w = drawing.width();
+		float ox = w / 2.0F;
 		float oy = drawing.height() / 2.0F;
-		for (int px = 0; px < drawing.width(); px++) {
+		float grow = pixel(g);
+		for (int pass = outline != 0 ? 0 : 1; pass < 2; pass++) {
 			for (int py = 0; py < drawing.height(); py++) {
-				if (drawing.at(px, py)) {
-					rect(g, px - ox, py - oy, px - ox + 1, py - oy + 1, color, invert);
+				int run = -1;
+				for (int px = 0; px <= w; px++) {
+					boolean on = px < w && drawing.at(px, py);
+					if (on && run < 0) {
+						run = px;
+					} else if (!on && run >= 0) {
+						if (pass == 0) {
+							rect(g, run - ox - grow, py - oy - grow, px - ox + grow, py - oy + 1 + grow, outline, false);
+						} else {
+							rect(g, run - ox, py - oy, px - ox, py - oy + 1, color, invert);
+						}
+						run = -1;
+					}
 				}
 			}
 		}
@@ -429,23 +449,38 @@ public final class Mc263Crosshair {
 
 	/** A line one screen pixel wide from (x0, y0) to (x1, y1). */
 	private static void line(GuiGraphicsExtractor g, float x0, float y0, float x1, float y1, int color) {
+		line(g, x0, y0, x1, y1, color, 0, 0);
+	}
+
+	/**
+	 * A line {@code width} GUI units wide (0: one screen pixel) from (x0, y0) to (x1, y1), grown {@code grow} screen pixels each
+	 * side (an outline under it); a wide or grown one is square-ended, so the corners of a shape close.
+	 */
+	private static void line(GuiGraphicsExtractor g, float x0, float y0, float x1, float y1, int color, float width, int grow) {
 		float dx = x1 - x0;
 		float dy = y1 - y0;
 		float length = (float) Math.sqrt(dx * dx + dy * dy);
 		if (length <= 0) {
 			return;
 		}
-		float half = pixel(g) / 2;
+		float pixel = pixel(g);
+		float half = (width > 0 ? width / 2 : pixel / 2) + grow * pixel;
+		float cap = width > 0 || grow > 0 ? half : 0;
 		Matrix3x2fStack pose = g.pose();
 		pose.pushMatrix();
 		pose.translate(x0, y0);
 		pose.rotate((float) Math.atan2(dy, dx));
-		rect(g, 0, -half, length, half, color, false);
+		rect(g, -cap, -half, length + cap, half, color, false);
 		pose.popMatrix();
 	}
 
 	/** An arc of radius {@code r} around the pose's origin, clockwise from the top, {@code from} to {@code to} degrees. */
 	private static void arc(GuiGraphicsExtractor g, float r, int from, int to, int color) {
+		arc(g, r, from, to, color, 0, 0);
+	}
+
+	/** The same in strokes {@code width} wide (0: a screen pixel), grown {@code grow} screen pixels each side. */
+	private static void arc(GuiGraphicsExtractor g, float r, int from, int to, int color, float width, int grow) {
 		int start = Math.max(0, Math.min(from, to));
 		int end = Math.min(360, Math.max(from, to));
 		if (end <= start) {
@@ -462,7 +497,7 @@ public final class Mc263Crosshair {
 			float nx = (float) Math.cos(rad) * r;
 			float ny = (float) Math.sin(rad) * r;
 			if (i > start) {
-				line(g, px, py, nx, ny, color);
+				line(g, px, py, nx, ny, color, width, grow);
 			}
 			px = nx;
 			py = ny;

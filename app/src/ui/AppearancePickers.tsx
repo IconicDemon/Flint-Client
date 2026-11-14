@@ -3,15 +3,27 @@ import { FONTS, THEMES, type EffectsLevel, type FontId, type ThemeId } from "../
 import { Icon } from "./Icon";
 
 /*
- * Theme, font and effects text in the interface language. lib/settings.tsx keeps the English originals;
- * theme names (Ember, Obsidian…) are names and stay as they are.
+ * Theme, font and effects text in the interface language. lib/settings.tsx keeps the English originals. The stored theme ids
+ * (ember, moss, bloodstone, dusk, aurora) are older names kept so saved settings still work; what the player reads is the
+ * name below: Orange, Ice Cream, Mint, Cherry, Passion Fruit, Blueberry (the game names them the same).
  */
 export const THEME_NOTES: Record<ThemeId, MessageKey> = {
   ember: "appearance.themes.ember.note",
-  obsidian: "appearance.themes.obsidian.note",
+  icecream: "appearance.themes.icecream.note",
   moss: "appearance.themes.moss.note",
   bloodstone: "appearance.themes.bloodstone.note",
   dusk: "appearance.themes.dusk.note",
+  aurora: "appearance.themes.aurora.note",
+};
+
+/** Each theme's name: a word, translated. */
+export const THEME_NAMES: Record<ThemeId, MessageKey> = {
+  ember: "appearance.themes.ember.name",
+  icecream: "appearance.themes.icecream.name",
+  moss: "appearance.themes.moss.name",
+  bloodstone: "appearance.themes.bloodstone.name",
+  dusk: "appearance.themes.dusk.name",
+  aurora: "appearance.themes.aurora.name",
 };
 
 export const FONT_TEXT: Record<FontId, { name: MessageKey; note: MessageKey }> = {
@@ -36,33 +48,33 @@ const Check = ({ active }: { active: boolean }) =>
 export function ThemePicker({ value, onChange }: { value: ThemeId; onChange: (v: ThemeId) => void }) {
   const t = useT();
   return (
-    <div className="pick-grid themes" role="radiogroup" aria-label={t("ui.appearance.themes")}>
-      {THEMES.map((theme) => (
-        <button key={theme.id} type="button" role="radio" aria-checked={value === theme.id} className={`pick-card ${value === theme.id ? "is-active" : ""}`} onClick={() => onChange(theme.id)}>
-          <span className="theme-preview" data-theme={theme.id} aria-hidden>
-            <span className="tp-rail">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span className="tp-scene">
-              <span className="tp-title" />
-              <span className="tp-chips">
+    <div className="pick-themes">
+      <div className="pick-grid themes" role="radiogroup" aria-label={t("ui.appearance.themes")}>
+        {THEMES.map((theme) => (
+          <button key={theme.id} type="button" role="radio" aria-checked={value === theme.id} className={`pick-card ${value === theme.id ? "is-active" : ""}`} onClick={() => onChange(theme.id)}>
+            <span className="theme-preview" data-theme={theme.id} aria-hidden>
+              <span className="tp-rail">
+                <i />
                 <i />
                 <i />
               </span>
-              <span className="tp-play" />
+              <span className="tp-scene">
+                <span className="tp-title" />
+                <span className="tp-chips">
+                  <i />
+                  <i />
+                </span>
+                <span className="tp-play" />
+              </span>
             </span>
-          </span>
-          <span className="pick-meta">
-            <strong>
-              <span className="pick-brand">Flint</span> {theme.name}
-            </strong>
-            <span className="pick-note">{t(THEME_NOTES[theme.id])}</span>
-          </span>
-          <Check active={value === theme.id} />
-        </button>
-      ))}
+            <span className="pick-meta">
+              <strong>{t(THEME_NAMES[theme.id])}</strong>
+              <span className="pick-note">{t(THEME_NOTES[theme.id])}</span>
+            </span>
+            <Check active={value === theme.id} />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

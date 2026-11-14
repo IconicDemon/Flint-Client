@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * UHC Overlay: a dropped item drawn at its size, right after Minecraft has placed it (its position, bob and spin), so it grows
+ * UHC Overlay and Item Customizer's Dropped Item Size: a dropped item drawn at its size, right after Minecraft has placed it (its position, bob and spin), so it grows
  * in place and every copy of a stack grows with it.
  */
 @Mixin(ItemEntityRenderer.class)
@@ -23,7 +23,8 @@ public abstract class ItemEntityRendererMixin {
 			return;
 		}
 		try {
-			float scale = Flint.modules().uhcOverlay.scale(entity.getItem());
+			// Item Customizer's Dropped Item Size, times UHC Overlay's own.
+			float scale = Flint.modules().uhcOverlay.scale(entity.getItem()) * Flint.modules().itemCustomizer.dropped(entity.getItem());
 			if (scale != 1) {
 				GlStateManager.scalef(scale, scale, scale);
 			}

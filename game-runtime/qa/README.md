@@ -35,6 +35,14 @@ the Mojang-to-intermediary names the QA build bundles from Loom's mappings (`fli
 identity. `--mc 1.21.10` likewise (`-Pminecraft_version=1.21.10` for both builds; `src/mc12110`, where a file of the
 same path as one in `src/main` replaces it, as `QaSkin` does).
 
+`--mc 1.19.2` and `--mc 1.19` run the tour in those releases on Java 17 (`java-runtime-gamma`, their own) with their jars
+(`-Pminecraft_version=1.19.2` or `1.19` for both builds). The QA mod's 1.19.2 files are in `src/mc11902`; 1.19 builds on
+them (`src/mc11900/overlay.properties`: `base=mc11902`) with only its own chat (`QaChat`: commands and chat lines before
+1.19.1's signing). The steps are the same; what 1.19.x can't do as later versions do: the tour's skin and the Minecraft
+cape stand-in are written where Minecraft keeps a player's textures (its player info), so a Flint Store cape or Nick
+Hider shows over a tour's own skin; later versions' default skins become Steve or Alex; `QaBots` `unlisted` players are
+listed (1.19.2 lists every player it knows) and `mount` hangs a named armour stand on you (text displays came in 1.19.4).
+
 The tours used for the beta are in `~/FlintQA/scripts/` (copied into each run folder as `script.txt`). The local test
 server for multiplayer checks is `~/FlintQA/server/run.sh` (127.0.0.1:25599, offline mode, loopback only).
 
@@ -64,6 +72,19 @@ steps are listed in `qa/legacy189/.../FlintQa.java` (`move-node`, `mouse-down`/`
 `fps SECONDS NAME`, `perspective N`…); Flint's elements are found by accessible name. The 1.8.9 tours are in
 `~/FlintQA/scripts/legacy189/`.
 
+The crash sweep (`~/FlintQA/scripts/crashproof/sweep.txt`, 1.8.9: `sweep-189.txt`; `QaSweep`, `legacy/QaSweep189`) finds what
+takes the game down when a mod, a setting or a screen opens, driven by Flint's own registries so a mod added later is swept with
+no tour change: `sweep mods [WxH]` switches every module of `ModuleRegistry` on in a world, opens its page in the Right Shift menu
+and sets every setting to its minimum, maximum and middle (through the setting's own clamp), every choice, both boolean states,
+empty and long text, a few frames each, then puts the module back (the window resized to WxH half way, every module on at once at
+the end); `sweep title` / `sweep pause` press every button of the title screen or pause menu and of the screen each opens (never
+one that quits, leaves, connects, opens a browser or folder, deletes or signs out: listed as skipped); `sweep rshift` opens the
+HUD page and every tab of the window; `sweep net` checks the safety net (`feature.Faults`: a HUD module made to throw is switched
+off, a Flint screen made to throw closes); `sweep deep` presses what opens another screen on Flint's own windows (Friends,
+Cosmetics...); `sweep summary` prints the PASS / FAIL list. Nothing stops it: a step's exception and everything the safety net
+caught meanwhile is a FAIL with the module / setting / screen it happened in, and a crash is found from the last `QA sweep at`
+line. Run it as the other tours, with the mock Store and mock link (`--size 1280x720`).
+
 Nametags and Flint marks over other players, without a second game or account (`~/FlintQA/scripts/nametag-fixes/`):
 `call com.flintclient.qa.QaBots.spawn NAME uuid:UUID listed|unlisted|noinfo DX DZ` adds a remote player to a single-player
 world the way the client does when a server announces one (1.8.9: `com.flintclient.qa.legacy.QaBots.spawn NAME UUID
@@ -83,3 +104,21 @@ rp-incompatible, rp-remove, shader-on, shader-listed, mod-blocked, datapack) wit
 `content::tests::qa_live_pack_change`). Game files come from `~/FlintQA/mc-cache` only (the runner gets an `APPDATA` without the
 app); it holds `~/FlintQA/game.lock` while the game runs. 1.8.9 tours have `await-signal` too. The tours are in
 `~/FlintQA/scripts/live-packs/`; `--mods ~/FlintQA/bench/<version>/iris` adds the performance set with Iris.
+
+What a screen share's viewer sees (Discord, OBS): `node qa/tools/capture-test.mjs --plan PLAN.json --run RUN [--mc VERSION] [--mods DIR]
+[--shader PACK.zip] [--perf-json JSON] [--sodium-ahead N]` runs one game (either runner) through a plan's segments (windowed; FPS
+limit; VSync; the game's GPU priority) and captures each the way screen sharing does: Windows.Graphics.Capture of the game window
+(`wgc`) or Desktop Duplication of its area (`dda`), every frame Windows delivers, encoded with NVENC H.264, with a portable ffmpeg
+that has gfxcapture and ddagrab (`%USERPROFILE%\FlintQA\tools\ffmpeg`). The game stamps each frame it presents with its number
+(`QaStamp`; 1.8.9 `LegacyStamp`: black and white blocks in a corner, painted just before the present), so each captured frame says
+which game frame the viewer got. Per segment (`capture-results.tsv`/`.json` in the run folder): the game's FPS, 1% low and present
+pacing; the delivered frames, gaps, and what a 60 or 30 fps stream shows (repeated frames, judder); GPU load (nvidia-smi). The window
+stays behind the owner's windows (`qa/tools/capture-window.ps1`); fullscreen or on-top segments need `--allow-on-top` and the
+owner's OK. A segment the owner clicked into is marked `*`. Run it inside heavy-slot.mjs; capture files are deleted unless `--keep`.
+
+The in-game Library and Instant Swap without the launcher: `node qa/tools/swap-link.mjs --game DIR --standby-script A,B` answers
+the Library's game-link ops against real Modrinth (CurseForge search through the local relay) and plays the launcher's swap
+(`app/src-tauri/src/swap.rs`): a mod change starts the standby game (this runner again with `FLINTQA_NO_LOCK`,
+`FLINTQA_KEEP_MODS`, `FLINTQA_PRIORITY=idle`, `FLINT_SWAP_STANDBY`; the first swap runs tour A, the next B), early when free
+memory holds a second game (`--prewarm`: always), else after the first game hands over. The tours and drivers are in
+`~/FlintQA/scripts/library/` (`run-swap.sh`, `run-mp.sh` with the local server, `run-preview.sh`, `run-fit.sh`).

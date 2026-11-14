@@ -4,7 +4,7 @@ import { test } from "node:test";
 import en from "../locales/en.json" with { type: "json" };
 import { bytes, list, relativeTime, shortDate } from "./format.ts";
 import { LANGUAGES, LOCALES, resolveLanguage, searchable, setLanguage, t, translator, type Key } from "./i18n.ts";
-import { allowedForms, coverageOf, messageIds, placeholders, pluralBase, requiredForms, type Messages } from "./i18nCatalog.ts";
+import { allowedForms, compactCatalog, coverageOf, expandCatalog, messageIds, placeholders, pluralBase, requiredForms, type Messages } from "./i18nCatalog.ts";
 
 const SRC = new URL("../", import.meta.url);
 const ENGLISH: Messages = en;
@@ -55,6 +55,22 @@ test("English is well formed: plain keys or one/other plurals with the same plac
     assert.ok(`${base}.one` in ENGLISH && `${base}.other` in ENGLISH, `${base}: English plurals need .one and .other`);
     assert.deepEqual(placeholders(text), placeholders(ENGLISH[`${base}.other`]), `${key}: placeholders differ from .other`);
   }
+});
+
+test("a build's language chunk, without its keys, puts back exactly its catalog file", () => {
+  const keys = Object.keys(ENGLISH);
+  for (const locale of OTHERS) {
+    const file = catalog(locale);
+    // As vite.config.ts writes the chunk (JSON) and lib/i18n.ts reads it back.
+    const shipped = JSON.parse(JSON.stringify(compactCatalog(keys, file)));
+    assert.deepEqual(expandCatalog(keys, shipped), file, locale);
+  }
+  const de = compactCatalog(keys, catalog("de"));
+  assert.ok(de.v.length === keys.length && !JSON.stringify(de).includes(keys[0]), "the texts only, in English's order");
+  assert.deepEqual(compactCatalog(["a.b", "a.c"], { "a.c": "C", "a.c.few": "F" }), { n: 2, v: [0, "C"], x: { "a.c.few": "F" } }, "a missing text, and a plural form English doesn't have");
+  assert.equal(expandCatalog([...keys, "another.key"], de), null, "a chunk made for another English isn't used");
+  const plain = catalog("de");
+  assert.equal(expandCatalog(keys, plain), plain, "a catalog file (development server, tests) is used as it is");
 });
 
 for (const locale of OTHERS) {

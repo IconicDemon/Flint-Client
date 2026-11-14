@@ -3,7 +3,6 @@ package com.flintclient.client.control.rshift;
 import static com.flintclient.client.control.rshift.MenuStyle.d;
 
 import com.flintclient.client.control.feature.CapeChoices;
-import com.flintclient.client.control.feature.CapeFrames;
 import com.flintclient.client.control.feature.CapeMods;
 import com.flintclient.client.control.feature.CapePng;
 import com.flintclient.client.control.rshift.MenuStyle.Label;
@@ -11,15 +10,12 @@ import com.flintclient.client.control.rshift.MenuStyle.Type;
 import com.flintclient.client.control.rshift.SocialParts.Button;
 import com.flintclient.client.control.rshift.SocialParts.Lines;
 import com.flintclient.client.control.feature.StoreCapes;
-import com.flintclient.client.control.store.CapeAnimation;
 import com.flintclient.client.control.store.StoreEndpoint;
-import com.flintclient.client.module.account.LauncherLink.LinkException;
 import com.flintclient.client.module.social.FriendsClient;
 import com.flintclient.client.module.social.SocialLink;
 import com.flintclient.client.module.social.SocialLink.Cosmetics;
 import com.flintclient.client.module.social.SocialLink.Item;
 import com.flintclient.client.platform.Clock;
-import com.flintclient.client.platform.Texture;
 import com.flintclient.client.render.Canvas;
 import com.flintclient.client.render.FontFace;
 import com.flintclient.client.render.Palette;
@@ -32,18 +28,10 @@ import com.flintclient.client.ui.kit.SearchField;
 import com.flintclient.client.ui.kit.TextField;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -61,32 +49,63 @@ import org.jspecify.annotations.Nullable;
  * picks made meanwhile are sent once the Store answers, only the last one. A refusal puts back what the Store last said
  * (on the tile and on you) and says why under the note. A change made in the launcher reads the list again.
  *
- * <p>Animated capes play in their tiles as they play on you ({@link Motion}): the poster first, then the frames, at the wall
- * clock's frame (the one the worn cape shows), written only while the tile is on screen; the strips come through the game's
- * own Store capes ({@link StoreCapes#strip}: its disk cache, the Store's hosts only, SHA-256 checked). Still capes stay still.
- * The frames go when the window does.
+ * <p>Animated capes play in their tiles as they play on you: at the wall clock's frame (the one the worn cape shows), every
+ * frame uploaded once into one texture and drawn from there ({@link CosmeticShelf.Reel}), so playing writes nothing; the
+ * strips come through the game's own Store capes ({@link StoreCapes#strip}: its disk cache, the Store's hosts only, SHA-256
+ * checked). Still capes stay still.
  *
- * <p>Built for big collections: a grid as dense as the window allows (about eight capes to a row at 1080p), the worn item
- * first in its slot, a search that filters by name (Escape clears it before it closes the window), and only the tiles on
- * screen ask for pictures or play. Past the window's frame budget, animations that scrolled away give their frames back.
+ * <p>Opens at once: the list, the pictures and the animations are the game session's ({@link CosmeticShelf}), warmed when the
+ * title screen or the Right Shift menu shows and kept when the window closes (within their budgets); the list is read again
+ * as the window opens. Built for big collections: a grid as dense as the window allows (about eight capes to a row at 1080p),
+ * the worn item first in its slot, a search that filters by name (Escape clears it before it closes the window), and what is
+ * on screen loads first.
  */
 public final class FlintCosmeticsScreen extends WindowScreen {
-	private final CosmeticsPage page = new CosmeticsPage();
+	/** Lines with the wardrobe ({@link WardrobePage}, {@code MenuHost.wardrobe}) show it; the others keep this window's grid. */
+	private static @Nullable Boolean wardrobeOn;
+
+	static boolean wardrobe() {
+		Boolean on = wardrobeOn;
+		if (on == null) {
+			try {
+				on = com.flintclient.client.platform.MenuHost.wardrobe();
+			} catch (RuntimeException | LinkageError e) {
+				on = false;
+			}
+			wardrobeOn = on;
+		}
+		return on;
+	}
+
+	private final @Nullable CosmeticsPage page;
+	private final @Nullable WardrobePage wardrobe;
 
 	public FlintCosmeticsScreen(@Nullable Object parent) {
-		super("Cosmetics", parent, 1240, 680);
+		super("Cosmetics", parent, wardrobe() ? 1500 : 1240, wardrobe() ? 840 : 680);
+		if (wardrobe()) {
+			page = null;
+			wardrobe = new WardrobePage(this, this::openLink);
+		} else {
+			page = new CosmeticsPage();
+			wardrobe = null;
+		}
 	}
 
 	@Override
 	protected Node content() {
-		return page;
+		return wardrobe != null ? wardrobe : java.util.Objects.requireNonNull(page);
 	}
 
 	@Override
 	protected void step() {
-		page.client.tick();
-		page.followLauncher();
-		page.rebuild();
+		if (wardrobe != null) {
+			wardrobe.step();
+			return;
+		}
+		CosmeticsPage p = java.util.Objects.requireNonNull(page);
+		p.client.tick();
+		p.followLauncher();
+		p.rebuild();
 	}
 
 	@Override
@@ -96,15 +115,15 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 	/** Escape clears the search first, then closes the window. */
 	@Override
 	protected void onEscape() {
-		if (!page.clearSearch()) {
+		boolean cleared = wardrobe != null ? wardrobe.clearSearch() : java.util.Objects.requireNonNull(page).clearSearch();
+		if (!cleared) {
 			super.onEscape();
 		}
 	}
 
-	@Override
-	protected void hidden() {
-		super.hidden();
-		page.release();
+	/** Escape in a text field of the window: as Escape anywhere in it. */
+	void escapeFromSearch() {
+		onEscape();
 	}
 
 	/** The front of a cape (the part a player sees from behind): 10 × 16 of its 64 × 32 layout, at the texture's own scale. */
@@ -163,11 +182,11 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 		private final Map<String, String> wearing = new HashMap<>();
 		/** Slot → the pick sent to the Store and not answered yet: one request per slot at a time. */
 		private final Map<String, String> sending = new HashMap<>();
-		/** Pictures by item and version; asked for once each. */
-		private final Map<String, Picture> pictures = new HashMap<>();
-		/** Capes' whole textures by item id (what goes on you when picked), within {@link #ART_TEXELS}. */
-		private final Map<String, CapeArt> capeArt = new HashMap<>();
-		private long capeTexels;
+		/** The game session's pictures, animations and last list. */
+		private final CosmeticShelf shelf = CosmeticShelf.get();
+		/** The account playing and the wall clock, read once a frame. */
+		private @Nullable String who;
+		private long epochMillis;
 		/** The pick last put on you ({@link CapeChoices}), and the item it was ("" for None). */
 		private long capeSerial;
 		private @Nullable String capePick;
@@ -176,19 +195,30 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 		private boolean failedPick;
 		/** The launcher's changes seen ({@link CapeChoices#launcherChanges}): another reads the list again. */
 		private long launcherSeen = CapeChoices.launcherChanges();
-		private final Set<String> asking = new HashSet<>();
 		private String builtKey = "";
 		private @Nullable Cosmetics builtFrom;
 		/** Everything the account has, next to the title. */
 		private final Label total = new Label(Type.CAPTION, "");
 		private final SearchField search;
 		private @Nullable FontFace searchFace;
+		/** The menu colours the search box was made with ({@link MenuStyle#version}): a change of theme remakes it. */
+		private int searchLook = -1;
 		/** The search, lower case and trimmed ("" shows everything). */
 		private String query = "";
 		/** Tiles the search left (None not counted); with a search and none left, "No matches" shows. */
 		private int matches;
 		private final Label noMatch = new Label(Type.EMPTY, "No matches");
 		private final Lines noMatchBody = new Lines(Type.EMPTY_NOTE, "");
+		/**
+		 * When the window was made (the click that opened it), and this frame's tiles on screen: how many, how many show their
+		 * picture (an animated cape playing), how many are animated. The first frame they all do is logged once (the dev tour's
+		 * "ready" time).
+		 */
+		private final long madeAt = System.nanoTime();
+		private int tilesDrawn;
+		private int tilesReady;
+		private int tilesAnimated;
+		private boolean readyLogged;
 
 		CosmeticsPage() {
 			more = add(new Button("Flint Store", Glyph.GEM, PageControls.Look.PLAIN, this::openStore));
@@ -201,6 +231,10 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			search.onChange(text -> filter(text));
 			search.onEscape(FlintCosmeticsScreen.this::onEscape);
 			search.setVisible(false);
+			// The list as it was last read this session shows at once (its tiles too); it is read again now.
+			shown = shelf.list(client.playing());
+			shelf.opened();
+			rebuild();
 			load();
 		}
 
@@ -255,6 +289,8 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			client.run(() -> link.cosmetics(who), got -> {
 				loading = false;
 				took(got);
+				shelf.remember(who, got);
+				shelf.preload(who, got);
 				problem = null;
 				// A pick on its way stays shown until the Store answers it.
 				wearing.keySet().retainAll(sending.keySet());
@@ -372,7 +408,7 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			if (player == null) {
 				return;
 			}
-			CapeArt art = want.isEmpty() ? null : capeArt.get(want);
+			CosmeticShelf.CapeArt art = want.isEmpty() ? null : art(want);
 			if (!want.isEmpty() && art == null) {
 				// Its picture isn't here yet: what the Store says stays on you until it answers.
 				if (capePick != null) {
@@ -399,7 +435,7 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			}
 			// What the Store last said goes back on you at once (it may be newer than the game's last lookup).
 			String worn = now.worn("cape");
-			CapeArt art = worn == null ? null : capeArt.get(worn);
+			CosmeticShelf.CapeArt art = worn == null ? null : art(worn);
 			if (worn == null || art != null) {
 				long serial = art == null ? CapeChoices.choose(player, null, null) : CapeChoices.choose(player, art.sha256(), art.image());
 				CapeChoices.settled(player, serial, true);
@@ -417,139 +453,17 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			}
 		}
 
-		/** The item's picture: asked for once, decoded on the worker, uploaded here. */
-		@Nullable Picture picture(Item item) {
-			if (item.art() < 0 || link == null) {
-				return null;
-			}
-			String key = item.id() + "-v" + item.art();
-			Picture known = pictures.get(key);
-			String who = client.playing();
-			if (known != null || asking.contains(key) || who == null) {
-				return known;
-			}
-			asking.add(key);
-			boolean cape = "cape".equals(item.kind());
-			int asked = generation;
-			client.run(() -> decode(link.art(who, item.id()), cape), decoded -> {
-				if (decoded != null && decoded.art != null) {
-					keepArt(item.id(), decoded.art);
+		/** The cape {@code id}'s whole texture, for putting it on you when picked (null: not here; the Store's answer then). */
+		private CosmeticShelf.@Nullable CapeArt art(String id) {
+			Cosmetics c = shown;
+			if (c != null) {
+				for (Item item : c.items()) {
+					if (item.id().equals(id) && "cape".equals(item.kind())) {
+						return shelf.capeArt(item);
+					}
 				}
-				if (decoded != null && asked == generation) {
-					String path = "cosmetics/" + key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "");
-					pictures.put(key, new Picture(Texture.upload(path, decoded.width, decoded.height, decoded.argb, false), decoded.width, decoded.height));
-				}
-			}, code -> {
-			});
+			}
 			return null;
-		}
-
-		/** A cape's whole texture, for putting it on you when picked: within {@link #ART_TEXELS} (more are left to the Store's answer). */
-		private void keepArt(String id, CapeArt art) {
-			long texels = (long) art.image().width() * art.image().height();
-			CapeArt before = capeArt.get(id);
-			if (before != null) {
-				capeTexels -= (long) before.image().width() * before.image().height();
-			}
-			if (capeTexels + texels > ART_TEXELS) {
-				capeArt.remove(id);
-				return;
-			}
-			capeArt.put(id, art);
-			capeTexels += texels;
-		}
-
-		/** Pictures asked for before the last {@link #release} are dropped when they arrive. */
-		private int generation;
-
-		/** Frees the pictures (the window went, or a screen covers it); they are asked for again when drawn. */
-		void release() {
-			generation++;
-			asking.clear();
-			for (Picture picture : pictures.values()) {
-				picture.texture.release();
-			}
-			pictures.clear();
-			for (Motion motion : motions.values()) {
-				motion.release();
-			}
-			motions.clear();
-			motionBytes = 0;
-		}
-
-		/** Animated capes' frames by item id while the window shows them; {@link #motionBytes} of them together. */
-		private final Map<String, Motion> motions = new HashMap<>();
-		private long motionBytes;
-
-		/**
-		 * The item's animation, playing or on its way, or null for a still cape (and while the game's Store capes aren't up, or
-		 * the window's frames are full: the poster then stays). Asked for once the poster is up.
-		 */
-		@Nullable Motion motion(Item item, int artPx) {
-			Motion known = motions.get(item.id());
-			long now = Clock.millis();
-			if (known != null) {
-				known.drawnAt = now;
-				return known;
-			}
-			if (item.animation() == null || !"cape".equals(item.kind()) || still.contains(item.id())) {
-				return null;
-			}
-			StoreCapes<?> capes = StoreCapes.shared();
-			if (capes == null) {
-				return null;
-			}
-			// The manifest is read once per item (not every frame while the frames are full): a bad one keeps the poster.
-			CapeAnimation animation = animations.get(item.id());
-			if (animation == null) {
-				animation = CapeAnimation.parse(item.animation(), capes.client().endpoint());
-				if (animation == null) {
-					still.add(item.id());
-					return null;
-				}
-				animations.put(item.id(), animation);
-			}
-			// Kept no bigger than the tile shows it (half the scale while that still fills the picture's width) nor MOTION_BYTES.
-			int scale = Math.min(animation.scale(), CapeFrames.MAX_SCALE);
-			while (scale > 1 && (Motion.bytes(animation.frameCount(), scale) > MOTION_BYTES || CapeFrames.FRONT_WIDTH * (scale / 2) >= artPx)) {
-				scale /= 2;
-			}
-			long bytes = Motion.bytes(animation.frameCount(), scale);
-			if (motionBytes + bytes > WINDOW_MOTION_BYTES && !makeRoom(bytes, now)) {
-				return null;
-			}
-			motionBytes += bytes;
-			Motion motion = new Motion(item.id(), animation, scale, bytes);
-			motion.drawnAt = now;
-			motions.put(item.id(), motion);
-			motion.load(capes);
-			return motion;
-		}
-
-		/** Manifests read, by item id, and the items whose manifest didn't read (they stay still). */
-		private final Map<String, CapeAnimation> animations = new HashMap<>();
-		private final Set<String> still = new HashSet<>();
-		private long roomAt;
-
-		/**
-		 * The frames are full: the animations not drawn for a moment (scrolled away) give theirs back, at most every 250 ms;
-		 * true when {@code bytes} more then fit.
-		 */
-		private boolean makeRoom(long bytes, long now) {
-			if (now - roomAt < 250) {
-				return false;
-			}
-			roomAt = now;
-			var it = motions.values().iterator();
-			while (it.hasNext()) {
-				Motion m = it.next();
-				if (now - m.drawnAt > 250) {
-					m.release();
-					motionBytes -= m.bytes;
-					it.remove();
-				}
-			}
-			return motionBytes + bytes <= WINDOW_MOTION_BYTES;
 		}
 
 		// ---------- layout ----------
@@ -570,7 +484,8 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			float sw = Math.max(d(110), searchRight - searchX);
 			search.setBounds(searchRight - sw, top, sw, bh);
 			FontFace face = Type.SEARCH.face();
-			if (face != searchFace) {
+			if (face != searchFace || searchLook != MenuStyle.version()) {
+				searchLook = MenuStyle.version();
 				searchFace = face;
 				search.look(new TextField.Look(face, MenuStyle.SEARCH, MenuStyle.SEARCH_EDGE, MenuStyle.SEARCH_EDGE_HOVER, MenuStyle.SEARCH_FOCUS,
 					MenuStyle.radius(), d(14), d(14), d(14), MenuStyle.SEARCH_TEXT, MenuStyle.SEARCH_HINT, MenuStyle.SEARCH_HINT));
@@ -631,7 +546,7 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				String worn = c.worn(slot);
 				List<Item> items = new ArrayList<>();
 				for (Item item : c.items()) {
-					if (item.kind().equals(slot)) {
+					if (slot.equals(item.slot())) {
 						if (item.id().equals(worn)) {
 							items.add(0, item);
 						} else {
@@ -650,6 +565,12 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 
 		@Override
 		protected void paint(Canvas c) {
+			shelf.pump();
+			who = client.playing();
+			epochMillis = System.currentTimeMillis();
+			tilesDrawn = 0;
+			tilesReady = 0;
+			tilesAnimated = 0;
 			if (!asked) {
 				load();
 			}
@@ -724,6 +645,15 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			emptyBody.paintCentered(c, cx, my + d(58), Math.min(w - d(120), d(640)), MenuStyle.EMPTY_NOTE);
 		}
 
+		@Override
+		protected void paintOver(Canvas c) {
+			if (!readyLogged && tilesDrawn > 0 && tilesReady == tilesDrawn) {
+				readyLogged = true;
+				com.flintclient.client.FlintLog.LOGGER.info("Flint cosmetics: {} tiles on screen ({} animated) all showing {} ms after opening ({})", tilesDrawn,
+					tilesAnimated, (System.nanoTime() - madeAt) / 1_000_000, shelf.describe());
+			}
+		}
+
 		/**
 		 * One slot's items: its name and count, then None and a tile per item in a grid as dense as the width allows (tiles at
 		 * least {@link #TILE_MIN} wide, the row shared out evenly). A search hides the tiles it leaves out (None too).
@@ -735,12 +665,8 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			private int shownTiles;
 
 			Slot(String slot, List<Item> items) {
-				this.name = new Label(Type.SECTION_TITLE, switch (slot) {
-					case "cape" -> "CAPES";
-					case "back" -> "BACK";
-					case "head" -> "HEAD";
-					default -> "AURAS";
-				});
+				com.flintclient.client.control.feature.CosmeticKinds.Kind kind = com.flintclient.client.control.feature.CosmeticKinds.ofSlot(slot);
+				this.name = new Label(Type.SECTION_TITLE, (kind == null ? slot : kind.category().title).toUpperCase(Locale.ROOT));
 				size = items.size();
 				count = new Label(Type.CAPTION, "· " + size);
 				add(new Tile(slot, null));
@@ -829,6 +755,8 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 			final @Nullable Item item;
 			/** The name in lower case, for the search. */
 			final String lower;
+			/** The item's key in the shelf ({@link CosmeticShelf#key}), made once. */
+			private final String key;
 			private final Lines label;
 			private final Label rest = new Label(Type.ROW_NOTE, "");
 			/** The first line {@link #rest} was cut after (the name is wrapped again only when the width or font changes). */
@@ -843,6 +771,7 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				this.slot = slot;
 				this.item = item;
 				this.lower = item == null ? "" : item.name().toLowerCase(Locale.ROOT);
+				this.key = item == null ? "" : CosmeticShelf.key(item);
 				this.hint = new Label(Type.CAPTION, item == null ? "Take off" : "Wear");
 				this.label = new Lines(Type.ROW_NOTE, item == null ? "None" : item.name());
 				setAction(() -> wear(slot, item == null ? null : item.id()));
@@ -907,16 +836,21 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				if (item == null) {
 					Glyph.CLOSE.draw(c, ax + artW / 2, ay + artH / 2, d(22), Palette.withAlpha(MenuStyle.TEXT, 0.35F + 0.2F * hot));
 				} else {
-					Picture picture = picture(item);
-					Motion motion = picture == null ? null : motion(item, c.px(artW));
-					Picture frame = motion == null ? null : motion.frame();
-					if (frame != null) {
-						drawPicture(c, frame, ax, ay, artW, artH);
+					CosmeticShelf.Poster picture = shelf.poster(key, who, item, true);
+					CosmeticShelf.Reel reel = shelf.reel(key, item, true);
+					boolean playing = reel != null && reel.up();
+					if (playing) {
+						int f = Kit.reduced() ? 0 : reel.animation.frameAt(epochMillis);
+						drawPicture(c, reel.texture, reel.u(f), reel.v(f), reel.frameW, reel.frameH, reel.width, reel.height, ax, ay, artW, artH);
 					} else if (picture != null) {
-						drawPicture(c, picture, ax, ay, artW, artH);
+						drawPicture(c, picture.texture, 0, 0, picture.width, picture.height, picture.width, picture.height, ax, ay, artW, artH);
 					} else {
 						Glyph.GEM.draw(c, ax + artW / 2, ay + artH / 2, d(20), Palette.withAlpha(MenuStyle.TEXT, item.art() < 0 ? 0.25F : 0.12F));
 					}
+					boolean animated = shelf.animated(key, item);
+					tilesDrawn++;
+					tilesAnimated += animated ? 1 : 0;
+					tilesReady += (animated ? playing : picture != null || item.art() < 0) ? 1 : 0;
 					if (item.gift()) {
 						Glyph.HEART.draw(c, ax + artW - d(11), ay + d(11), d(11), 0xFFFF6B8A);
 					}
@@ -983,145 +917,24 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 				MenuStyle.focusRing(c, x, y, w, h, rad, focus);
 			}
 
-			/** As large as fits, in proportion, pixels kept whole where they can be. */
-			private void drawPicture(Canvas c, Picture picture, float ax, float ay, float artW, float artH) {
-				float scale = Math.min(artW * c.scale() / picture.width, artH * c.scale() / picture.height);
+			/**
+			 * The {@code width × height} picture at ({@code u}, {@code v}) of a {@code texW × texH} texture (a poster, or a frame
+			 * of a reel), as large as fits, in proportion, pixels kept whole where they can be.
+			 */
+			private void drawPicture(Canvas c, com.flintclient.client.platform.@Nullable Texture texture, int u, int v, int width, int height,
+				int texW, int texH, float ax, float ay, float artW, float artH) {
+				if (texture == null) {
+					return;
+				}
+				float scale = Math.min(artW * c.scale() / width, artH * c.scale() / height);
 				if (scale >= 1) {
 					scale = (float) Math.floor(scale);
 				}
-				int pw = Math.max(1, Math.round(picture.width * scale));
-				int ph = Math.max(1, Math.round(picture.height * scale));
+				int pw = Math.max(1, Math.round(width * scale));
+				int ph = Math.max(1, Math.round(height * scale));
 				int px = c.px(ax + artW / 2) - pw / 2;
 				int py = c.px(ay + artH / 2) - ph / 2;
-				c.texture(picture.texture, px, py, pw, ph, picture.width, picture.height, 0xFFFFFFFF);
-			}
-		}
-	}
-
-	/** One animated cape's frames in the window: at most this many bytes (more halve its scale). */
-	static final long MOTION_BYTES = 8L * 1024 * 1024;
-	/** Every animated tile's frames together: past this, a cape keeps its poster. */
-	static final long WINDOW_MOTION_BYTES = 48L * 1024 * 1024;
-
-	/** The window's loader: one low-priority thread, gone when idle. */
-	private static @Nullable ExecutorService loader;
-
-	private static synchronized ExecutorService loader() {
-		ExecutorService l = loader;
-		if (l == null) {
-			ThreadPoolExecutor pool = new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), task -> {
-				Thread thread = new Thread(task, "Flint cosmetics frames");
-				thread.setDaemon(true);
-				thread.setPriority(Thread.MIN_PRIORITY);
-				return thread;
-			});
-			pool.allowCoreThreadTimeOut(true);
-			l = pool;
-			loader = pool;
-		}
-		return l;
-	}
-
-	/**
-	 * An animated cape's front, playing: its strips loaded on {@link #loader} through the game's Store capes, cut into fronts
-	 * ({@link CapeFrames#front}) at {@code scale} pixels per unit in the layout {@link Texture#writeTopLeft} takes; then one
-	 * texture, written with the wall clock's frame ({@link CapeAnimation#frameAt}, as the worn cape) when it changes and only
-	 * while the tile is drawn. A strip that fails its checks leaves the poster.
-	 */
-	private static final class Motion {
-		private final String id;
-		private final CapeAnimation animation;
-		private final int scale;
-		/** What its frames take ({@link #bytes(int, int)}), counted in the window's budget. */
-		final long bytes;
-		/** When its tile last drew it (render thread): one off screen for a moment gives its frames back when room is needed. */
-		long drawnAt;
-		private final AtomicBoolean cancelled = new AtomicBoolean();
-		private volatile int @Nullable [][] frames;
-		private @Nullable Picture texture;
-		private int shown = -1;
-
-		Motion(String id, CapeAnimation animation, int scale, long bytes) {
-			this.id = id;
-			this.animation = animation;
-			this.scale = scale;
-			this.bytes = bytes;
-		}
-
-		/** What {@code count} fronts take at {@code scale} pixels per unit. */
-		static long bytes(int count, int scale) {
-			return (long) count * CapeFrames.FRONT_WIDTH * scale * CapeFrames.FRONT_HEIGHT * scale * 4;
-		}
-
-		void load(StoreCapes<?> capes) {
-			try {
-				loader().execute(() -> cut(capes));
-			} catch (RejectedExecutionException e) {
-				// The poster stays.
-			}
-		}
-
-		/** Loader thread: every strip read (or downloaded) and checked, decoded at the size the manifest gives, cut into fronts. */
-		private void cut(StoreCapes<?> capes) {
-			int[][] whole = new int[animation.frameCount()][];
-			int[][] out = new int[animation.frameCount()][];
-			try {
-				for (int s = 0; s < animation.strips().size(); s++) {
-					if (cancelled.get()) {
-						return;
-					}
-					CapeAnimation.Strip strip = animation.strips().get(s);
-					int height = strip.frames() * animation.frameHeight();
-					CapePng.Image image = CapePng.decode(capes.strip(strip), animation.frameWidth(), height);
-					if (image.width() != animation.frameWidth() || image.height() != height) {
-						return;
-					}
-					int first = animation.firstFrame(s);
-					CapeFrames.slice(image.argb(), animation.scale(), first, strip.frames(), scale, Texture.WRITE_LAYOUT, whole);
-					for (int f = first; f < first + strip.frames(); f++) {
-						out[f] = CapeFrames.front(whole[f], scale);
-						whole[f] = null;
-					}
-				}
-			} catch (Exception e) {
-				// Offline, refused or not a PNG: the poster stays.
-				return;
-			}
-			if (!cancelled.get()) {
-				frames = out;
-			}
-		}
-
-		/** The frame the wall clock is at, written into the texture when it changed; null until the frames are in. Render thread. */
-		@Nullable Picture frame() {
-			int[][] all = frames;
-			if (all == null || cancelled.get()) {
-				return null;
-			}
-			int fw = CapeFrames.FRONT_WIDTH * scale;
-			int fh = CapeFrames.FRONT_HEIGHT * scale;
-			Picture t = texture;
-			if (t == null) {
-				String path = "cosmetics/motion-" + id.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "") + "-" + animation.key();
-				t = new Picture(Texture.upload(path, fw, fh, new int[fw * fh], false), fw, fh);
-				texture = t;
-				shown = -1;
-			}
-			int f = Kit.reduced() ? 0 : animation.frameAt(System.currentTimeMillis());
-			if (f != shown) {
-				shown = f;
-				t.texture.writeTopLeft(all[f], fw, fh);
-			}
-			return t;
-		}
-
-		void release() {
-			cancelled.set(true);
-			frames = null;
-			Picture t = texture;
-			texture = null;
-			if (t != null) {
-				t.texture.release();
+				c.textureRegion(texture, px, py, pw, ph, u, v, width, height, texW, texH, 0xFFFFFFFF);
 			}
 		}
 	}
@@ -1131,7 +944,7 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 	 * do, and OK. In the window's look (a block, Minecraft's font), over the screen's dimmed backdrop; it rises in over
 	 * 160 ms. OK, Escape or a click beside it closes it; the cape is worn either way.
 	 */
-	private static final class CapeNotice extends Node {
+	static final class CapeNotice extends Node {
 		private static final float W = 600;
 		private static final float PAD = 32;
 		private static final float ICON = 44;
@@ -1216,37 +1029,6 @@ public final class FlintCosmeticsScreen extends WindowScreen {
 		protected void paintOver(Canvas c) {
 			c.popOffset();
 			c.setOpacity(opacity);
-		}
-	}
-
-	/** An item's picture, uploaded. */
-	private record Picture(Texture texture, int width, int height) {
-	}
-
-	/** A decoded picture: a cape's front, or the whole image for anything else; for a cape, its whole texture too. */
-	private record Decoded(int width, int height, int[] argb, @Nullable CapeArt art) {
-	}
-
-	/** A cape's whole texture as the Flint app checked it (the PNG the Store hashed), and that hash. */
-	private record CapeArt(String sha256, CapePng.Image image) {
-	}
-
-	/** The most cape texels kept for putting capes on you at once: 32 MiB (16 HD capes, or thousands of 64 × 32 ones). */
-	static final long ART_TEXELS = 8L * 1024 * 1024;
-
-	private static @Nullable Decoded decode(byte[] png, boolean cape) throws LinkException {
-		try {
-			CapePng.Image image = CapePng.decode(png, 4096, 2048);
-			if (!cape) {
-				return image.width() > 1024 || image.height() > 1024 ? null : new Decoded(image.width(), image.height(), image.argb(), null);
-			}
-			// The texture goes to the game's cape cache (by its hash), so the Store's answer for it loads from disk.
-			String sha256 = CapeChoices.seen(png);
-			int[] size = new int[2];
-			int[] front = capeFront(image, size);
-			return size[0] > 0 && size[1] > 0 ? new Decoded(size[0], size[1], front, new CapeArt(sha256, image)) : null;
-		} catch (CapePng.Refused e) {
-			throw new LinkException("invalid", false);
 		}
 	}
 }

@@ -535,7 +535,8 @@ public final class Mc263Overlay {
 		}
 		try {
 			ModuleState state = Mods.state(TNT);
-			float seconds = Math.max(0, fuseTicks / 20.0F);
+			// The fuse counts down one a tick, at the world's tick rate (20 unless a server changed it).
+			float seconds = (float) com.flintclient.client.control.feature.GameTime.seconds(fuseTicks, Mc263HudData.tickrate());
 			String text = String.format(java.util.Locale.ROOT, "%." + state.integer(HudMods.TntCountdown.DECIMALS) + "f", seconds);
 			int color;
 			if (state.bool(HudMods.TntCountdown.STATIC_COLOR)) {

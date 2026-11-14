@@ -205,7 +205,75 @@ pub fn chosen_collector(extra: &[String]) -> Option<&'static str> {
 /// `tuning_args` for a launch with the player's extra Java arguments: Flint's G1 settings are left out when those
 /// choose another collector. Compact object headers stay (they work with every collector).
 pub fn tuning_args_with(policy: JvmPolicy, extra: &[String]) -> Vec<String> {
-    let mut args = if chosen_collector(extra).is_some() { Vec::new() } else { gc_args() };
+    tuning_args_for(policy, extra, MemoryCleaner::Official, None)
+}
+
+/// Settings → Java and memory → Memory cleaner, for Minecraft 1.21.x (the setting `memoryCleaner`): which garbage collector
+/// Java frees memory with while the game runs. Only Java's flags change, never the game.
+/// - `Official`: G1 with `gc_args`, what the official Minecraft Launcher passes for 1.21.x.
+/// - `Smooth`: Generational ZGC, the collector Mojang's own settings choose for 26.x (`default-user-jvm`): its pauses are a
+///   fraction of a millisecond where G1's are several, and on 1.21.x they came every two or three seconds (QA, 1.21.11).
+///
+/// Same Java, same heap (`-Xmx`, and no `-Xms`, as the official launcher), the same other flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoryCleaner {
+    Official,
+    Smooth,
+}
+
+/// The cleaner a 1.21.x launch uses when the player hasn't chosen one.
+pub const DEFAULT_MEMORY_CLEANER: MemoryCleaner = MemoryCleaner::Official;
+
+/// The smallest heap (`-Xmx`, MB) Smooth runs with: 4 GB, the size it was measured at (QA, 1.21.x: no allocation stalls, no
+/// growth over ten minutes). A smaller heap launches with Official whatever is chosen, so a case that wasn't measured (ZGC
+/// running short of free heap) can't reach a player. Kept equal to SMOOTH_MIN_HEAP_MB in app/src/lib/settings.tsx.
+pub const SMOOTH_MIN_HEAP_MB: u64 = 4096;
+
+impl MemoryCleaner {
+    /// From settings.json's `memoryCleaner` ("smooth" or "official"); anything else is the default.
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value {
+            Some("smooth") => MemoryCleaner::Smooth,
+            Some("official") => MemoryCleaner::Official,
+            _ => DEFAULT_MEMORY_CLEANER,
+        }
+    }
+
+    /// The cleaner a launch of `game_version` on Java `java` (its major version; None: not known) with a heap of `heap_mb` runs
+    /// with: the chosen one on Minecraft 1.21.x on Java 21 or newer with at least [SMOOTH_MIN_HEAP_MB], else Official (26.x has
+    /// Mojang's own settings, which `recommended_jvm` passes whatever this says; older versions run Java 17 or 8, where
+    /// Generational ZGC doesn't exist).
+    pub fn for_launch(self, game_version: &str, java: Option<u64>, heap_mb: u64) -> Self {
+        let line_121 = game_version == "1.21" || game_version.starts_with("1.21.") || game_version.starts_with("1.21-");
+        if self == MemoryCleaner::Smooth && line_121 && java.is_none_or(|major| major >= 21) && heap_mb >= SMOOTH_MIN_HEAP_MB {
+            MemoryCleaner::Smooth
+        } else {
+            MemoryCleaner::Official
+        }
+    }
+}
+
+/// Generational ZGC's flags on Java `java`: Java 21 and 22 need `ZGenerational` to have the generational mode; from 23 it is
+/// the only one (24 removed the flag, and a Java started with it would warn).
+fn smooth_gc_args(java: Option<u64>) -> Vec<String> {
+    let mut args = vec!["-XX:+UseZGC".to_owned()];
+    if java.is_none_or(|major| major < 23) {
+        args.push("-XX:+ZGenerational".to_owned());
+    }
+    args
+}
+
+/// `tuning_args_with` with the memory cleaner: Smooth replaces the G1 set with Generational ZGC's flags. A collector the
+/// player chose in the extra arguments always wins: another one leaves Flint's out (Java refuses two), and G1 named there
+/// keeps Flint's G1 set (Official).
+pub fn tuning_args_for(policy: JvmPolicy, extra: &[String], cleaner: MemoryCleaner, java: Option<u64>) -> Vec<String> {
+    let mut args = if chosen_collector(extra).is_some() {
+        Vec::new()
+    } else if cleaner == MemoryCleaner::Smooth && !extra.iter().any(|a| a == "-XX:+UseG1GC") {
+        smooth_gc_args(java)
+    } else {
+        gc_args()
+    };
     if policy == JvmPolicy::CompactHeaders {
         args.push(COMPACT_HEADERS.to_owned());
     }
@@ -245,6 +313,26 @@ pub fn runtime_config(profile: &Profile, tuning: &LaunchTuning, hardware: &Hardw
         "modules": {},
         "dev": { "frameStatsLog": frame_stats_log },
     })
+}
+
+/// The launcher's themes (Settings › Appearance, `app/src/lib/settings.tsx` THEMES), as the in-game runtime names them too.
+pub const THEMES: [&str; 6] = ["ember", "icecream", "moss", "bloodstone", "dusk", "aurora"];
+
+/// The theme the app's settings choose, as the app reads it (lib/settings.tsx THEME_ALIASES): one of [THEMES]; Obsidian,
+/// remade as Ice Cream, and the older names that read as it (`mono`, `slate`, `frost`) → Ice Cream; else Ember (the default).
+pub fn ui_theme(settings: &Value) -> &'static str {
+    match settings["theme"].as_str().unwrap_or_default() {
+        "obsidian" | "mono" | "slate" | "frost" => "icecream",
+        theme => THEMES.into_iter().find(|t| *t == theme).unwrap_or("ember"),
+    }
+}
+
+/// The player's theme for the in-game runtime's config (`ui.theme`): the game draws Flint's menus in it from the first frame.
+pub fn with_ui_theme(mut config: Value, settings: &Value) -> Value {
+    if let Some(fields) = config.as_object_mut() {
+        fields.insert("ui".into(), json!({ "theme": ui_theme(settings) }));
+    }
+    config
 }
 
 /// Writes the config into a profile's game folder (atomically), or removes it when the runtime
@@ -321,29 +409,89 @@ pub fn scan_mods(dir: &Path) -> Vec<ModJar> {
         .filter(|name| name.ends_with(".jar") && !name.starts_with('.'))
         .collect();
     names.sort();
-    names
-        .into_iter()
-        .filter_map(|name| {
-            let path = dir.join(&name);
-            let meta = std::fs::metadata(&path).ok().filter(std::fs::Metadata::is_file)?;
-            let stamp = (meta.len(), meta.modified().ok());
-            if let Some(known) = SCANNED.lock().unwrap_or_else(|e| e.into_inner()).get(&path).filter(|(seen, _)| *seen == stamp) {
-                return known.1.clone();
+    // Each jar with its size and modification time, and what an earlier scan found in it as it is now.
+    let mut found: Vec<(String, std::path::PathBuf, Stamp, Option<Option<ModJar>>)> = Vec::with_capacity(names.len());
+    for name in names {
+        let path = dir.join(&name);
+        let Some(meta) = std::fs::metadata(&path).ok().filter(std::fs::Metadata::is_file) else { continue };
+        found.push((name, path, (meta.len(), meta.modified().ok()), None));
+    }
+    {
+        let scanned = SCANNED.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, path, stamp, known) in &mut found {
+            *known = scanned.get(&*path).filter(|(seen, _)| *seen == *stamp).map(|(_, jar)| jar.clone());
+        }
+    }
+    // The rest are opened several at a time: the first scan of a session reads every jar (its index, its fabric.mod.json and
+    // the jars bundled in it), and with 50 mods read one after another that held Play for 0.9 to 1.3 s before Java started.
+    let unread: Vec<(&Path, &str)> = found.iter().filter(|f| f.3.is_none()).map(|(name, path, _, _)| (path.as_path(), name.as_str())).collect();
+    let read = read_jars(&unread);
+    let mut read = read.into_iter();
+    let mut learned = Vec::new();
+    let mut out = Vec::with_capacity(found.len());
+    for (_, path, stamp, known) in found {
+        let jar = match known {
+            Some(jar) => jar,
+            None => {
+                let jar = read.next().flatten();
+                // Only a stamp that can tell a later change is worth remembering by.
+                if stamp.1.is_some() {
+                    learned.push((path, (stamp, jar.clone())));
+                }
+                jar
             }
-            let jar = read_jar(&path, name);
-            // Only a stamp that can tell a later change is worth remembering by.
-            if stamp.1.is_some() {
-                SCANNED.lock().unwrap_or_else(|e| e.into_inner()).insert(path, (stamp, jar.clone()));
+        };
+        out.extend(jar);
+    }
+    if !learned.is_empty() {
+        SCANNED.lock().unwrap_or_else(|e| e.into_inner()).extend(learned);
+    }
+    out
+}
+
+/// A jar's size and modification time.
+type Stamp = (u64, Option<std::time::SystemTime>);
+
+/// The most jars one scan opens at once: enough to use the cores while the player waits, few enough that the jars bundled
+/// inside them (read into memory, 32 MiB at most each) stay a small amount of memory.
+const SCAN_THREADS: usize = 6;
+
+/// Reads each jar (`read_jar`), in order, on up to [SCAN_THREADS] threads; one jar (or none) is read right here.
+fn read_jars(jars: &[(&Path, &str)]) -> Vec<Option<ModJar>> {
+    let threads = std::thread::available_parallelism().map_or(2, std::num::NonZeroUsize::get).clamp(2, SCAN_THREADS).min(jars.len());
+    if threads <= 1 {
+        return jars.iter().map(|(path, name)| read_jar(path, (*name).to_owned())).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<Option<ModJar>> = vec![None; jars.len()];
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((path, name)) = jars.get(i) else { break };
+                        mine.push((i, read_jar(path, (*name).to_owned())));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        for worker in workers {
+            // A panic while reading a jar goes on to the caller, as it did when the jars were read here one by one.
+            for (i, jar) in worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)) {
+                out[i] = jar;
             }
-            jar
-        })
-        .collect()
+        }
+    });
+    out
 }
 
 /// What each jar scanned so far declares, by path, with the size and modification time it had: a launch checks the
 /// mods folder twice and Home checks it again, and a jar is only opened again once it changed.
 static SCANNED: std::sync::LazyLock<std::sync::Mutex<HashMap<std::path::PathBuf, JarStamp>>> = std::sync::LazyLock::new(Default::default);
-type JarStamp = ((u64, Option<std::time::SystemTime>), Option<ModJar>);
+type JarStamp = (Stamp, Option<ModJar>);
 
 /// Ids Fabric Loader provides itself: never missing.
 const BUILT_IN: [&str; 5] = ["minecraft", "java", "fabricloader", "fabric-loader", "mixinextras"];
@@ -529,6 +677,30 @@ pub fn mod_conflicts(mods: &[ModJar]) -> Vec<String> {
     problems
 }
 
+/// Dynamic FPS's settings file in a profile (`config/`).
+const DYNAMIC_FPS_CONFIG: &str = "dynamic_fps.json";
+
+/// The settings Flint gives Dynamic FPS (part of the performance set) in a profile that has none of its own. Dynamic FPS on its
+/// own holds a window that is visible but not focused at 1 FPS with its sound at a quarter, so a game recorded or streamed while
+/// another window has focus (OBS, Discord on a second screen, an overlay that takes focus for a moment) freezes in the
+/// recording and stutters when focus flickers. Flint never limits a visible game unless the player asks (Settings: Limit when
+/// unfocused), so an unfocused window draws as Dynamic FPS's hovered one does: 60 FPS, full volume. Minimised, idle and on
+/// battery stay Dynamic FPS's own. The file holds only what differs from its defaults, as Dynamic FPS writes it itself.
+fn dynamic_fps_defaults() -> Value {
+    json!({ "states": { "unfocused": { "frame_rate_target": 60, "volume_multipliers": {} } } })
+}
+
+/// Before a launch: gives Dynamic FPS [dynamic_fps_defaults] when it is in `game_dir`'s mods and has no settings file yet (a
+/// choice made in its own screen, which writes the file, is never touched). Whether it wrote them.
+pub fn ensure_dynamic_fps_defaults(game_dir: &Path, mods: &[ModJar]) -> bool {
+    let path = game_dir.join("config").join(DYNAMIC_FPS_CONFIG);
+    if path.exists() || !mods.iter().any(|m| m.ids().any(|id| id == "dynamic_fps")) {
+        return false;
+    }
+    let Ok(bytes) = serde_json::to_vec_pretty(&dynamic_fps_defaults()) else { return false };
+    std::fs::create_dir_all(game_dir.join("config")).is_ok() && write_atomic(&path, &bytes).is_ok()
+}
+
 /// Writes a minimal mod jar containing `mod_json` as its `fabric.mod.json`, for tests.
 #[cfg(test)]
 pub fn test_jar(dir: &Path, name: &str, mod_json: &str) {
@@ -669,6 +841,19 @@ mod tests {
     }
 
     #[test]
+    fn the_players_theme_goes_to_the_game() {
+        for theme in THEMES {
+            assert_eq!(ui_theme(&json!({ "theme": theme })), theme);
+        }
+        assert_eq!(ui_theme(&json!({ "theme": "frost" })), "icecream", "older names, as the app reads them");
+        assert_eq!(ui_theme(&json!({ "theme": "obsidian" })), "icecream", "Obsidian was remade as Ice Cream");
+        assert_eq!(ui_theme(&json!({ "theme": "plaid" })), "ember");
+        assert_eq!(ui_theme(&json!({})), "ember", "the default");
+        let config = with_ui_theme(json!({ "schema": 1 }), &json!({ "theme": "dusk" }));
+        assert_eq!(config, json!({ "schema": 1, "ui": { "theme": "dusk" } }));
+    }
+
+    #[test]
     fn the_runtime_config_records_the_launch() {
         let hardware = HardwareInfo { memory_mb: Some(16384), logical_cpus: Some(8), performance_cores: Some(4), efficiency_cores: Some(4), arch: "aarch64".into(), os: "macos".into() };
         let tuning = LaunchTuning { automatic: true, policy: JvmPolicy::Legacy, heap_max_mb: 4096 };
@@ -755,6 +940,49 @@ mod tests {
         assert_eq!(scan_mods(&dir.0)[0].id, "second");
         std::fs::remove_file(&path).unwrap();
         assert!(scan_mods(&dir.0).is_empty());
+    }
+
+    #[test]
+    fn dynamic_fps_gets_flints_unfocused_rate_only_when_it_has_no_settings() {
+        let dir = TestDir::new();
+        let mods = dir.0.join("mods");
+        let config = dir.0.join("config").join(DYNAMIC_FPS_CONFIG);
+        // Without Dynamic FPS nothing is written.
+        test_jar(&mods, "sodium.jar", r#"{"id":"sodium","version":"0.9.2"}"#);
+        assert!(!ensure_dynamic_fps_defaults(&dir.0, &scan_mods(&mods)));
+        assert!(!config.exists());
+        // With it and no settings: an unfocused window at 60 FPS, full volume; nothing else differs from its defaults.
+        test_jar(&mods, "dynamic-fps.jar", r#"{"id":"dynamic_fps","version":"3.11.10+minecraft-26.3.0"}"#);
+        assert!(ensure_dynamic_fps_defaults(&dir.0, &scan_mods(&mods)));
+        let written: Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+        assert_eq!(written, json!({ "states": { "unfocused": { "frame_rate_target": 60, "volume_multipliers": {} } } }));
+        // The player's own settings (Dynamic FPS writes the file when they change one) are never touched.
+        std::fs::write(&config, br#"{"states":{"unfocused":{"frame_rate_target":1}}}"#).unwrap();
+        assert!(!ensure_dynamic_fps_defaults(&dir.0, &scan_mods(&mods)));
+        assert_eq!(std::fs::read(&config).unwrap(), br#"{"states":{"unfocused":{"frame_rate_target":1}}}"#);
+    }
+
+    #[test]
+    fn many_jars_read_at_once_come_back_whole_and_in_order() {
+        let dir = TestDir::new();
+        for i in 0..40 {
+            test_jar(&dir.0, &format!("mod-{i:02}.jar"), &format!(r#"{{"id":"mod{i}","version":"{i}","depends":{{"dep{i}":"*"}}}}"#));
+        }
+        // Unreadable ones among them are left out, wherever they fall.
+        std::fs::write(dir.0.join("mod-05x.jar"), b"not a zip").unwrap();
+        let ids = |mods: Vec<ModJar>| mods.into_iter().map(|m| (m.file, m.id, m.depends)).collect::<Vec<_>>();
+        let want: Vec<_> = (0..40).map(|i| (format!("mod-{i:02}.jar"), format!("mod{i}"), vec![format!("dep{i}")])).collect();
+        assert_eq!(ids(scan_mods(&dir.0)), want);
+        // Again from memory, and with one jar changed among the remembered ones.
+        assert_eq!(ids(scan_mods(&dir.0)), want);
+        test_jar(&dir.0, "mod-17.jar", r#"{"id":"changed","version":"2"}"#);
+        let mut changed = want.clone();
+        changed[17] = ("mod-17.jar".into(), "changed".into(), Vec::new());
+        assert_eq!(ids(scan_mods(&dir.0)), changed);
+        // One jar to read takes no other thread; none at all reads nothing.
+        assert_eq!(read_jars(&[]).len(), 0);
+        let one = dir.0.join("mod-03.jar");
+        assert_eq!(read_jars(&[(one.as_path(), "mod-03.jar")])[0].as_ref().map(|m| m.id.as_str()), Some("mod3"));
     }
 
     #[test]

@@ -29,6 +29,28 @@ public final class ControlState {
 	private record Read(ControlSettings settings, LayoutStore layouts) {
 	}
 
+	/** The Right Shift menu's blur strength while it shows (General › Menu blur strength), and when it last said so. */
+	private static volatile int menuBlur = -1;
+	private static volatile long menuBlurAt;
+
+	/**
+	 * The Right Shift menu draws this frame with blur {@code strength} (0 to 10, 0 off): Minecraft's menu blur reads it in place of
+	 * its own setting ({@link #menuBlurOverride}) while the menu keeps saying so. Render thread.
+	 */
+	public static void menuBlurFor(int strength) {
+		menuBlur = strength;
+		menuBlurAt = System.nanoTime();
+	}
+
+	/**
+	 * The menu blur Minecraft should use now instead of its own, or -1: only while the Right Shift menu said so in the last quarter
+	 * second, so a menu that closed (however it closed) leaves Minecraft's own setting at once. Your own setting is never changed.
+	 */
+	public static int menuBlurOverride() {
+		int strength = menuBlur;
+		return strength >= 0 && System.nanoTime() - menuBlurAt < 250_000_000L ? strength : -1;
+	}
+
 	private ControlState() {
 	}
 
@@ -51,6 +73,8 @@ public final class ControlState {
 		com.flintclient.client.control.feature.Features.init(configDir);
 		Kit.bind(new SavedPrefs());
 		applyGameplayBlur();
+		// The theme the Flint app wrote for this launch, and the accent every Flint screen draws with.
+		ThemeSync.init(configDir);
 		StartupTrace.end("features", began);
 	}
 

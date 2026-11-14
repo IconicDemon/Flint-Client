@@ -141,15 +141,6 @@ public final class Mc263Tools {
 		return GUARD.on() && Mods.on(ANIMATIONS) && Mods.state(ANIMATIONS).bool(Animations.NO_HIT_DIRECTION) ? 0 : direction;
 	}
 
-	/** How many ticks {@code entity}'s arm swing takes: yours longer or shorter with Change swing duration. */
-	public static int swing(LivingEntity entity, int ticks) {
-		if (!GUARD.on() || entity != mc().player || !Mods.on(ANIMATIONS)) {
-			return ticks;
-		}
-		ModuleState s = Mods.state(ANIMATIONS);
-		return s.bool(Animations.SWING) ? Math.max(1, Math.round(ticks * s.decimal(Animations.SWING_MULTIPLIER))) : ticks;
-	}
-
 	/** Whether {@code entity}'s potion particles appear (yours don't in first person with Hide own potion particles). */
 	public static boolean potionParticles(LivingEntity entity) {
 		if (!GUARD.on() || entity != mc().player || !Mods.on(ANIMATIONS) || !Mods.state(ANIMATIONS).bool(Animations.NO_POTION_PARTICLES)) {

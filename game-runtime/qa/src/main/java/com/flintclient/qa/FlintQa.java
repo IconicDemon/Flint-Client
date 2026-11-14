@@ -40,7 +40,11 @@ import org.slf4j.LoggerFactory;
  * quit.
  */
 public final class FlintQa implements ClientModInitializer {
-	public static final boolean ENABLED = System.getProperty("flintqa.script") != null;
+	/** An Instant Swap standby game runs its own tour (flintqa.standbyScript / flintqa.standbyOut), the first game the other. */
+	private static final boolean STANDBY = System.getenv("FLINT_SWAP_STANDBY") != null;
+	private static final String SCRIPT = STANDBY && System.getProperty("flintqa.standbyScript") != null ? System.getProperty("flintqa.standbyScript") : System.getProperty("flintqa.script");
+	private static final String OUT = STANDBY && System.getProperty("flintqa.standbyOut") != null ? System.getProperty("flintqa.standbyOut") : System.getProperty("flintqa.out", ".");
+	public static final boolean ENABLED = SCRIPT != null;
 	/**
 	 * True while the tour itself presses a mouse button through Minecraft's handler: during a tour every other button event
 	 * (a real click on the window, which runs behind other windows) is dropped (mixin/MouseHandlerMixin).
@@ -56,6 +60,8 @@ public final class FlintQa implements ClientModInitializer {
 	/** When create-world started the world (System.nanoTime), for the join time wait-world logs once. */
 	private static long worldStart;
 	private static boolean worldJoined;
+	/** When the last pack step started a resource reload (wait-reload). */
+	private static long reloadStart;
 	private static boolean done;
 	/** Where the button held by mouse-down is now (GUI units). */
 	private static double heldX;
@@ -67,9 +73,9 @@ public final class FlintQa implements ClientModInitializer {
 			return;
 		}
 		try {
-			out = Path.of(System.getProperty("flintqa.out", "."));
+			out = Path.of(OUT);
 			Files.createDirectories(out.resolve("screenshots"));
-			for (String line : Files.readAllLines(Path.of(System.getProperty("flintqa.script")), StandardCharsets.UTF_8)) {
+			for (String line : Files.readAllLines(Path.of(SCRIPT), StandardCharsets.UTF_8)) {
 				String t = line.strip();
 				if (!t.isEmpty() && !t.startsWith("#")) {
 					STEPS.add(t.split("\\s+"));
@@ -92,6 +98,11 @@ public final class FlintQa implements ClientModInitializer {
 	private static void fail(String text) {
 		failures++;
 		log("FAIL " + text);
+	}
+
+	/** A failure the crash sweep logged itself (QaSweep), counted in "QA DONE failures=N". */
+	static void countFailure() {
+		failures++;
 	}
 
 	private static String name(Screen s) {
@@ -310,6 +321,41 @@ public final class FlintQa implements ClientModInitializer {
 					log("clicked node '" + found[0] + "' at " + Math.round(x) + "," + Math.round(y));
 				}
 			}
+			case "drag-node-at" -> {
+				// drag-node-at FX0 FY0 FX1 FY1 NAME: press at one fraction of a Flint kit element's box, move to another in steps (as a
+				// real drag), let go there (a stroke on the crosshair pad).
+				Object[] found = kitNode(screen, rest(c, 5));
+				if (found == null) {
+					fail("node '" + rest(c, 5) + "' not found on " + name(screen));
+				} else {
+					Object node = found[3];
+					Class<?> n = node.getClass();
+					float nx = (float) n.getMethod("x").invoke(node);
+					float ny = (float) n.getMethod("y").invoke(node);
+					float nw = (float) n.getMethod("width").invoke(node);
+					float nh = (float) n.getMethod("height").invoke(node);
+					double perUi = (double) found[1] / (nx + nw / 2);
+					double x0 = (nx + Double.parseDouble(c[1]) * nw) * perUi;
+					double y0 = (ny + Double.parseDouble(c[2]) * nh) * perUi;
+					double x1 = (nx + Double.parseDouble(c[3]) * nw) * perUi;
+					double y1 = (ny + Double.parseDouble(c[4]) * nh) * perUi;
+					MouseButtonInfo left = new MouseButtonInfo(QaInput.LEFT, 0);
+					screen.mouseMoved(x0, y0);
+					screen.mouseClicked(new MouseButtonEvent(x0, y0, left), false);
+					double px = x0;
+					double py = y0;
+					for (int k = 1; k <= 16; k++) {
+						double qx = x0 + (x1 - x0) * k / 16;
+						double qy = y0 + (y1 - y0) * k / 16;
+						screen.mouseMoved(qx, qy);
+						screen.mouseDragged(new MouseButtonEvent(qx, qy, left), qx - px, qy - py);
+						px = qx;
+						py = qy;
+					}
+					screen.mouseReleased(new MouseButtonEvent(x1, y1, left));
+					log("dragged on node '" + found[0] + "' from " + Math.round(x0) + "," + Math.round(y0) + " to " + Math.round(x1) + "," + Math.round(y1));
+				}
+			}
 			case "select-server" -> {
 				Field f = QaNames.field(net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen.class, "serverSelectionList");
 				var list = (net.minecraft.client.gui.screens.multiplayer.ServerSelectionList) f.get(screen);
@@ -415,9 +461,18 @@ public final class FlintQa implements ClientModInitializer {
 				var repository = mc.getResourcePackRepository();
 				boolean changed = c[2].equals("on") ? repository.addPack(c[1]) : repository.removePack(c[1]);
 				if (changed) {
+					reloadStart = System.nanoTime();
 					mc.options.updateResourcePacks(repository);
 				}
 				log("pack " + c[1] + " " + c[2] + " -> " + changed + " " + repository.getSelectedIds());
+			}
+			case "wait-reload" -> {
+				// wait-reload [S]: until the resource reload the last pack step started is over (no loading overlay), then how
+				// long it took.
+				if (QaGame.overlay(mc) != null || System.nanoTime() - reloadStart < 100_000_000L) {
+					return timeout(elapsed, c.length > 1 ? c[1] : "120", "resource reload");
+				}
+				log(String.format(java.util.Locale.ROOT, "reload done %d ms after the pack step", (System.nanoTime() - reloadStart) / 1_000_000));
 			}
 			case "files" -> {
 				Path p = mc.gameDirectory.toPath().resolve(c[1]);
@@ -466,7 +521,20 @@ public final class FlintQa implements ClientModInitializer {
 				net.minecraft.client.gui.screens.ConnectScreen.startConnecting(screen == null ? new net.minecraft.client.gui.screens.TitleScreen() : screen,
 					mc, net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(c[1]),
 					new net.minecraft.client.multiplayer.ServerData("QA", c[1], net.minecraft.client.multiplayer.ServerData.Type.OTHER), false, null);
+				// wait-world logs how long joining took, from here.
+				worldStart = System.nanoTime();
+				worldJoined = false;
 				log("connecting to " + c[1]);
+			}
+			case "wait-chunks" -> {
+				// wait-chunks COUNT [S]: until the client holds COUNT chunks (from the server, or the integrated one), then how long
+				// that took since create-world, open-world or connect: how fast the world around you arrives.
+				int have = mc.level == null ? 0 : mc.level.getChunkSource().getLoadedChunksCount();
+				if (have >= Integer.parseInt(c[1])) {
+					log(String.format(java.util.Locale.ROOT, "chunks %d loaded %d ms after the world started", have, (System.nanoTime() - worldStart) / 1_000_000));
+					return true;
+				}
+				return timeout(elapsed, c.length > 2 ? c[2] : "120", "chunks " + c[1] + " (have " + have + ")");
 			}
 			case "scroll" -> {
 				// A mouse wheel notch (positive: up), through Minecraft's own handler.
@@ -504,6 +572,13 @@ public final class FlintQa implements ClientModInitializer {
 				// turn DEG_PER_S: the camera keeps turning every frame, as a moving mouse turns it (0 stops).
 				QaFrames.turn(Double.parseDouble(c[1]));
 				log("turn " + c[1]);
+			}
+			case "cpu" -> {
+				// cpu NAME: the process CPU time (all threads) and the render thread CPU time, with the uptime, in ms; two of these
+				// around a sleep give the idle CPU of what is on screen.
+				var os = (com.sun.management.OperatingSystemMXBean) java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+				log("cpu " + c[1] + " uptimeMs=" + java.lang.management.ManagementFactory.getRuntimeMXBean().getUptime() + " cpuMs="
+					+ os.getProcessCpuTime() / 1000000 + " threadCpuMs=" + java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime() / 1000000);
 			}
 			case "mem" -> {
 				// mem: the Java heap in use and its limit, after a collection, in MB (what the game holds, not garbage).
@@ -699,6 +774,35 @@ public final class FlintQa implements ClientModInitializer {
 				}
 				log("hover " + c[1] + " " + c[2]);
 			}
+			case "hover-node-at" -> {
+				// hover-node-at FX FY NAME: the pointer at a fraction of a Flint kit element's box (as click-node-at; below 0 or above 1
+				// lands beside it: -0.5 0.5 is half its width to its left), without clicking, for its tooltip or its row's.
+				double fx = Double.parseDouble(c[1]);
+				double fy = Double.parseDouble(c[2]);
+				Object[] found = kitNode(screen, rest(c, 3));
+				if (found == null) {
+					fail("node '" + rest(c, 3) + "' not found on " + name(screen));
+				} else {
+					Object node = found[3];
+					Class<?> n = node.getClass();
+					double perUi = (double) found[1] / ((float) n.getMethod("x").invoke(node) + (float) n.getMethod("width").invoke(node) / 2);
+					double x = ((float) n.getMethod("x").invoke(node) + fx * (float) n.getMethod("width").invoke(node)) * perUi;
+					double y = ((float) n.getMethod("y").invoke(node) + fy * (float) n.getMethod("height").invoke(node)) * perUi;
+					double scale = mc.getWindow().getGuiScale();
+					QaNames.field(net.minecraft.client.MouseHandler.class, "xpos").setDouble(mc.mouseHandler, x * scale);
+					QaNames.field(net.minecraft.client.MouseHandler.class, "ypos").setDouble(mc.mouseHandler, y * scale);
+					screen.mouseMoved(x, y);
+					log("hovered node '" + found[0] + "' at " + Math.round(x) + "," + Math.round(y));
+				}
+			}
+			case "window" -> {
+				// window W H: the game window resized to W × H (as dragging its edge would); logs the size Minecraft then has.
+				mc.getWindow().setWindowed(Integer.parseInt(c[1]), Integer.parseInt(c[2]));
+				log("window asked " + c[1] + "x" + c[2] + " -> " + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight() + " gui scale "
+					+ mc.getWindow().getGuiScale());
+			}
+			case "window-size" -> log("window " + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight() + " gui scale " + mc.getWindow().getGuiScale()
+				+ " gui " + mc.getWindow().getGuiScaledWidth() + "x" + mc.getWindow().getGuiScaledHeight());
 			case "hover-widget-at" -> {
 				// hover-widget-at FX LABEL: the pointer over a widget, FX (0..1) across its width and half way down; no click.
 				AbstractWidget found = widget(screen, rest(c, 2));
@@ -812,6 +916,15 @@ public final class FlintQa implements ClientModInitializer {
 					log("bind " + c[1] + " " + found.saveString());
 				}
 			}
+			case "friends-overlay" -> {
+				// friends-overlay: Minecraft's own friends list (26.2 and later) over the screen shown, as its Friends buttons open
+				// it once the friends list is on (a QA account can't turn it on: that asks Mojang). The list draws the screen under
+				// it and blurs it, the path of the "Can only blur once per frame" crash.
+				Class<?> overlay = Class.forName("net.minecraft.client.gui.screens.friends.FriendsOverlayScreen");
+				Screen opened = (Screen) overlay.getConstructor(Screen.class).newInstance(screen);
+				QaGame.setScreen(mc, opened);
+				log("friends overlay over " + name(screen));
+			}
 			case "break-screen" -> {
 				// break-screen FIELD: the open screen's field (searched up its classes) set to null, so its next draw throws: how a
 				// screen bug behaves (Flint's screens close instead of crashing the game).
@@ -880,6 +993,18 @@ public final class FlintQa implements ClientModInitializer {
 				} else {
 					fail("camera " + view + ", expected " + c[1]);
 				}
+			}
+			case "sweep" -> {
+				// sweep title|mods [WxH]|pause|rshift|net|summary: the crash sweep (QaSweep), driven by Flint's registries.
+				return QaSweep.step(mc, c, (s, x, y) -> {
+					MouseButtonEvent e = new MouseButtonEvent(x, y, new MouseButtonInfo(QaInput.LEFT, 0));
+					s.mouseMoved(x, y);
+					s.mouseClicked(e, false);
+					Screen after = QaGame.screen(mc);
+					if (after != null) {
+						after.mouseReleased(e);
+					}
+				}, w -> new double[] {w.getX() + w.getWidth() / 2.0, w.getY() + w.getHeight() / 2.0});
 			}
 			case "quit" -> {
 				done = true;

@@ -131,4 +131,26 @@ public final class AnimatedCapeFixture {
 			+ ",\"frame_count\":" + durations.length + ",\"durations_ms\":[" + ds + "],\"duration_ms\":" + total + ",\"frames_per_strip\":"
 			+ per + ",\"strips\":[" + ss + "],\"source\":{\"format\":\"webp\",\"sha256\":\"" + "ab".repeat(32) + "\",\"bytes\":4096}}";
 	}
+
+	/**
+	 * The card preview's entry (Store {@code animation.preview}, Backend 7770) for {@code strips} at {@code scale}: its scale, frame
+	 * size, frames per strip and strips, each at {@code base + "animated/<sha256>.png"} as the full ones.
+	 */
+	public static String previewJson(int scale, int frames, List<byte[]> strips, String base) {
+		int per = CapeAnimation.framesPerStrip(CapeAnimation.ATLAS_HEIGHT * scale);
+		StringJoiner ss = new StringJoiner(",");
+		for (int k = 0; k < strips.size(); k++) {
+			byte[] png = strips.get(k);
+			String hash = StoreCapes.sha256(png);
+			ss.add("{\"path\":\"animated/" + hash + ".png\",\"sha256\":\"" + hash + "\",\"bytes\":" + png.length + ",\"frames\":"
+				+ Math.min(per, frames - k * per) + ",\"url\":\"" + base + "animated/" + hash + ".png\"}");
+		}
+		return "{\"scale\":" + scale + ",\"width\":" + 22 * scale + ",\"height\":" + 17 * scale + ",\"frames_per_strip\":" + per
+			+ ",\"strips\":[" + ss + "]}";
+	}
+
+	/** {@code animation} (a manifest's JSON) with {@code preview} as its {@code preview}. */
+	public static String withPreview(String animation, String preview) {
+		return animation.substring(0, animation.length() - 1) + ",\"preview\":" + preview + "}";
+	}
 }

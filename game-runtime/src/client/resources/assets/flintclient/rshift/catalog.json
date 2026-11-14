@@ -25,8 +25,18 @@
 						},
 						{
 							"label": "Menu size",
+							"kind": "choice",
+							"bind": "global/menuSize"
+						},
+						{
+							"label": "Menu transparency",
 							"kind": "slider",
-							"bind": "global/menuScale"
+							"bind": "global/menuTransparency"
+						},
+						{
+							"label": "Menu blur strength",
+							"kind": "slider",
+							"bind": "global/menuBlurStrength"
 						},
 						{
 							"label": "24-hour clock",
@@ -139,6 +149,16 @@
 							"label": "VSync",
 							"kind": "toggle",
 							"bind": "minecraft/enableVsync"
+						},
+						{
+							"label": "Smooth screen sharing",
+							"kind": "toggle",
+							"bind": "global/smoothScreenSharing"
+						},
+						{
+							"label": "Borderless fullscreen",
+							"kind": "toggle",
+							"bind": "global/borderlessFullscreen"
 						}
 					]
 				},
@@ -539,17 +559,12 @@
 					]
 				},
 				{
-					"title": "Swing Duration",
+					"title": "Swing",
 					"rows": [
 						{
-							"label": "Modify Swing Duration",
-							"kind": "toggle",
-							"bind": "animations/modifySwingDuration"
-						},
-						{
-							"label": "Swing Duration Multiplier",
-							"kind": "slider",
-							"bind": "animations/swingDurationMultiplier"
+							"label": "Swing Speed, Eating and Re-Equip",
+							"kind": "link",
+							"bind": "link/view_model"
 						}
 					]
 				},
@@ -1215,11 +1230,6 @@
 					"title": "General",
 					"rows": [
 						{
-							"label": "Indicator Range",
-							"kind": "slider",
-							"bind": "block_indicator/indicatorRange"
-						},
-						{
 							"label": "Show Block Breaking Percentage",
 							"kind": "toggle",
 							"bind": "block_indicator/showBlockBreakingPercentage"
@@ -1292,10 +1302,6 @@
 							"label": "Fill",
 							"kind": "toggle",
 							"bind": "block_outline/fill"
-						},
-						{
-							"label": "See Through",
-							"kind": "toggle"
 						},
 						{
 							"label": "Show Side Only",
@@ -5013,6 +5019,16 @@
 							"label": "Rotate Speed",
 							"kind": "slider",
 							"bind": "item_physics/rotationSpeed"
+						}
+					]
+				},
+				{
+					"title": "Size",
+					"rows": [
+						{
+							"label": "Dropped Item Size",
+							"kind": "link",
+							"bind": "link/view_model"
 						}
 					]
 				}
@@ -9484,9 +9500,9 @@
 			]
 		},
 		{
-			"key": "viewmodel",
-			"name": "ViewModel",
-			"description": "Move, scale and rotate the item in your hand",
+			"key": "itemcustomizer",
+			"name": "Item Customizer",
+			"description": "Move, size and animate held and dropped items",
 			"icon": "SWORD",
 			"categories": [
 				"PvP"
@@ -9505,86 +9521,6 @@
 							"label": "Toggle Mod Notification",
 							"kind": "toggle",
 							"bind": "view_model/modKeyNotify"
-						},
-						{
-							"label": "Shield Height",
-							"kind": "slider",
-							"bind": "view_model/shieldHeight"
-						}
-					]
-				},
-				{
-					"title": "Scale",
-					"rows": [
-						{
-							"label": "Scale",
-							"kind": "toggle",
-							"bind": "view_model/scale"
-						},
-						{
-							"label": "X",
-							"kind": "slider",
-							"bind": "view_model/scaleX"
-						},
-						{
-							"label": "Y",
-							"kind": "slider",
-							"bind": "view_model/scaleY"
-						},
-						{
-							"label": "Z",
-							"kind": "slider",
-							"bind": "view_model/scaleZ"
-						}
-					]
-				},
-				{
-					"title": "Position",
-					"rows": [
-						{
-							"label": "Position",
-							"kind": "toggle",
-							"bind": "view_model/position"
-						},
-						{
-							"label": "X",
-							"kind": "slider",
-							"bind": "view_model/positionX"
-						},
-						{
-							"label": "Y",
-							"kind": "slider",
-							"bind": "view_model/positionY"
-						},
-						{
-							"label": "Z",
-							"kind": "slider",
-							"bind": "view_model/positionZ"
-						}
-					]
-				},
-				{
-					"title": "Rotation",
-					"rows": [
-						{
-							"label": "Rotation",
-							"kind": "toggle",
-							"bind": "view_model/rotation"
-						},
-						{
-							"label": "X",
-							"kind": "slider",
-							"bind": "view_model/rotationX"
-						},
-						{
-							"label": "Y",
-							"kind": "slider",
-							"bind": "view_model/rotationY"
-						},
-						{
-							"label": "Z",
-							"kind": "slider",
-							"bind": "view_model/rotationZ"
 						}
 					]
 				}

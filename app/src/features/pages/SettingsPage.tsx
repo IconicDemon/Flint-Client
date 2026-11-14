@@ -14,6 +14,7 @@ import { useSyncRows } from "./SettingsSync";
 import { EFFECT_TEXT, FontPicker, ThemePicker } from "../../ui/AppearancePickers";
 import { Modal, useToast } from "../../ui/overlays";
 import { Avatar } from "../onboarding/steps";
+import { PERFORMANCE_SET } from "../onboarding/plan";
 import { checkForUpdates, useUpdates } from "../../lib/updater";
 import { DOWNLOAD_LIMITS } from "../../lib/storage";
 import { CleanupButton, StorageOverviewCard } from "./StorageSettings";
@@ -256,6 +257,16 @@ function useRows(): RowDef[] {
         title: t("settings.minecraft.performanceMods.title"),
         desc: t("settings.minecraft.performanceMods.desc"),
         keywords: "settings.minecraft.performanceMods.keywords",
+        status: (
+          <span className={`perf-mods ${settings.performanceMods ? "" : "is-off"}`}>
+            {PERFORMANCE_SET.map((name) => (
+              <span key={name} className="perf-mod">
+                <Icon name="gauge" size={11} />
+                {name}
+              </span>
+            ))}
+          </span>
+        ),
         render: () => <Switch label={t("settings.minecraft.performanceMods.title")} checked={settings.performanceMods} onChange={(v) => update({ performanceMods: v })} />,
       },
       {

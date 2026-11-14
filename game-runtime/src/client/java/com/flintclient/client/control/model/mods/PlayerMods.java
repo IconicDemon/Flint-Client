@@ -120,7 +120,8 @@ public final class PlayerMods {
 			.section("Secondary Zoom", SECONDARY_KEY, SECONDARY_AMOUNT, SECONDARY_IN, SECONDARY_OUT, SECONDARY_HIDE_HUD)
 			.section("Presets", PRESET)
 			.note("Zoomify's zoom: only your field of view changes while a key is used; your FOV setting is never touched. The secondary "
-				+ "zoom is completely separate: toggle-only, slow, and it always uses the cinematic camera.").build();
+				+ "zoom is completely separate: toggle-only, slow, and it always uses the cinematic camera. Together they go to 50× at most "
+				+ "(Zoomify itself went to 500×).").build();
 	}
 
 	public static final class Freelook {
@@ -134,7 +135,8 @@ public final class PlayerMods {
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Freelook", "Look around without turning")
 			.keywords("perspective", "freelook", "camera", "look around").icon(IconId.COMPASS).category(Category.UTILITY)
 			.section("Freelook", KEY, MODE, INVERT_YAW, INVERT_PITCH, VIEW)
-			.note("Only the camera turns; you keep walking where you were facing. Servers may disallow it: respect their rules.").build();
+			.note("Only the camera turns; you keep walking where you were facing. Off on Hypixel and Hoplite, whose rules don't allow it; "
+				+ "other servers may disallow it too: respect their rules.").build();
 	}
 
 	/**
@@ -147,8 +149,6 @@ public final class PlayerMods {
 			"circle", "Circle", "square", "Square", "triangle", "Triangle", "arrow", "Arrow", "debug", "Debug", "drawn", "Drawn");
 		public static final BoolSetting KEEP_DEBUG = new BoolSetting("keepDebug", "Vanilla crosshair in debug HUD",
 			"Shows Minecraft's 3D crosshair while F3 is open", false);
-		public static final OptionSetting DRAW = new OptionSetting("drawCrosshair", "Draw crosshair",
-			"Opens the editor for the Drawn style: click or drag on the grid to set or clear pixels", 0, "closed", "Draw…", "open", "Opening");
 		public static final KeySetting EDIT_KEY = new KeySetting("editKey", "Edit crosshair", "Opens these settings while you play",
 			"key.keyboard.grave.accent");
 		public static final RgbSetting COLOR = new RgbSetting("color", "Crosshair color", null, 0xFFFFFF);
@@ -212,7 +212,7 @@ public final class PlayerMods {
 
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Crosshair", "Customize your crosshair")
 			.keywords("crosshair", "aim", "reticle", "dot", "custom crosshair", "indicator").icon(IconId.GAUGE).category(Category.VISUAL)
-			.section("General Settings", TYPE, KEEP_DEBUG, DRAW, EDIT_KEY)
+			.section("General Settings", TYPE, KEEP_DEBUG, EDIT_KEY)
 			.section("Shape Settings", COLOR, ALPHA, INVERT, WIDTH, HEIGHT, GAP, THICKNESS, ROTATION, SCALE, OFFSET_X, OFFSET_Y)
 			.section("Visibility Settings", VISIBLE_DEFAULT, VISIBLE_HIDDEN_GUI, VISIBLE_DEBUG, THIRD_PERSON, VISIBLE_SPECTATOR, VISIBLE_RANGED,
 				VISIBLE_THROWABLE, VISIBLE_SPYGLASS)
@@ -224,7 +224,7 @@ public final class PlayerMods {
 			.section("Indicator Settings", TOOL_DAMAGE, PROJECTILES, PLAYER_INDICATOR)
 			.note("Custom Crosshair Mod's crosshair, drawn over the whole HUD while no screen is open, in place of Minecraft's (its attack "
 				+ "indicator is drawn with it). Highlighting colors it by what you aim at: players, then hostile and neutral mobs, then "
-				+ "animals. The drawn crosshair is kept in config/flintclient/crosshair-drawn.png.").build();
+				+ "animals. Draw your own on the page's pad (the Drawn style); it is kept in config/flintclient/crosshair-drawn.png.").build();
 	}
 
 	public static final class AttackIndicator {
@@ -510,6 +510,7 @@ public final class PlayerMods {
 			.keywords("health", "hearts", "players", "hp", "indicator").icon(IconId.SHIELD).category(Category.COMBAT)
 			.section("General", STACKING, OFFSET).section("Keys", STACKING_KEY, INCREASE_KEY, DECREASE_KEY).needs(Requirement.WORLD)
 			.note("Other players' health and absorption as the server sends them, as Minecraft's own hearts, up to 64 blocks away. Use the "
-				+ "Toggle mod key to switch them on and off from in game.").build();
+				+ "Toggle mod key to switch them on and off from in game. Walls hide them, and invisible players get none. Off on "
+				+ "Hypixel, whose rules don't allow other players' health.").build();
 	}
 }

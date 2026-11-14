@@ -8,9 +8,15 @@
 // - error: the Store page can't be loaded at all. locked: the system refuses to read the saved sign-in.
 // - slow: every Store call takes 2.5 s. wearfail: wearing is refused. ordersfail: orders can't be loaded.
 // - staging: connected to a test Store. badcode: a browser code isn't waiting at the Store.
+// - scale: 500 more v2 items (300 capes, 120 pets, 80 wings), to measure the wardrobe at size.
+// - badges: the Store sends role badges (GET /me/ badges/badge): every account owns the Flint mark and Staff, and wears
+//   Staff; badgesall: every mark. badgefail: choosing one is refused. Without these, today's Store (the Flint mark only).
+// - v2: cosmetics v2 too (devMockWardrobe.ts: placeholder wings, hats, an aura, a pet, a shield, gloves and
+//   emotes, with Bedrock geometry and thumbnails) and the emote wheel. future: also a kind Flint doesn't know yet.
 // `&cape=static|frost|hd|animated|animatedhd` starts the active account signed in wearing that test cape; `&mccape`
 // (devMock.ts) gives it a Minecraft cape.
 import { CAPE_IDS, CAPE_ITEMS, CAPE_PARAM, capeAnimation, capeAsset, capeStrip } from "./devMockCapes";
+import { EMOTE_ANIMATION, MODELS, V2_ITEMS, modelTexture, thumbnail } from "./devMockWardrobe";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DAY = 86_400_000;
@@ -18,14 +24,15 @@ const DAY = 86_400_000;
 export type Item = {
   cosmeticId: string;
   slug: string;
-  kind: "cape" | "back" | "head" | "aura";
+  /** Today's kinds (back and head are v1's names), the v2 kinds, or one Flint doesn't know (`?store=v2,future`). */
+  kind: string;
   name: string;
   test: boolean;
   gift: boolean;
   giftFrom?: string | null;
   giftMessage?: string | null;
   grantedAt: string | null;
-  asset: { id: string; version: number; width: number; height: number; animation?: unknown } | null;
+  asset: { id: string; version: number; width: number; height: number; animation?: unknown; model?: unknown; hasTexture?: boolean } | null;
   /** Mock only: how the texture is drawn (`testCape`: by devMockCapes.ts). */
   art: { hue: number; animated?: { frames: number; scale: number; durations: number[] }; testCape?: boolean };
   /** A newer Store's fields (devMockCommunity.ts). */
@@ -47,7 +54,7 @@ export type StoreExtension = {
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 
 const ADJECTIVES = ["Ember", "Frost", "Aurora", "Midnight", "Copper", "Verdant", "Obsidian", "Solar", "Lunar", "Tidal", "Crimson", "Amber", "Glacier", "Thunder", "Velvet", "Ashen", "Golden", "Prism"];
-const NOUNS: Record<Item["kind"], string[]> = {
+const NOUNS: Record<string, string[]> = {
   cape: ["Cape", "Mantle", "Banner Cape", "Cloak", "Drape"],
   back: ["Wings", "Pack", "Quiver", "Sheath"],
   head: ["Crown", "Halo", "Circlet", "Horns"],
@@ -118,6 +125,8 @@ function inventoryFor(flags: Set<string>): Item[] {
     items.push(item(2, "cape", "Ember Storm", { art: { hue: 18, animated: animatedArt(12, 16) }, gift: true, giftFrom: "Kestrel", giftMessage: "Happy launch day!" }));
     items.push(item(3, "cape", "Tidal Shimmer", { art: { hue: 205, animated: animatedArt(10, 4) } }));
   }
+  if (flags.has("v2")) items.push(...v2Items(flags.has("future")));
+  if (flags.has("scale")) items.push(...scaleItems());
   if (flags.has("many")) {
     const kinds: Item["kind"][] = [...Array(240).fill("cape"), ...Array(30).fill("back"), ...Array(20).fill("head"), ...Array(10).fill("aura")];
     kinds.forEach((kind, i) => {
@@ -134,6 +143,83 @@ function inventoryFor(flags: Set<string>): Item[] {
     });
   }
   return items;
+}
+
+/** Cosmetics v2's placeholder items: every kind with a model (an emote: its animation and thumbnail). */
+function v2Items(future: boolean): Item[] {
+  const file = (bytes: number, size?: number) => ({ bytes, width: size ?? null, height: size ?? null });
+  const list = V2_ITEMS.map(([kind, name, hue], i): Item => {
+    const m = MODELS[kind];
+    const model = {
+      geometry: m ? file(m.geometry.length) : null,
+      texture: m ? file(2000, 32) : null,
+      animation: kind === "emote" ? file(EMOTE_ANIMATION.length) : null,
+      thumbnail: file(30_000, 512),
+      textureFrames: m?.frames ?? null,
+      frameMs: m?.frames ? [140] : [],
+      attach: m ? { anchor: m.anchor, side: m.side ?? null } : null,
+      hidesCape: !!m?.hidesCape && name.startsWith("Ember"),
+    };
+    return {
+      cosmeticId: id(0x5000 + i),
+      slug: name.toLowerCase().replace(/\s+/g, "-"),
+      kind,
+      name,
+      test: false,
+      gift: i === 4,
+      giftFrom: i === 4 ? "Kestrel" : null,
+      grantedAt: new Date(Date.now() - (i + 2) * 0.9 * DAY).toISOString(),
+      asset: { id: id(0x6000 + i), version: 1, width: 512, height: 512, model, hasTexture: false },
+      art: { hue },
+      obtainedVia: i === 6 ? "discord_member" : i === 2 ? "event" : "purchase",
+    };
+  });
+  if (future)
+    list.push({
+      cosmeticId: id(0x5100),
+      slug: "jetpack",
+      kind: "jetpack",
+      name: "Rocket Jetpack",
+      test: false,
+      gift: false,
+      grantedAt: new Date(Date.now() - DAY).toISOString(),
+      asset: { id: id(0x6100), version: 1, width: 512, height: 512, model: { thumbnail: file(30_000, 512) }, hasTexture: false },
+      art: { hue: 10 },
+    });
+  return list;
+}
+
+/** `scale`: 500 more v2 items (300 capes, 120 pets, 80 wings) to measure the wardrobe with. */
+function scaleItems(): Item[] {
+  const kinds = [...Array(300).fill("cape"), ...Array(120).fill("pet"), ...Array(80).fill("wings")];
+  return kinds.map((kind, i): Item => {
+    const name = `${ADJECTIVES[i % ADJECTIVES.length]} ${kind === "cape" ? NOUNS.cape[i % 5] : kind === "pet" ? ["Fox", "Owl", "Cat", "Frog"][i % 4] : "Wings"} ${Math.floor(i / ADJECTIVES.length) + 1}`;
+    const base = item(0x7000 + i, kind, name, { art: { hue: (i * 29) % 360 } });
+    if (kind === "cape") return base;
+    const m = MODELS[kind];
+    return {
+      ...base,
+      asset: {
+        id: id(0x8000 + i),
+        version: 1,
+        width: 512,
+        height: 512,
+        hasTexture: false,
+        model: { geometry: { bytes: m.geometry.length }, texture: { bytes: 2000, width: 32, height: 32 }, thumbnail: { bytes: 30_000, width: 512, height: 512 }, attach: { anchor: m.anchor, side: m.side ?? null } },
+      },
+    };
+  });
+}
+
+/** A v2 item's file, as `store_model_file` answers it: JSON text, or a picture's data URL. */
+function modelFile(found: Item, part: string): string {
+  const kind = found.kind === "jetpack" ? "pet" : found.kind;
+  const m = MODELS[kind];
+  if (part === "thumbnail") return thumbnail(kind, found.art.hue);
+  if (part === "animation" && kind === "emote") return EMOTE_ANIMATION;
+  if (part === "geometry" && m) return m.geometry;
+  if (part === "texture" && m) return modelTexture(kind, found.art.hue, m.frames ?? 1);
+  throw "This item doesn't have that file.";
 }
 
 // ---------- textures ----------
@@ -272,7 +358,7 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
   const flags = new Set((params.get("store") ?? "").split(",").map((f) => f.trim()).filter(Boolean));
   const storeUrl = flags.has("staging") ? "https://flint-store-website-preview.example.workers.dev" : "https://store.flintclient.com";
   const signedIn = new Set<string>();
-  const startSignedIn = flags.has("in") || flags.has("offline") || flags.has("unreachable") || flags.has("many") || flags.has("anim") || flags.has("orders") || flags.has("empty") || flags.has("ordersfail") || flags.has("wearfail");
+  const startSignedIn = flags.has("in") || flags.has("v2") || flags.has("offline") || flags.has("unreachable") || flags.has("many") || flags.has("anim") || flags.has("orders") || flags.has("empty") || flags.has("ordersfail") || flags.has("wearfail");
   const owned = inventoryFor(flags);
   const firstWorn: Record<string, string> = {};
   if (flags.has("anim")) firstWorn.cape = CAPE_IDS.flame;
@@ -280,8 +366,14 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
     firstWorn.cape = id(13);
     firstWorn.head = id(10 + 240 + 30 + 2);
   }
+  if (flags.has("v2")) {
+    firstWorn.back = id(0x5000);
+    firstWorn.head = id(0x5002);
+  }
   const equipped: Record<string, Record<string, string>> = {};
   const worn = (uuid: string) => (equipped[uuid] ??= { ...firstWorn });
+  const wheels: Record<string, (string | null)[]> = {};
+  const wheel = (uuid: string) => (wheels[uuid] ??= flags.has("empty") ? Array(8).fill(null) : [id(0x5009), id(0x500a), null, null, null, null, null, null]);
   const versions: Record<string, number> = {};
   const version = (uuid: string) => versions[uuid] ?? 3;
   const startCape = CAPE_PARAM[params.get("cape") ?? ""];
@@ -293,6 +385,12 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
   const balance = flags.has("empty") ? 0 : 1250;
   const itemsOf = (uuid: string): Item[] => [...owned.map((o) => ({ ...o, ...extension?.decorate(uuid, o) })), ...(extension?.extra(uuid) ?? [])];
   const offline = flags.has("offline") || flags.has("unreachable");
+  const badgeOwned = flags.has("badgesall")
+    ? ["default", "owner", "co_owner", "developer", "staff", "content_creator", "trial_creator", "vip", "special"]
+    : ["default", "staff"];
+  const chosenBadge: Record<string, string> = {};
+  const badgesOf = (uuid: string) =>
+    flags.has("badges") || flags.has("badgesall") ? { known: true, badges: badgeOwned, badge: chosenBadge[uuid] ?? "staff" } : { known: false, badges: ["default"], badge: "default" };
 
   const view = (uuid: string) => {
     const signed = signedIn.has(uuid) || (startSignedIn && !signedIn.has(`out:${uuid}`));
@@ -312,7 +410,14 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
           : null,
       inventory:
         signed && !flags.has("unreachable")
-          ? { version: version(uuid), name: accountName(uuid) ?? "Steve", balance, owned: itemsOf(uuid).map(({ art: _art, ...rest }) => rest), equipped: { ...worn(uuid) } }
+          ? {
+              version: version(uuid),
+              name: accountName(uuid) ?? "Steve",
+              balance,
+              owned: itemsOf(uuid).map(({ art: _art, ...rest }) => rest),
+              equipped: { ...worn(uuid) },
+              ...(flags.has("v2") ? { emotes: [...wheel(uuid)] } : {}),
+            }
           : null,
     };
   };
@@ -341,6 +446,22 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
         else delete worn(args.uuid)[args.slot];
         versions[args.uuid] = version(args.uuid) + 1;
         return view(args.uuid);
+      case "store_set_emotes": {
+        await sleep(350);
+        if (!flags.has("v2")) throw "The Flint Store refused that (HTTP 404). Try again later.";
+        const slots = (args.slots as (string | null)[]).slice(0, 8);
+        const emotes = new Set(itemsOf(args.uuid).filter((o) => o.kind === "emote").map((o) => o.cosmeticId));
+        if (slots.length !== 8 || slots.some((s) => s && !emotes.has(s))) throw "That emote can't go on your emote wheel.";
+        wheels[args.uuid] = slots;
+        versions[args.uuid] = version(args.uuid) + 1;
+        return view(args.uuid);
+      }
+      case "store_model_file": {
+        const found = itemsOf(args.uuid).find((o) => o.cosmeticId === args.cosmeticId);
+        if (!found) throw "This account doesn't own that item.";
+        await sleep(80);
+        return modelFile(found, String(args.part));
+      }
       case "store_changes":
         if (offline) return { state: "offline" };
         return view(args.uuid).signedIn ? { state: "ok", changed: args.since !== version(args.uuid), version: version(args.uuid), pollAfterSeconds: 25 } : { state: "signedOut" };
@@ -355,6 +476,16 @@ export function createStoreMock(params: URLSearchParams, accountName: (uuid: str
         if (!found?.art.animated) throw "This item isn't animated.";
         await sleep(120);
         return strip(found.art, args.index);
+      }
+      case "badge_list":
+        if (offline) throw "Flint can't reach the Flint Store right now. Check your connection and try again.";
+        return badgesOf(args.uuid);
+      case "badge_set": {
+        await sleep(350);
+        if (flags.has("badgefail")) throw "You're changing your badge too often. Wait a minute and try again.";
+        if (!badgeOwned.includes(args.tag) || !badgesOf(args.uuid).known) throw "That badge isn't yours (any more). Flint decides which badges you have.";
+        chosenBadge[args.uuid] = args.tag;
+        return badgesOf(args.uuid);
       }
       case "store_wallet":
         if (offline) throw "Flint can't reach the Flint Store right now. Check your connection and try again.";

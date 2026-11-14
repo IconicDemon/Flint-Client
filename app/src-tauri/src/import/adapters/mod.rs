@@ -399,4 +399,34 @@ mod tests {
         assert!(broken.is_err());
         assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0);
     }
+
+    /// A launcher's database may have full-text search or R-tree tables, extensions the app's SQLite leaves out
+    /// (.cargo/config.toml): it still opens through the copy and its ordinary tables read as before. Only those tables
+    /// themselves would say their module is missing.
+    #[test]
+    fn a_database_with_tables_of_left_out_extensions_still_reads() {
+        let dir = TestDir::new();
+        let db = dir.0.join("app.db");
+        let writer = rusqlite::Connection::open(&db).unwrap();
+        writer.execute_batch("CREATE TABLE profiles (name TEXT); INSERT INTO profiles VALUES ('Survival'), ('PvP');").unwrap();
+        // The schema rows an SQLite with FTS5 and R-tree writes for such tables.
+        writer
+            .execute_batch(
+                "PRAGMA writable_schema=ON;
+                 INSERT INTO sqlite_master (type, name, tbl_name, rootpage, sql) VALUES
+                   ('table', 'search', 'search', 0, 'CREATE VIRTUAL TABLE search USING fts5(body)'),
+                   ('table', 'shapes', 'shapes', 0, 'CREATE VIRTUAL TABLE shapes USING rtree(id, x0, x1)');
+                 PRAGMA writable_schema=OFF;",
+            )
+            .unwrap();
+        drop(writer);
+        let copy = DbCopy::open(&db, &dir.0.join("temp")).unwrap();
+        let rows = |sql: &str| -> Vec<String> { copy.conn().prepare(sql).unwrap().query_map([], |r| r.get(0)).unwrap().flatten().collect() };
+        assert_eq!(rows("SELECT name FROM profiles ORDER BY name"), ["PvP", "Survival"]);
+        assert_eq!(rows("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"), ["profiles", "search", "shapes"]);
+        for table in ["search", "shapes"] {
+            let error = copy.conn().prepare(&format!("SELECT * FROM {table}")).map(|_| ()).unwrap_err().to_string();
+            assert!(error.contains("no such module"), "{table}: {error} (the app's SQLite should leave this extension out)");
+        }
+    }
 }

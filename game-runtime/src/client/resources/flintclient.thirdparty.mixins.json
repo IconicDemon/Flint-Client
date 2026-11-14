@@ -6,7 +6,8 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "WalksyUpdateNoticeMixin",
-    "WalksyToastPlacementMixin"
+    "WalksyToastPlacementMixin",
+    "HotLoadKeyMappingMixin"
   ],
   "injectors": {
     "defaultRequire": 0

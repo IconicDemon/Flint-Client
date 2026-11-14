@@ -55,8 +55,23 @@ public final class FogPlan {
 	static final float CLEAR_RENDER_DISTANCES = 16;
 	/** No fog's start in blocks at least: past the height of the world at a small render distance. */
 	static final float CLEAR_MIN = 4096;
+	/** The clearest water Minecraft shows: 96 blocks, once your eyes are used to it (its water vision). */
+	static final float WATER_CLEAR = 96;
+	/** The clearest lava Minecraft shows: 5 blocks, with Fire Resistance. */
+	static final float LAVA_CLEAR = 5;
+	/** Inside powder snow Minecraft shows 2 blocks. */
+	static final float POWDER_SNOW_CLEAR = 2;
 
 	private FogPlan() {
+	}
+
+	/**
+	 * Keeps the fog of the water or powder snow you're in within {@code max} blocks: Flint's fog there is never clearer than
+	 * Minecraft's own best (seeing further would be seeing through what hides you and others).
+	 */
+	private static void fluidLimit(Distances fog, float max) {
+		fog.environmentalEnd = Float.isNaN(fog.environmentalEnd) ? max : Math.min(fog.environmentalEnd, max);
+		fog.environmentalStart = Float.isNaN(fog.environmentalStart) ? 0 : Math.min(fog.environmentalStart, fog.environmentalEnd);
 	}
 
 	/** The render distance in blocks the fog is measured against: {@code chunks} chunks, at least 32 blocks. */
@@ -86,6 +101,8 @@ public final class FogPlan {
 	 */
 	public static void adjust(Distances fog, Medium medium, boolean blind, @Nullable String dimension, float view, ModuleState s,
 		boolean skyAndClouds) {
+		// Minecraft's own fog in water or powder snow: Flint's is never clearer than that and the best Minecraft shows there.
+		float vanillaEnd = fog.environmentalEnd;
 		if (!blind && (medium == Medium.AIR || medium == Medium.WATER || medium == Medium.POWDER_SNOW)) {
 			FogCustomizer.Config config = medium == Medium.WATER ? FogCustomizer.WATER
 				: medium == Medium.POWDER_SNOW ? FogCustomizer.SNOW : config(s, dimension);
@@ -96,19 +113,25 @@ public final class FogPlan {
 		}
 		switch (medium) {
 			case WATER -> {
-				if (s.bool(FogCustomizer.CLEAR_WATER)) {
+				// Blindness and Darkness keep Minecraft's fog under water and in lava too.
+				boolean clear = s.bool(FogCustomizer.CLEAR_WATER) && !blind;
+				if (clear) {
 					fog.environmentalStart = Math.max(fog.environmentalStart, 32);
-					fog.environmentalEnd = Math.max(fog.environmentalEnd, 256);
+					fog.environmentalEnd = Math.max(fog.environmentalEnd, WATER_CLEAR);
+				}
+				fluidLimit(fog, Math.max(vanillaEnd, WATER_CLEAR));
+				if (clear) {
 					fog.skyEnd = fog.environmentalEnd;
 					fog.cloudEnd = fog.environmentalEnd;
 				}
 			}
 			case LAVA -> {
-				if (s.bool(FogCustomizer.CLEAR_LAVA)) {
+				if (s.bool(FogCustomizer.CLEAR_LAVA) && !blind) {
 					fog.environmentalStart = 0;
-					fog.environmentalEnd = Math.max(fog.environmentalEnd, 12);
+					fog.environmentalEnd = Math.max(fog.environmentalEnd, LAVA_CLEAR);
 				}
 			}
+			case POWDER_SNOW -> fluidLimit(fog, Math.max(vanillaEnd, POWDER_SNOW_CLEAR));
 			case AIR -> {
 				// Blindness and Darkness keep Minecraft's fog: No fog and the multiplier never lift them (that would be an unfair
 				// advantage on servers, which anti-cheats look for).

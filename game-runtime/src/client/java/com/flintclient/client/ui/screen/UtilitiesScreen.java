@@ -22,7 +22,13 @@ public final class UtilitiesScreen extends FlintPageScreen {
 	@Override
 	protected void initPage(int contentTop) {
 		Path game = minecraft.gameDirectory.toPath();
-		Row[] rows = {
+		java.util.List<Row> list = new java.util.ArrayList<>();
+		// The in-game Library (mods, resource packs and shaders for this profile, from the Flint app), where it is offered.
+		if (com.flintclient.client.platform.MenuHost.libraryOffered()) {
+			list.add(new Row("flintclient.utilities.library", Icon.CUBE,
+				() -> minecraft.gui.setScreen(new com.flintclient.client.control.rshift.FlintLibraryScreen(this))));
+		}
+		Row[] fixed = {
 			new Row("flintclient.utilities.language", Icon.GLOBE, () -> minecraft.gui.setScreen(new LanguageSelectScreen(this, minecraft.options, minecraft.getLanguageManager()))),
 			new Row("flintclient.utilities.accessibility", Icon.ACCESSIBILITY, () -> minecraft.gui.setScreen(new AccessibilityOptionsScreen(this, minecraft.options))),
 			// The main menu's part sizes, shown live on the menu this page was opened from.
@@ -33,6 +39,8 @@ public final class UtilitiesScreen extends FlintPageScreen {
 			new Row("flintclient.utilities.packsFolder", Icon.LAYERS, () -> open(minecraft.getResourcePackDirectory())),
 			new Row("flintclient.utilities.credits", Icon.SPARK, () -> minecraft.gui.setScreen(new FlintCreditsScreen(this))),
 		};
+		list.addAll(java.util.List.of(fixed));
+		Row[] rows = list.toArray(new Row[0]);
 		int total = rows.length * ROW_H + (rows.length - 1) * GAP;
 		int y = Math.max(contentTop, (height - total) / 2);
 		MenuButton first = null;

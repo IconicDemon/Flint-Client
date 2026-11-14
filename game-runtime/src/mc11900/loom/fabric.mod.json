@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "flintclient",
+  "version": "0",
+  "custom": {
+    "loom:injected_interfaces": {
+      "net/minecraft/class_329": [
+        "com/flintclient/client/compat/GuiBridge"
+      ],
+      "net/minecraft/class_338": [
+        "com/flintclient/client/compat/Bridges$Chat"
+      ],
+      "net/minecraft/class_303": [
+        "com/flintclient/client/compat/v1190/GuiMessageBridge"
+      ],
+      "net/minecraft/class_310": [
+        "com/flintclient/client/compat/Bridges$Game"
+      ],
+      "net/minecraft/class_638": [
+        "com/flintclient/client/compat/Bridges$Level"
+      ],
+      "net/minecraft/class_4184": [
+        "com/flintclient/client/compat/Bridges$Camera"
+      ],
+      "net/minecraft/class_2583": [
+        "com/flintclient/client/compat/Bridges$StyleFont"
+      ],
+      "net/minecraft/class_1011": [
+        "com/flintclient/client/compat/Bridges$Image"
+      ],
+      "net/minecraft/class_1041": [
+        "com/flintclient/client/compat/Bridges$WindowScale"
+      ],
+      "net/minecraft/class_1661": [
+        "com/flintclient/client/compat/Bridges$PlayerInventory"
+      ],
+      "net/minecraft/class_1159": [
+        "com/flintclient/client/compat/MatrixBridge"
+      ],
+      "net/minecraft/class_640": [
+        "com/flintclient/client/compat/render/SkinBridge"
+      ],
+      "net/minecraft/class_742": [
+        "com/flintclient/client/compat/render/SkinBridge"
+      ],
+      "net/minecraft/class_339": [
+        "com/flintclient/client/compat/WidgetBridge"
+      ],
+      "net/minecraft/class_1799": [
+        "com/flintclient/client/compat/item/ItemStackBridge"
+      ],
+      "net/minecraft/class_5250": [
+        "com/flintclient/client/compat/ComponentBridge"
+      ],
+      "net/minecraft/class_342": [
+        "com/flintclient/client/compat/EditBoxBridge"
+      ]
+    }
+  }
+}

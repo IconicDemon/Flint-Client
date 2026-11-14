@@ -112,7 +112,7 @@ final class ItemViews {
 				if (bar) {
 					text();
 				} else if (ticks[i] >= 0) {
-					text().fixed(ticks[i] / 20.0, 1).ch('s');
+					text().fixed(com.flintclient.client.control.feature.GameTime.seconds(ticks[i], HudData.tickrate()), 1).ch('s');
 				} else {
 					text().integer(Math.round(left[i] * 100)).ch('%');
 				}

@@ -163,6 +163,12 @@ impl Jobs {
     pub fn dismiss(&self, id: &str) {
         self.map.lock().unwrap().retain(|j| j.id != id || j.state == "queued" || j.state == "running");
     }
+
+    /// The Downloads panel's Clear all: every finished entry (done, failed, cancelled) leaves the history; what is waiting or
+    /// running stays. Only the list changes: nothing installed is touched.
+    pub fn clear_finished(&self) {
+        self.map.lock().unwrap().retain(|j| j.state == "queued" || j.state == "running");
+    }
 }
 
 pub enum Expected<'a> {
@@ -192,7 +198,11 @@ pub fn listed_cap(listed: Option<u64>) -> u64 {
 
 pub fn host_allowed(url: &str, hosts: &[&str]) -> CmdResult<url::Url> {
     let parsed = url::Url::parse(url).map_err(|_| "Invalid download address".to_string())?;
-    if parsed.scheme() != "https" || !parsed.host_str().is_some_and(|h| hosts.contains(&h)) {
+    // Plain http only from this computer, and only when the list names it (a development CurseForge proxy, never a
+    // release build's list).
+    let loopback = matches!(parsed.host_str(), Some("127.0.0.1" | "localhost"));
+    let scheme_ok = parsed.scheme() == "https" || (parsed.scheme() == "http" && loopback);
+    if !scheme_ok || !parsed.host_str().is_some_and(|h| hosts.contains(&h)) {
         return Err(format!("Refused a download from an unverified source ({})", parsed.host_str().unwrap_or("unknown")));
     }
     Ok(parsed)
@@ -354,9 +364,52 @@ pub fn job_dismiss(state: State<'_, AppState>, id: String) {
     state.jobs.dismiss(&id);
 }
 
+#[tauri::command]
+pub fn jobs_clear_finished(state: State<'_, AppState>) {
+    state.jobs.clear_finished();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_come_over_https_from_listed_hosts_or_a_listed_loopback() {
+        assert!(host_allowed("https://cdn.modrinth.com/data/x.jar", &["cdn.modrinth.com"]).is_ok());
+        assert!(host_allowed("http://cdn.modrinth.com/data/x.jar", &["cdn.modrinth.com"]).is_err(), "plain http from the internet");
+        assert!(host_allowed("https://evil.example/x.jar", &["cdn.modrinth.com"]).is_err());
+        // A development CurseForge proxy on this computer serves its own files, only when the list names it.
+        let dev = crate::curseforge::CurseForge::from_env(false).download_hosts();
+        assert!(host_allowed("http://127.0.0.1:4810/files/5/1/a.jar", dev).is_err(), "release lists never name loopback");
+        assert!(host_allowed("http://127.0.0.1:4810/files/5/1/a.jar", &["edge.forgecdn.net", "127.0.0.1"]).is_ok());
+        assert!(host_allowed("http://10.0.0.5/x.jar", &["10.0.0.5"]).is_err(), "http only on loopback");
+        assert!(host_allowed("https://edge.forgecdn.net/files/1/2/a.jar", crate::curseforge::CDN).is_ok());
+    }
+
+    #[test]
+    fn clear_all_empties_the_history_but_keeps_what_is_still_working() {
+        let jobs = Jobs::with_slots(1);
+        let job = |id: &str, state: &str| Job {
+            id: id.into(),
+            kind: "install".into(),
+            profile_id: None,
+            title: id.into(),
+            state: state.into(),
+            stage: String::new(),
+            file: None,
+            bytes_done: 0,
+            bytes_total: None,
+            items_done: 0,
+            items_total: 0,
+            message: None,
+            result: None,
+            created_at: 0,
+        };
+        jobs.map.lock().unwrap().extend([job("a", "done"), job("b", "running"), job("c", "failed"), job("d", "queued"), job("e", "cancelled")]);
+        jobs.clear_finished();
+        let left: Vec<String> = jobs.list().into_iter().map(|j| j.id).collect();
+        assert_eq!(left, ["b", "d"]);
+    }
 
     #[test]
     fn a_download_may_be_as_large_as_its_source_lists() {

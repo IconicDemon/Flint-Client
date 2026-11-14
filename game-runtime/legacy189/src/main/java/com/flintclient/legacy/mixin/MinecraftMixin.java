@@ -14,10 +14,28 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * The client tick (Flint's mods tick before input is handled; the Flint menu key is read after), the mouse presses that reach
- * gameplay (CPS: Minecraft passes a mouse button as its number minus 100), the wheel while zoomed, and saving on quit.
+ * gameplay (CPS: Minecraft passes a mouse button as its number minus 100), the wheel while zoomed, saving on quit, and Flint's
+ * main menu in place of Minecraft's title screen.
  */
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
+	@org.spongepowered.asm.mixin.Shadow
+	public ClientWorld world;
+
+	/**
+	 * Every way a screen is shown: Minecraft's title screen (asked for, or shown because nothing is open without a world) becomes
+	 * the one the player chose, Flint's main menu or Minecraft's own, as {@code Gui.setScreen} does on every line
+	 * ({@code FlintTitleScreen.titleFor}); Flint's menu asked for after the player chose Minecraft's becomes Minecraft's.
+	 */
+	@org.spongepowered.asm.mixin.injection.ModifyVariable(method = "openScreen", at = @At("HEAD"), argsOnly = true)
+	private net.minecraft.client.gui.screen.Screen flint$chosenTitle(net.minecraft.client.gui.screen.Screen screen) {
+		try {
+			return com.flintclient.legacy.ui.TitleChoice.screenFor(screen, world == null);
+		} catch (RuntimeException | LinkageError e) {
+			return screen;
+		}
+	}
+
 	@Inject(method = "tick", at = @At("HEAD"))
 	private void flint$tick(CallbackInfo ci) {
 		Flint.tick((Minecraft) (Object) this);

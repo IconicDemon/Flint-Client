@@ -154,10 +154,11 @@ public final class MenuToggle extends FlintButton {
 		}
 		// The track: dark glass, lit from above, its edge brighter at the top.
 		float lift = Math.max(hover, focus);
-		c.roundLinear(x, y, w, h, r, 180.0F, new int[] {Palette.lerp(0xE01A1C22, 0xEA22252C, lift), Palette.lerp(0xE60C0D11, 0xEE111318, lift)},
+		c.roundLinear(x, y, w, h, r, 180.0F, Palette.light() ? new int[] {Palette.lerp(0xE6FFFDF9, 0xF0FFFFFF, lift), Palette.lerp(0xE6F4ECDF, 0xF0F8F1E6, lift)}
+			: new int[] {Palette.lerp(0xE01A1C22, 0xEA22252C, lift), Palette.lerp(0xE60C0D11, 0xEE111318, lift)},
 			Math.max(1, w));
 		int edge = Math.max(1, Math.round(c.scale() / 4.0F));
-		c.ringLinear(x, y, w, h, r, edge, 180.0F, new int[] {Palette.lerp(0x2EFFFFFF, 0x42FFFFFF, lift), 0x10FFFFFF}, 8);
+		c.ringLinear(x, y, w, h, r, edge, 180.0F, new int[] {Palette.lerp(Palette.tint(0x2EFFFFFF), Palette.tint(0x42FFFFFF), lift), Palette.tint(0x10FFFFFF)}, 8);
 
 		// The knob: under the shown half, stretching a little as it crosses; its glow turns from ember to grass on the way.
 		int kx0 = x + inset;
@@ -171,14 +172,14 @@ public final class MenuToggle extends FlintButton {
 		int knobY = y + inset;
 		int knobH = h - 2 * inset;
 		int kr = knobH / 2;
-		int tintColor = Palette.lerp(EMBER, GRASS_GREEN, k);
+		int tintColor = Palette.lerp(Palette.themed(EMBER), GRASS_GREEN, k);
 		// Its glow: a few soft layers in its colour.
 		for (int i = 3; i >= 1; i--) {
 			int spread = c.px(0.7F * i);
 			c.roundRect(knobX - spread, knobY - spread, knobW + 2 * spread, knobH + 2 * spread, kr + spread, Palette.withAlpha(tintColor, 0.05F));
 		}
-		int top = Palette.lerp(0xFF2E2620, 0xFF25301F, k);
-		int bottom = Palette.lerp(0xFF1C1713, 0xFF161D13, k);
+		int top = Palette.light() ? Palette.lerp(0xFFFBE9D9, 0xFFE6F2DC, k) : Palette.lerp(0xFF2E2620, 0xFF25301F, k);
+		int bottom = Palette.light() ? Palette.lerp(0xFFF4DDC8, 0xFFD9EACB, k) : Palette.lerp(0xFF1C1713, 0xFF161D13, k);
 		c.roundLinear(knobX, knobY, knobW, knobH, kr, 180.0F, new int[] {top, bottom}, Math.max(1, knobW));
 		c.ringLinear(knobX, knobY, knobW, knobH, kr, edge, 180.0F,
 			new int[] {Palette.withAlpha(tintColor, 0.85F), Palette.withAlpha(tintColor, 0.28F)}, 8);

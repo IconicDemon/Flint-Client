@@ -197,6 +197,18 @@ public final class LauncherLink {
 		call(request, QUICK_MILLIS);
 	}
 
+	/** The Flint app's theme as it names it ({@code ember}, {@code icecream}, {@code moss}, {@code bloodstone}, {@code dusk}, {@code aurora}). */
+	public @Nullable String theme() throws LinkException {
+		return string(call(op("theme"), QUICK_MILLIS, 4096), "theme");
+	}
+
+	/** Makes {@code theme} (one of the app's names) the Flint app's theme, as its Settings do: the player chose it in the game. */
+	public void setTheme(String theme) throws LinkException {
+		JsonObject request = op("setTheme");
+		request.addProperty("theme", theme);
+		call(request, QUICK_MILLIS, 4096);
+	}
+
 	/**
 	 * Starts Flint's Microsoft sign-in and returns its page, which this game opens (it is in front: a page Flint opened from
 	 * the background would stay behind the game). Flint still waits for Microsoft's redirect and makes the account. When a
@@ -289,13 +301,55 @@ public final class LauncherLink {
 	 * {@code timeoutMillis} and at most {@code maxReply} characters. What the answer holds is the caller's to check.
 	 */
 	public JsonObject request(String name, JsonObject fields, int timeoutMillis, int maxReply) throws LinkException {
+		return request(name, fields, timeoutMillis, maxReply, null);
+	}
+
+	/** {@link #request}, which {@code call} can cut short from another thread (it then throws {@link Call#CANCELLED}). */
+	public JsonObject request(String name, JsonObject fields, int timeoutMillis, int maxReply, @Nullable Call call) throws LinkException {
 		JsonObject request = op(name);
 		for (Map.Entry<String, JsonElement> field : fields.entrySet()) {
 			if (!request.has(field.getKey())) {
 				request.add(field.getKey(), field.getValue());
 			}
 		}
-		return call(request, timeoutMillis, maxReply);
+		return call(request, timeoutMillis, maxReply, call);
+	}
+
+	/**
+	 * A request another thread can cut short ({@link #cancel}): its connection is closed, so Flint lets go of a request it was
+	 * holding (a Friends poll waiting for a change), and the call throws a {@link LinkException} saying {@link #CANCELLED}.
+	 */
+	public static final class Call {
+		public static final String CANCELLED = "cancelled";
+		private @Nullable Socket socket;
+		private boolean cancelled;
+
+		public void cancel() {
+			Socket open;
+			synchronized (this) {
+				cancelled = true;
+				open = socket;
+			}
+			if (open != null) {
+				try {
+					open.close();
+				} catch (IOException e) {
+					// Closed already.
+				}
+			}
+		}
+
+		public synchronized boolean cancelled() {
+			return cancelled;
+		}
+
+		synchronized boolean start(Socket socket) {
+			if (cancelled) {
+				return false;
+			}
+			this.socket = socket;
+			return true;
+		}
 	}
 
 	private JsonObject op(String name) {
@@ -311,8 +365,15 @@ public final class LauncherLink {
 	}
 
 	private JsonObject call(JsonObject request, int timeoutMillis, int maxReply) throws LinkException {
+		return call(request, timeoutMillis, maxReply, null);
+	}
+
+	private JsonObject call(JsonObject request, int timeoutMillis, int maxReply, @Nullable Call handle) throws LinkException {
 		String line;
 		try (Socket socket = new Socket()) {
+			if (handle != null && !handle.start(socket)) {
+				throw new LinkException(Call.CANCELLED, false);
+			}
 			socket.connect(address, CONNECT_MILLIS);
 			socket.setSoTimeout(timeoutMillis);
 			OutputStream out = socket.getOutputStream();
@@ -320,7 +381,12 @@ public final class LauncherLink {
 			out.flush();
 			BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
 			line = readLine(in, maxReply);
+		} catch (LinkException e) {
+			throw e;
 		} catch (IOException e) {
+			if (handle != null && handle.cancelled()) {
+				throw new LinkException(Call.CANCELLED, false);
+			}
 			throw new LinkException("Flint isn't reachable.", true);
 		}
 		JsonObject reply;

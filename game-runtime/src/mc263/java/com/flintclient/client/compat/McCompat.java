@@ -66,6 +66,29 @@ public final class McCompat {
 	public static final boolean SHAPED_NAMETAGS = true;
 	/** Whether Minecraft has a friends list. */
 	public static final boolean FRIENDS = true;
+	/**
+	 * Whether the Right Shift menu shows the game and the HUD live around its panel (only the panel frosted, HUD mods drawn with
+	 * sample values where they have nothing to show): 26.3 for now; the other lines keep the blurred, dimmed backdrop.
+	 */
+	public static final boolean MENU_PREVIEW = true;
+
+	/** The effects the HUD preview shows while the player has none (made once; never applied to anyone). */
+	private static Object @Nullable [] sampleEffects;
+
+	/** Representative effects for the Effects preview into {@code out} (fixed times, never ticking); returns how many. */
+	public static int sampleEffects(Object[] out) {
+		Object[] samples = sampleEffects;
+		if (samples == null) {
+			samples = new Object[] {new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.SPEED, 95 * 20, 1),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.STRENGTH, 48 * 20, 0),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 170 * 20, 0),
+				new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.WEAKNESS, 26 * 20, 0)};
+			sampleEffects = samples;
+		}
+		int n = Math.min(out.length, samples.length);
+		System.arraycopy(samples, 0, out, 0, n);
+		return n;
+	}
 	/** The keyboard key type (26.3 keys keyboard keys by SDL scancode). */
 	public static final InputConstants.Type KEYBOARD = InputConstants.Type.KEYBOARD;
 	/** The GPU pipeline type's internal name, for mixin descriptors (annotation values may use this constant). */
@@ -589,5 +612,121 @@ public final class McCompat {
 	public static com.mojang.realmsclient.client.RealmsClient realmsClient(Minecraft minecraft) {
 		com.flintclient.client.module.account.SessionSwitch.forgetRealmsClient();
 		return com.mojang.realmsclient.client.RealmsClient.getOrCreate(minecraft);
+	}
+
+	// ---------- Flint's main menu: other mods' title-screen buttons, the Discord card's player ----------
+
+	/** Lays {@code screen} out at {@code width} × {@code height} GUI units without showing it (its init, and other mods' hooks on it). */
+	public static void initScreen(Screen screen, int width, int height) {
+		screen.init(width, height);
+	}
+
+	/** A left click in the middle of {@code widget} (another mod's title-screen button, pressed from Flint's menu); true when it took it. */
+	public static boolean clickWidget(net.minecraft.client.gui.components.AbstractWidget widget) {
+		double x = widget.getX() + widget.getWidth() / 2.0;
+		double y = widget.getY() + widget.getHeight() / 2.0;
+		net.minecraft.client.input.MouseButtonEvent event = new net.minecraft.client.input.MouseButtonEvent(x, y,
+			new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0));
+		boolean clicked = widget.mouseClicked(event, false);
+		widget.mouseReleased(event);
+		return clicked;
+	}
+
+	/**
+	 * Draws the player the game plays as (their own skin) wearing {@code cape} as a whole 3D player in the pixel box ({@code x},
+	 * {@code y}, {@code w}, {@code h}) of {@code frame}'s canvas, turned {@code yaw} degrees from facing the viewer, its cape leaning
+	 * {@code capeLean} degrees: Minecraft's own player renderer (as the inventory's player), from a render state alone. False where
+	 * the box is too small to draw in.
+	 */
+	public static boolean previewPlayer(com.flintclient.client.platform.Frame frame, com.flintclient.client.platform.Texture cape, int x, int y,
+		int w, int h, float yaw, float capeLean) {
+		int gui = com.flintclient.client.platform.Frame.windowGuiScale();
+		int x0 = Math.round(x / (float) gui);
+		int y0 = Math.round(y / (float) gui);
+		int x1 = Math.round((x + w) / (float) gui);
+		int y1 = Math.round((y + h) / (float) gui);
+		if (x1 - x0 < 4 || y1 - y0 < 8) {
+			return false;
+		}
+		net.minecraft.world.entity.player.PlayerSkin own = com.flintclient.client.module.account.AccountSkin.current();
+		net.minecraft.world.entity.player.PlayerSkin skin = new net.minecraft.world.entity.player.PlayerSkin(own.body(),
+			new net.minecraft.core.ClientAsset.ResourceTexture(cape.id(), cape.id()), own.elytra(), own.model(), own.secure());
+		net.minecraft.client.renderer.entity.state.AvatarRenderState state = new net.minecraft.client.renderer.entity.state.AvatarRenderState();
+		state.skin = skin;
+		state.entityType = playerType();
+		state.boundingBoxWidth = 0.6F;
+		state.boundingBoxHeight = 1.8F;
+		state.bodyRot = 180.0F + yaw;
+		state.yRot = 0.0F;
+		state.xRot = 0.0F;
+		state.lightCoords = 15728880;
+		state.capeLean = capeLean;
+		state.showCape = true;
+		org.joml.Quaternionf tilt = new org.joml.Quaternionf().rotateX((float) Math.toRadians(-6.0));
+		org.joml.Quaternionf rotation = new org.joml.Quaternionf().rotateZ((float) Math.PI).mul(tilt);
+		// Back from the canvas's pixels to GUI units, where the player is drawn.
+		frame.pushPlace(0, 0, gui);
+		try {
+			net.minecraft.client.gui.GuiGraphicsExtractor graphics = frame.graphics();
+			graphics.entity(state, (y1 - y0) / 2.1F, new org.joml.Vector3f(0.0F, 0.95F, 0.0F), rotation, tilt, x0, y0, x1, y1);
+		} finally {
+			frame.pop();
+		}
+		return true;
+	}
+	/**
+	 * The wardrobe's player ({@code control/rshift/WardrobeScreen}): as {@link #previewPlayer}, wearing {@code skin} (a skin to
+	 * try on, {@code slim} its arm model; null: the account's own) and {@code cape} (null: none), turned {@code yaw} degrees.
+	 */
+	public static boolean previewAvatar(com.flintclient.client.platform.Frame frame, com.flintclient.client.platform.@Nullable Texture skin,
+		boolean slim, com.flintclient.client.platform.@Nullable Texture cape, int x, int y, int w, int h, float yaw, float capeLean) {
+		int gui = com.flintclient.client.platform.Frame.windowGuiScale();
+		int x0 = Math.round(x / (float) gui);
+		int y0 = Math.round(y / (float) gui);
+		int x1 = Math.round((x + w) / (float) gui);
+		int y1 = Math.round((y + h) / (float) gui);
+		if (x1 - x0 < 4 || y1 - y0 < 8) {
+			return false;
+		}
+		net.minecraft.world.entity.player.PlayerSkin own = com.flintclient.client.module.account.AccountSkin.current();
+		net.minecraft.core.ClientAsset.Texture body = skin == null ? own.body() : new net.minecraft.core.ClientAsset.ResourceTexture(skin.id(), skin.id());
+		net.minecraft.world.entity.player.PlayerModelType model = skin == null ? own.model()
+			: slim ? net.minecraft.world.entity.player.PlayerModelType.SLIM : net.minecraft.world.entity.player.PlayerModelType.WIDE;
+		net.minecraft.core.ClientAsset.Texture capeAsset = cape == null ? null : new net.minecraft.core.ClientAsset.ResourceTexture(cape.id(), cape.id());
+		net.minecraft.world.entity.player.PlayerSkin look = new net.minecraft.world.entity.player.PlayerSkin(body, capeAsset, own.elytra(), model, own.secure());
+		net.minecraft.client.renderer.entity.state.AvatarRenderState state = new net.minecraft.client.renderer.entity.state.AvatarRenderState();
+		state.skin = look;
+		state.entityType = playerType();
+		state.boundingBoxWidth = 0.6F;
+		state.boundingBoxHeight = 1.8F;
+		state.bodyRot = 180.0F + yaw;
+		state.yRot = 0.0F;
+		state.xRot = 0.0F;
+		state.lightCoords = 15728880;
+		state.capeLean = capeLean;
+		state.showCape = cape != null;
+		org.joml.Quaternionf tilt = new org.joml.Quaternionf().rotateX((float) Math.toRadians(-6.0));
+		org.joml.Quaternionf rotation = new org.joml.Quaternionf().rotateZ((float) Math.PI).mul(tilt);
+		frame.pushPlace(0, 0, gui);
+		try {
+			net.minecraft.client.gui.GuiGraphicsExtractor graphics = frame.graphics();
+			graphics.entity(state, (y1 - y0) / 2.1F, new org.joml.Vector3f(0.0F, 0.95F, 0.0F), rotation, tilt, x0, y0, x1, y1);
+		} finally {
+			frame.pop();
+		}
+		return true;
+	}
+
+	/**
+	 * The wardrobe's Apply: {@code skin} (a 64 × 64 texture) on the player's own model at once, first and third person, until
+	 * the next join looks it up anew ({@link OwnSkin}). True when it is on.
+	 */
+	public static boolean wearOwnSkin(com.flintclient.client.platform.Texture skin, boolean slim) {
+		java.util.UUID me = Minecraft.getInstance().getUser().getProfileId();
+		if (me == null) {
+			return false;
+		}
+		OwnSkin.wear(skin.id(), slim, me);
+		return true;
 	}
 }

@@ -13,6 +13,7 @@ import com.flintclient.legacy.mods.Direction;
 import com.flintclient.legacy.mods.Fps;
 import com.flintclient.legacy.mods.HitColor;
 import com.flintclient.legacy.mods.ItemCounter;
+import com.flintclient.legacy.mods.ItemCustomizer;
 import com.flintclient.legacy.mods.Keystrokes;
 import com.flintclient.legacy.mods.MotionBlur;
 import com.flintclient.legacy.mods.MusicPlayer;
@@ -49,6 +50,7 @@ public final class Modules {
 	public final Fps fps = new Fps();
 	public final HitColor hitColor = new HitColor();
 	public final ItemCounter itemCounter = new ItemCounter();
+	public final ItemCustomizer itemCustomizer = new ItemCustomizer();
 	public final Keystrokes keystrokes = new Keystrokes();
 	public final MotionBlur motionBlur = new MotionBlur();
 	public final MusicPlayer musicPlayer = new MusicPlayer();
@@ -73,7 +75,7 @@ public final class Modules {
 	Modules() {
 		List<Module> list = new ArrayList<Module>();
 		Collections.addAll(list, armorStatus, blockOverlay, brightness, clock, combo, coordinates, cps, crosshair, dayCounter, direction, fps,
-			hitColor, itemCounter, keystrokes, motionBlur, musicPlayer, nametags, ping, potionEffects, reach, saturation, scoreboard,
+			hitColor, itemCounter, itemCustomizer, keystrokes, motionBlur, musicPlayer, nametags, ping, potionEffects, reach, saturation, scoreboard,
 			subtitles, tntTimer, toggleSprint, uhcOverlay, waypoints, zoom);
 		Collections.sort(list, new Comparator<Module>() {
 			@Override

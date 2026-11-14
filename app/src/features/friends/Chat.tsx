@@ -3,7 +3,7 @@ import { api } from "../../lib/api";
 import { privateParts, looksPrivate } from "../../lib/credentials";
 import { formatLocale, useT } from "../../lib/i18n";
 import { useSettings } from "../../lib/settings";
-import { chatItems, COUNTER_FROM, isPending, MAX_MESSAGE, mergeMessages, type ChatMessage, type Friend, type Me, type PendingMessage } from "../../lib/social";
+import { chatItems, COUNTER_FROM, isPending, MAX_MESSAGE, mergeMessages, unsent, type ChatMessage, type Friend, type Me, type PendingMessage } from "../../lib/social";
 import { Button, IconButton, Spinner } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { Modal, Tooltip } from "../../ui/overlays";
@@ -43,7 +43,16 @@ export function ChatPanel({ friend, me, onGift, onPin }: { friend: Friend; me: M
     () => mergeMessages(older, conversation?.messages ?? [], confirmed.filter((m) => m.to === friend.uuid)),
     [older, conversation, confirmed, friend.uuid],
   );
-  const mine = useMemo(() => pending.filter((p) => p.to === friend.uuid), [pending, friend.uuid]);
+  const mine = useMemo(() => unsent(pending, messages, friend.uuid), [pending, messages, friend.uuid]);
+  const typing = snapshot.typing?.includes(friend.uuid) ?? false;
+  // "Typing…" for them: at most every 3 s (the backend sends it only while live).
+  const typedAt = useRef(0);
+  const typed = () => {
+    const now = Date.now();
+    if (now - typedAt.current < 3000) return;
+    typedAt.current = now;
+    void api.socialTyping(friend.uuid).catch(() => {});
+  };
   const items = useMemo(() => chatItems([...messages, ...mine], me.uuid), [messages, mine, me.uuid]);
   const fewMessages = conversation?.loaded && messages.length < PAGE;
 
@@ -179,7 +188,10 @@ export function ChatPanel({ friend, me, onGift, onPin }: { friend: Friend; me: M
         )}
       </div>
 
-      <Composer friend={friend} onSend={(body, sensitive) => send(friend.uuid, body, sensitive)} onSent={() => (pinnedToBottom.current = true)} />
+      <div className={`chat-typing faint ${typing ? "is-on" : ""}`} aria-live="polite">
+        {typing ? t("friends.chat.typing", { name: friend.name }) : ""}
+      </div>
+      <Composer friend={friend} onSend={(body, sensitive) => send(friend.uuid, body, sensitive)} onSent={() => (pinnedToBottom.current = true)} onTyping={typed} />
     </>
   );
 }
@@ -203,7 +215,7 @@ function DaySeparator({ at }: { at: number }) {
 }
 
 /** The message box: Enter sends, Shift+Enter starts a new line; anything that looks private is asked about first. */
-function Composer({ friend, onSend, onSent }: { friend: Friend; onSend: (body: string, sensitive: boolean) => void; onSent: () => void }) {
+function Composer({ friend, onSend, onSent, onTyping }: { friend: Friend; onSend: (body: string, sensitive: boolean) => void; onSent: () => void; onTyping: () => void }) {
   const t = useT();
   const [draft, setDraft] = useState("");
   const [check, setCheck] = useState<string | null>(null);
@@ -245,7 +257,10 @@ function Composer({ friend, onSend, onSent }: { friend: Friend; onSend: (body: s
           value={draft}
           placeholder={t("friends.chat.placeholder", { name: friend.name })}
           aria-label={t("friends.chat.placeholder", { name: friend.name })}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (e.target.value.trim()) onTyping();
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

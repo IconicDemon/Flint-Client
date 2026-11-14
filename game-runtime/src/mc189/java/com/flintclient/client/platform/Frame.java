@@ -74,6 +74,16 @@ public final class Frame {
 		return SHARED;
 	}
 
+	/** The frame under newer Minecraft's GUI graphics as Flint's main menu hands them on ({@code mc.GuiGraphicsExtractor}): this one. */
+	public static Frame of(com.flintclient.client.mc.GuiGraphicsExtractor graphics) {
+		return SHARED;
+	}
+
+	/** Newer Minecraft's GUI graphics over this frame, for the main menu's textures and turns ({@code mc.GuiGraphicsExtractor}). */
+	public com.flintclient.client.mc.GuiGraphicsExtractor graphics() {
+		return com.flintclient.client.mc.GuiGraphicsExtractor.get();
+	}
+
 	/** What this frame draws into, for telling frames apart ({@code ui.FlintFrame}). */
 	public Object target() {
 		return this;
@@ -192,6 +202,26 @@ public final class Frame {
 		m01 *= k;
 		m10 *= k;
 		m11 *= k;
+	}
+
+	/**
+	 * Turns what follows by {@code radians} clockwise about the pixel point ({@code cx}, {@code cy}), in place (no save: pair it
+	 * with a {@link #pushTranslate}{@code (0, 0)} and {@link #pop}, as the main menu's account chevron does through
+	 * {@code mc.GuiGraphicsExtractor.pose()}).
+	 */
+	public void rotate(float radians, float cx, float cy) {
+		translate(cx, cy);
+		float c = (float) Math.cos(radians);
+		float s = (float) Math.sin(radians);
+		float a = m00;
+		float b = m01;
+		float d = m10;
+		float e = m11;
+		m00 = a * c + b * s;
+		m01 = -a * s + b * c;
+		m10 = d * c + e * s;
+		m11 = -d * s + e * c;
+		translate(-cx, -cy);
 	}
 
 	/** Moves what follows by ({@code dx}, {@code dy}) pixels until {@link #pop}. */
@@ -418,6 +448,7 @@ public final class Frame {
 
 	/** Draws every pending batch now, in order. */
 	private void flush() {
+		runPendingBlur();
 		if (slots == 0) {
 			return;
 		}
@@ -608,8 +639,64 @@ public final class Frame {
 	public void nextLayer() {
 	}
 
-	/** 1.8.9 has no menu blur: false (nothing blurred). */
+	private static final int[] NO_RECTS = new int[0];
+	/** At most this many rectangles keep a clipped blur (as on 26.x). */
+	public static final int BLUR_CLIPS = 8;
+	private static final int[] CLIPS = new int[4 * BLUR_CLIPS];
+	/** A blur asked for this frame and not run yet: -2 none, -1 the whole screen, else the clip's rectangle count. */
+	private static int pendingBlur = -2;
+
+	/**
+	 * Blurs everything drawn so far (Flint's own menu blur on 1.8.9, legacy/ui/MenuBlur189: Minecraft 1.8.9 has none), once a
+	 * frame; false when this frame was blurred already or the blur is off. It runs just before the next drawing (so a clip
+	 * asked for right after, {@link #clipBlur}, keeps it to the window's rectangles: the frosted panel over the live game).
+	 */
 	public boolean blurBehind() {
-		return false;
+		if (!com.flintclient.legacy.ui.MenuBlur189.on() || com.flintclient.legacy.ui.MenuBlur189.blurredThisFrame()) {
+			return false;
+		}
+		flush();
+		com.flintclient.legacy.ui.MenuBlur189.claim();
+		pendingBlur = -1;
+		return true;
+	}
+
+	/** Keeps the blur {@link #blurBehind} was just granted to the rectangles {@link #clipBlurTo} adds (none yet: nothing). */
+	public static void clipBlur() {
+		if (pendingBlur == -1) {
+			pendingBlur = 0;
+		}
+	}
+
+	/** Adds a rectangle (window pixels from the top left) to this frame's clipped blur; empty ones are left out. */
+	public static void clipBlurTo(int x0, int y0, int x1, int y1) {
+		if (pendingBlur < 0 || pendingBlur >= BLUR_CLIPS || x1 <= x0 || y1 <= y0) {
+			return;
+		}
+		int at = 4 * pendingBlur++;
+		CLIPS[at] = x0;
+		CLIPS[at + 1] = y0;
+		CLIPS[at + 2] = x1;
+		CLIPS[at + 3] = y1;
+	}
+
+	/** Drops a blur that was asked for (the screen that asked it closed before it ran). */
+	public static void clipBlurOff() {
+		pendingBlur = -2;
+	}
+
+	/** Runs the blur asked for, before what was drawn after the ask (called first thing when drawing). */
+	private static void runPendingBlur() {
+		int n = pendingBlur;
+		if (n == -2 || n == 0) {
+			// Nothing asked, or a clip whose rectangles aren't named yet (the window names them as it draws): later.
+			return;
+		}
+		pendingBlur = -2;
+		if (n == -1) {
+			com.flintclient.legacy.ui.MenuBlur189.blur(NO_RECTS, -1);
+		} else if (n > 0) {
+			com.flintclient.legacy.ui.MenuBlur189.blur(CLIPS, n);
+		}
 	}
 }

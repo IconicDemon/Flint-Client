@@ -31,8 +31,8 @@ public final class Mc263ChatScreen {
 	private static final HookGuard GUARD = new HookGuard("chat screen", (path, error) -> FlintClient.LOGGER.warn(
 		"Flint: the {} hook failed; it's off for this session", path, error));
 	private static final String[] TABS = {"All", "Chat", "Server", "Private", ""};
-	/** Flint's orange, for the tab showing and the search box in use. */
-	private static final int ACCENT = 0xFFFF8139;
+	/** Flint's orange (the theme's accent on another theme), for the tab showing and the search box in use. */
+	private static final int EMBER_ACCENT = 0xFFFF8139;
 	private static final int ROW_HEIGHT = 11;
 	private static final int SEARCH_WIDTH = 110;
 	/** SDL scancodes: Tab, Page Up, Page Down. */
@@ -155,7 +155,7 @@ public final class Mc263ChatScreen {
 					boolean hover = mouseX >= x && mouseX < x + w && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
 					g.fill(x, rowY, x + w, rowY + ROW_HEIGHT, hover ? 0xC0141414 : 0xA0000000);
 					if (i == showing) {
-						g.fill(x, rowY + ROW_HEIGHT - 1, x + w, rowY + ROW_HEIGHT, ACCENT);
+						g.fill(x, rowY + ROW_HEIGHT - 1, x + w, rowY + ROW_HEIGHT, com.flintclient.client.render.Palette.themed(EMBER_ACCENT));
 					}
 					g.text(font, label, x + 4, rowY + 2, i == showing ? 0xFFFFFFFF : hover ? 0xFFD9D9D9 : 0xFF8A8A8A, false);
 					TAB_X[i] = x;
@@ -176,7 +176,7 @@ public final class Mc263ChatScreen {
 					box.setWidth(right - left - 6);
 					g.fill(left, rowY, right, rowY + ROW_HEIGHT, searchFocused ? 0xD0000000 : 0xA0000000);
 					if (searchFocused || !box.getValue().isEmpty()) {
-						g.fill(left, rowY + ROW_HEIGHT - 1, right, rowY + ROW_HEIGHT, searchFocused ? ACCENT : 0xFF5A5A5A);
+						g.fill(left, rowY + ROW_HEIGHT - 1, right, rowY + ROW_HEIGHT, searchFocused ? com.flintclient.client.render.Palette.themed(EMBER_ACCENT) : 0xFF5A5A5A);
 					}
 					box.extractRenderState(g, mouseX, mouseY, delta);
 					searchRight = right;

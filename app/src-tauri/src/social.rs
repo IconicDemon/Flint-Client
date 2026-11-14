@@ -16,6 +16,9 @@
 //!   is merged into the last one and compared with it: the interface gets `social:update` (the whole snapshot) and
 //!   `social:event` (a request, an accepted request, a message, a friend coming online), never for the first sync after
 //!   Flint starts or an account signs in.
+//! - **Live** (`live.rs`): a second task keeps the Flint Store's push socket open, so what a friend does arrives at once and
+//!   is applied to the same state; while it is live the sync slows to every 10 s with a chat open and every 60 s otherwise.
+//!   Writes go through the Store, which tells the other player (the RPCs directly where it can't).
 //! - **Nothing is fatal**: offline, the last state stays on screen marked offline and is retried; a server without the
 //!   functions (PostgREST 404, PGRST202) is "not available right now" and asked again every 10 minutes; a build without
 //!   the project's address says Friends isn't available in it.
@@ -27,6 +30,12 @@
 #[cfg(test)]
 pub mod fake;
 pub mod game;
+pub mod live;
+pub mod emote_room;
+#[cfg(test)]
+mod emote_room_tests;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod tests;
 
@@ -69,6 +78,10 @@ pub const CONVERSATION_CAP: usize = 200;
 pub const MAX_BODY: usize = 1000;
 const MAX_JSON: usize = 4 * 1024 * 1024;
 pub const STATUSES: [&str; 4] = ["online", "busy", "away", "invisible"];
+/// Who sees when the player was last online (a server that has the setting sends it back with `me`).
+pub const LAST_SEEN: [&str; 2] = ["friends", "nobody"];
+/// Who may send the player gifts.
+pub const GIFTS: [&str; 3] = ["everyone", "friends", "nobody"];
 
 /// How often Friends may ask, whatever wakes it: syncs at least `min_gap` apart (an open chat's 4 s), and after "expired"
 /// a new sign-in at most every `resign_gap`, so a session that keeps ending can never make a loop.
@@ -167,6 +180,13 @@ pub struct Me {
     pub name: String,
     pub status: String,
     pub allow_requests: bool,
+    /// Who sees when the player was last online ([`LAST_SEEN`]); none from a server without the setting (the game and the
+    /// app then don't offer it, and never send it: a server without it would refuse the whole change).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+    /// Who may send the player gifts ([`GIFTS`]); none from a server without the setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gifts: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -206,6 +226,10 @@ pub struct Message {
     pub sensitive: bool,
     pub at: Option<i64>,
     pub read: bool,
+    /// The sender's id for it (`flint_message_send`'s `p_client_id`), when the server says: the interface replaces its
+    /// "sending" copy with this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -254,6 +278,10 @@ pub struct Snapshot {
     pub focus: Option<String>,
     /// What is shown is the last run's (kept on disk), not yet confirmed by a sync: no status is live.
     pub stale: bool,
+    /// The Store's push socket is open: what friends do arrives at once.
+    pub live: bool,
+    /// Friends typing to the player now.
+    pub typing: Vec<String>,
 }
 
 impl Snapshot {
@@ -321,6 +349,8 @@ pub fn parse_me(value: &Value) -> Option<Me> {
         name: name_of(&value["name"])?,
         status: status_of(&value["status"], &STATUSES, "online"),
         allow_requests: value["allow_requests"].as_bool().unwrap_or(true),
+        last_seen: value["last_seen"].as_str().filter(|v| LAST_SEEN.contains(v)).map(str::to_owned),
+        gifts: value["gifts"].as_str().filter(|v| GIFTS.contains(v)).map(str::to_owned),
     })
 }
 
@@ -350,6 +380,7 @@ pub fn parse_message(value: &Value) -> Option<Message> {
         sensitive: value["sensitive"].as_bool().unwrap_or(false),
         at: millis(&value["at"]),
         read: value["read"].as_bool().unwrap_or(false),
+        client_id: value["client_id"].as_str().filter(|id| id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).map(str::to_ascii_lowercase),
     })
 }
 
@@ -465,6 +496,33 @@ fn code_of(value: &Value) -> String {
     }
 }
 
+/// An RPC's answer (or the Store's, which is the RPC's) read by its HTTP status and `ok`.
+pub(crate) fn answer_of(name: &str, status: u16, body: Value) -> Result<Value, Fail> {
+    match status {
+        200..=299 => {}
+        // PGRST202: no such function (yet). A 404 without it is the same to the player.
+        404 => return Err(Fail::Unavailable),
+        408 | 500..=599 => return Err(Fail::Offline),
+        429 => return Err(Fail::Refused("rate_limited".into())),
+        _ => return Err(Fail::Invalid),
+    }
+    if !body.is_object() {
+        return Err(Fail::Invalid);
+    }
+    if body["ok"] == false {
+        let code = code_of(&body["error"]);
+        if code == "invalid" {
+            // Flint sent something the server couldn't take: a bug to find, shown as a calm "didn't work".
+            eprintln!("[flint] Friends: {name} refused its arguments as invalid");
+        }
+        return Err(if code == "expired" { Fail::Expired } else { Fail::Refused(code) });
+    }
+    if body["ok"] != true {
+        return Err(Fail::Invalid);
+    }
+    Ok(body)
+}
+
 // ---------- the account Friends is for ----------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -555,6 +613,13 @@ struct Inner {
     stale: bool,
     /// The view last written to disk (written again only when it changes).
     saved_view: Option<CachedView>,
+    /// Friends typing to the player, until when (`live.rs`).
+    typing: HashMap<String, Instant>,
+    /// Outgoing requests that just went away (uuid → name, when), so a push of the new friend says "accepted".
+    gone_outgoing: HashMap<String, (String, Instant)>,
+    /// While a sync is on its way: the pushes applied since it left, applied again over its answer (which may be from
+    /// before them), so nothing pushed disappears until the next sync.
+    journal: Option<Vec<live::LiveEvent>>,
 }
 
 impl Inner {
@@ -608,11 +673,24 @@ pub struct Social {
     pub wake: Notify,
     sign_in: tokio::sync::Mutex<()>,
     pacing: Pacing,
+    pub(crate) live: live::Live,
+    /// The emote room of the server a game plays on (emote_room.rs).
+    pub(crate) emotes: emote_room::Room,
 }
 
 impl Social {
     pub fn new(http: reqwest::Client, endpoints: Option<Endpoints>) -> Self {
-        Self { http, endpoints, inner: Mutex::default(), focus: Mutex::default(), wake: Notify::new(), sign_in: tokio::sync::Mutex::new(()), pacing: PACING }
+        Self {
+            http,
+            endpoints,
+            inner: Mutex::default(),
+            focus: Mutex::default(),
+            wake: Notify::new(),
+            sign_in: tokio::sync::Mutex::new(()),
+            pacing: PACING,
+            live: live::Live::new(None),
+            emotes: emote_room::Room::default(),
+        }
     }
 
     pub fn configured(&self) -> bool {
@@ -640,6 +718,9 @@ impl Social {
 
     pub fn snapshot(&self) -> Snapshot {
         let inner = self.inner.lock().unwrap();
+        let now = Instant::now();
+        let mut typing: Vec<String> = inner.typing.iter().filter(|(_, until)| **until > now).map(|(uuid, _)| uuid.clone()).collect();
+        typing.sort();
         Snapshot {
             configured: self.configured(),
             phase: if self.configured() { inner.phase } else { Phase::Unavailable },
@@ -654,10 +735,12 @@ impl Social {
             synced_at: inner.synced_at,
             focus: self.focus.lock().unwrap().clone(),
             stale: inner.stale,
+            live: self.live_up(),
+            typing,
         }
     }
 
-    /// The chat open on the Friends page (polled every 4 s while it is). Returns whether it changed.
+    /// The chat open on the Friends page (polled faster while it is). Returns whether it changed.
     pub fn set_focus(&self, chat: Option<String>) -> bool {
         let chat = chat.as_deref().and_then(canonical);
         let mut focus = self.focus.lock().unwrap();
@@ -666,11 +749,14 @@ impl Social {
         changed
     }
 
-    fn poll_interval(&self) -> Duration {
-        if self.focus.lock().unwrap().is_some() {
-            CHAT_POLL
-        } else {
-            IDLE_POLL
+    /// The next sync's wait: 4 s with a chat open (in the app or a game) and 15 s otherwise; while the push socket is live,
+    /// 10 s and 60 s (it is only the safety net then, and the presence heartbeat).
+    pub fn poll_interval(&self) -> Duration {
+        match (self.live_up(), self.chat_open()) {
+            (false, true) => CHAT_POLL,
+            (false, false) => IDLE_POLL,
+            (true, true) => live::LIVE_CHAT_POLL,
+            (true, false) => live::LIVE_IDLE_POLL,
         }
     }
 
@@ -698,30 +784,7 @@ impl Social {
             .map_err(|_| Fail::Offline)?;
         let status = response.status().as_u16();
         let bytes = read_capped(response).await?;
-        let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        match status {
-            200..=299 => {}
-            // PGRST202: no such function (yet). A 404 without it is the same to the player.
-            404 => return Err(Fail::Unavailable),
-            408 | 500..=599 => return Err(Fail::Offline),
-            429 => return Err(Fail::Refused("rate_limited".into())),
-            _ => return Err(Fail::Invalid),
-        }
-        if !body.is_object() {
-            return Err(Fail::Invalid);
-        }
-        if body["ok"] == false {
-            let code = code_of(&body["error"]);
-            if code == "invalid" {
-                // Flint sent something the server couldn't take: a bug to find, shown as a calm "didn't work".
-                eprintln!("[flint] Friends: {name} refused its arguments as invalid");
-            }
-            return Err(if code == "expired" { Fail::Expired } else { Fail::Refused(code) });
-        }
-        if body["ok"] != true {
-            return Err(Fail::Invalid);
-        }
-        Ok(body)
+        answer_of(name, status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
     }
 
     /// Mojang's `session/minecraft/join`, as a Minecraft client does before joining a server. The access token goes to
@@ -874,7 +937,7 @@ impl Social {
         let mut attempt = 0;
         loop {
             let (who, token) = self.session(mc).await?;
-            match self.rpc(name, args(&token)).await {
+            match self.write(name, args(&token)).await {
                 Err(Fail::Expired) if attempt == 0 => {
                     attempt += 1;
                     {
@@ -899,13 +962,22 @@ impl Social {
 
     /// The state from the server, merged into what was known; events for what changed since the previous sync.
     async fn sync(&self, mc: &dyn Minecraft) -> Result<Vec<SocialEvent>, Fail> {
-        let after = self.inner.lock().unwrap().last_message;
-        let (who, body) = self.authed(mc, "flint_social_state", |token| json!({ "p_token": token, "p_after_message": after })).await?;
-        let answer = parse_state(&body).ok_or(Fail::Invalid)?;
-        if answer.me.uuid != who.uuid {
-            return Err(Fail::Invalid);
+        let after = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.journal = Some(Vec::new());
+            inner.last_message
+        };
+        let result = async {
+            let (who, body) = self.authed(mc, "flint_social_state", |token| json!({ "p_token": token, "p_after_message": after })).await?;
+            let answer = parse_state(&body).ok_or(Fail::Invalid)?;
+            if answer.me.uuid != who.uuid {
+                return Err(Fail::Invalid);
+            }
+            Ok(self.merge(&who, answer))
         }
-        Ok(self.merge(&who, answer))
+        .await;
+        self.inner.lock().unwrap().journal = None;
+        result
     }
 
     fn merge(&self, who: &Identity, answer: StateAnswer) -> Vec<SocialEvent> {
@@ -932,27 +1004,51 @@ impl Social {
                     events.push(SocialEvent::Online { uuid: friend.uuid.clone(), name: friend.name.clone(), status: friend.status.clone() });
                 }
             }
-            for message in answer.messages.iter().filter(|m| m.id > inner.last_message && m.from != who.uuid) {
+            // A message the push already placed was announced then.
+            let placed = |m: &Message| inner.conversations.get(&m.from).is_some_and(|c| c.messages.binary_search_by_key(&m.id, |x| x.id).is_ok());
+            for message in answer.messages.iter().filter(|m| m.id > inner.last_message && m.from != who.uuid && !placed(m)) {
                 let name = answer.friends.iter().find(|f| f.uuid == message.from).map(|f| f.name.clone()).unwrap_or_default();
                 events.push(SocialEvent::Message { name, message: message.clone() });
             }
         }
         inner.last_message = answer.messages.iter().map(|m| m.id).max().unwrap_or(0).max(inner.last_message);
+        let answered: HashSet<i64> = answer.messages.iter().map(|m| m.id).collect();
         inner.add_messages(&answer.messages);
         // A friend removed (by either side) takes the conversation along.
         let friends: HashSet<&str> = answer.friends.iter().map(|f| f.uuid.as_str()).collect();
         inner.conversations.retain(|uuid, _| friends.contains(uuid.as_str()));
+        inner.typing.retain(|uuid, _| friends.contains(uuid.as_str()));
         inner.me = Some(answer.me);
         inner.friends = answer.friends;
         inner.incoming = answer.incoming;
         inner.outgoing = answer.outgoing;
         inner.synced = true;
         inner.synced_at = Some(crate::store::now_millis());
+        // What was pushed while this sync was on its way (announced then), over the answer that may predate it.
+        for event in inner.journal.take().unwrap_or_default() {
+            if let live::LiveEvent::Message(m) = &event {
+                // Pushed after the server counted: its unread count doesn't have it yet.
+                let kept = inner.conversations.get(&m.from).is_some_and(|c| c.messages.binary_search_by_key(&m.id, |x| x.id).is_ok());
+                if kept && !answered.contains(&m.id) && m.from != who.uuid && !m.read {
+                    if let Some(friend) = inner.friends.iter_mut().find(|f| f.uuid == m.from) {
+                        friend.unread = friend.unread.saturating_add(1);
+                    }
+                }
+            }
+            inner.apply(event);
+        }
         events
     }
 
-    /// One pass of the background task: follow the active account, sync, and say when to come back.
+    /// One pass of the background task: follow the active account, sync, and say when to come back. The push socket then
+    /// looks at the session (it opens once there is one, and follows a switch).
     pub async fn step(&self, mc: &dyn Minecraft) -> Step {
+        let step = self.sync_step(mc).await;
+        self.live.kick.notify_one();
+        step
+    }
+
+    async fn sync_step(&self, mc: &dyn Minecraft) -> Step {
         let idle = Step { events: Vec::new(), wait: SIGNED_OUT_CHECK };
         if !self.configured() {
             return Step { wait: Duration::from_secs(3600), ..idle };
@@ -978,10 +1074,14 @@ impl Social {
         {
             let mut inner = self.inner.lock().unwrap();
             if inner.me_uuid() == Some(who.uuid.as_str()) {
-                // However often it's woken (focus changes, actions), never faster than an open chat's poll.
-                if let Some(since) = inner.last_sync.map(|at| at.elapsed()).filter(|since| *since < self.pacing.min_gap) {
-                    return Step { wait: self.pacing.min_gap - since, ..idle };
+                // However often it's woken (focus changes, actions), never faster than an open chat's poll; one the push
+                // socket asks for (it is live again, or said `resync`) may come a second after the last.
+                let urgent = self.live.urgent.load(std::sync::atomic::Ordering::Relaxed);
+                let gap = if urgent { self.pacing.min_gap.min(live::URGENT_GAP) } else { self.pacing.min_gap };
+                if let Some(since) = inner.last_sync.map(|at| at.elapsed()).filter(|since| *since < gap) {
+                    return Step { wait: gap - since, ..idle };
                 }
+                self.live.urgent.store(false, std::sync::atomic::Ordering::Relaxed);
                 inner.last_sync = Some(Instant::now());
                 if !inner.synced && inner.phase != Phase::Error {
                     inner.phase = Phase::Connecting;
@@ -1055,9 +1155,17 @@ impl Social {
 
     // ---------- actions ----------
 
-    pub async fn settings(&self, mc: &dyn Minecraft, status: Option<&str>, allow_requests: Option<bool>) -> Result<Me, Fail> {
+    /// Changes what is given (none: left as it is). `last_seen` and `gifts` are sent only when given: a server without
+    /// those settings (its `me` has no `last_seen`/`gifts`) refuses a change that names them.
+    pub async fn settings(&self, mc: &dyn Minecraft, status: Option<&str>, allow_requests: Option<bool>, last_seen: Option<&str>, gifts: Option<&str>) -> Result<Me, Fail> {
         if status.is_some_and(|s| !STATUSES.contains(&s)) {
             return Err(Fail::Refused("invalid_status".into()));
+        }
+        if last_seen.is_some_and(|v| !LAST_SEEN.contains(&v)) {
+            return Err(Fail::Refused("invalid_last_seen".into()));
+        }
+        if gifts.is_some_and(|v| !GIFTS.contains(&v)) {
+            return Err(Fail::Refused("invalid_gifts".into()));
         }
         let (who, body) = self
             .authed(mc, "flint_social_settings", |token| {
@@ -1068,9 +1176,22 @@ impl Social {
                 if let Some(allow) = allow_requests {
                     args["p_allow_requests"] = json!(allow);
                 }
+                if let Some(last_seen) = last_seen {
+                    args["p_last_seen"] = json!(last_seen);
+                }
+                if let Some(gifts) = gifts {
+                    args["p_gifts"] = json!(gifts);
+                }
                 args
             })
-            .await?;
+            .await
+            .map_err(|failure| match failure {
+                // The server refusing a privacy value: said as the setting it was about.
+                Fail::Refused(code) if code == "invalid" && (last_seen.is_some() != gifts.is_some()) => {
+                    Fail::Refused(if last_seen.is_some() { "invalid_last_seen" } else { "invalid_gifts" }.into())
+                }
+                other => other,
+            })?;
         let me = parse_me(&body["me"]).filter(|me| me.uuid == who.uuid).ok_or(Fail::Invalid)?;
         let mut inner = self.inner.lock().unwrap();
         if inner.me_uuid() == Some(who.uuid.as_str()) {
@@ -1347,33 +1468,61 @@ impl Minecraft for AppMinecraft {
     }
 }
 
-fn publish(app: &AppHandle, social: &Social) {
-    let _ = app.emit("social:update", social.snapshot());
+/// The app's window: events and snapshots as `social:event` and `social:update`.
+struct AppOut(AppHandle);
+
+impl live::Out for AppOut {
+    fn event(&self, event: &SocialEvent) {
+        let _ = self.0.emit("social:event", event);
+    }
+    fn update(&self, snapshot: &Snapshot) {
+        let _ = self.0.emit("social:update", snapshot);
+    }
 }
 
-/// Starts the background task (once, at start-up). Signed out it only looks at Flint's account list.
-pub fn start(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mc = AppMinecraft { app: app.clone(), interactive: false };
-        let state = app.state::<AppState>();
-        let social = &state.social;
-        let mut last: Option<Snapshot> = None;
-        loop {
-            let step = social.step(&mc).await;
-            for event in &step.events {
-                let _ = app.emit("social:event", event);
-            }
-            let snapshot = social.snapshot();
-            if last.as_ref().is_none_or(|l| !l.same_as(&snapshot)) {
-                let _ = app.emit("social:update", &snapshot);
-                last = Some(snapshot);
-            }
-            tokio::select! {
-                _ = tokio::time::sleep(step.wait) => {}
-                _ = social.wake.notified() => {}
-            }
+fn publish(app: &AppHandle, social: &Social) {
+    social.publish_to(&AppOut(app.clone()));
+}
+
+/// The sync task: steps, announces what changed, and waits for the next step (or a wake).
+pub async fn run_sync(social: &Social, mc: &dyn Minecraft, out: &dyn live::Out) {
+    let mut last: Option<Snapshot> = None;
+    loop {
+        let step = social.step(mc).await;
+        for event in &step.events {
+            out.event(event);
         }
+        let snapshot = social.snapshot();
+        if last.as_ref().is_none_or(|l| !l.same_as(&snapshot)) {
+            out.update(&snapshot);
+            social.changed();
+            last = Some(snapshot);
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(step.wait) => {}
+            _ = social.wake.notified() => {}
+        }
+    }
+}
+
+/// Starts the background tasks (once, at start-up): the sync, and the push socket. Signed out they only look at Flint's
+/// account list.
+pub fn start(app: &AppHandle) {
+    let sync = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mc = AppMinecraft { app: sync.clone(), interactive: false };
+        let state = sync.state::<AppState>();
+        run_sync(&state.social, &mc, &AppOut(sync.clone())).await;
+    });
+    let socket = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = socket.state::<AppState>();
+        live::run(&state.social, live::TIMING, &AppOut(socket.clone())).await;
+    });
+    let room = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = room.state::<AppState>();
+        emote_room::run(&state.social, live::TIMING).await;
     });
 }
 
@@ -1386,7 +1535,13 @@ pub fn social_snapshot(state: State<'_, AppState>) -> Snapshot {
     state.social.snapshot()
 }
 
-/// The chat open on the Friends page, or none: polling is every 4 s while one is.
+/// The player is typing to a friend: they see "typing…" (sent only while live, at most every 3 s).
+#[tauri::command]
+pub fn social_typing(state: State<'_, AppState>, to: String) {
+    state.social.typing(&to);
+}
+
+/// The chat open on the Friends page, or none: polling is faster while one is.
 #[tauri::command]
 pub fn social_focus(state: State<'_, AppState>, chat: Option<String>) {
     let opened = chat.is_some();
@@ -1414,8 +1569,15 @@ pub async fn social_refresh(app: AppHandle, state: State<'_, AppState>, force: O
 }
 
 #[tauri::command]
-pub async fn social_settings(app: AppHandle, state: State<'_, AppState>, status: Option<String>, allow_requests: Option<bool>) -> CmdResult<Me> {
-    let me = state.social.settings(&interactive(&app), status.as_deref(), allow_requests).await.map_err(|f| f.code())?;
+pub async fn social_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    status: Option<String>,
+    allow_requests: Option<bool>,
+    last_seen: Option<String>,
+    gifts: Option<String>,
+) -> CmdResult<Me> {
+    let me = state.social.settings(&interactive(&app), status.as_deref(), allow_requests, last_seen.as_deref(), gifts.as_deref()).await.map_err(|f| f.code())?;
     publish(&app, &state.social);
     Ok(me)
 }

@@ -88,12 +88,12 @@ pub fn target_in(body: &Value, id: &str, now: i64, loopback: bool) -> CmdResult<
     Ok(Target { join: Join { name, host, port, address }, versions: versions(&server["versions"]) })
 }
 
-fn target(state: &AppState, id: &str) -> CmdResult<Target> {
+pub(crate) fn target(state: &AppState, id: &str) -> CmdResult<Target> {
     let body = super::cached_body(state).ok_or(NOT_LISTED)?;
     target_in(&body, id, super::now(), rules::allow_loopback())
 }
 
-fn compatible(target: &Target, version: &str) -> CmdResult<()> {
+pub(crate) fn compatible(target: &Target, version: &str) -> CmdResult<()> {
     if rules::version_fits(version, target.versions.as_ref()) {
         Ok(())
     } else {

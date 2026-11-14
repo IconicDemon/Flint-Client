@@ -81,10 +81,13 @@ public final class LookMods {
 		public static final IntSetting FILL_OPACITY = new IntSetting("fillOpacity", "Fill opacity", null, 50, 0, 100, 5, "%");
 		public static final IntSetting THICKNESS = new IntSetting("outlineThickness", "Outline thickness", null, 25, 0, 100, 25, "");
 		public static final RgbSetting OUTLINE_COLOR = new RgbSetting("outlineColor", "Outline color", null, 0xFFFFFF);
-		public static final BoolSetting ALWAYS = new BoolSetting("showAlways", "Show always", "Off: only the mob you look at", true);
+		public static final BoolSetting ALWAYS = new BoolSetting("showAlways", "Show always",
+			"Full mode: every mob you can see. Off: only the mob you look at", true);
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Mob Overlay", "Outline or tint mobs so they stand out")
-			.keywords("mob", "outline", "glow", "highlight", "esp", "tint").icon(IconId.GAUGE).category(Category.VISUAL)
-			.section("General", MODE, FILL_COLOR, FILL_OPACITY).section("Outline", THICKNESS, OUTLINE_COLOR, ALWAYS).needs(Requirement.WORLD).build();
+			.keywords("mob", "outline", "glow", "highlight", "tint").icon(IconId.GAUGE).category(Category.VISUAL)
+			.section("General", MODE, FILL_COLOR, FILL_OPACITY).section("Outline", THICKNESS, OUTLINE_COLOR, ALWAYS).needs(Requirement.WORLD)
+			.note("Full tints the mobs you can see, drawn with them, so walls still hide them. The outline is Minecraft's glowing "
+				+ "outline, which shows through walls, so it is only on the mob you look at. Invisible mobs stay invisible.").build();
 	}
 
 	/**
@@ -271,8 +274,8 @@ public final class LookMods {
 
 	public static final class TeamTracker {
 		public static final String ID = "team_tracker";
-		public static final BoolSetting MARKERS = new BoolSetting("nametagIndicator", "Markers", "A marker over each teammate, seen through walls",
-			true);
+		public static final BoolSetting MARKERS = new BoolSetting("nametagIndicator", "Markers",
+			"A marker over each teammate whose nametag Minecraft shows, through walls as a nametag is", true);
 		public static final IntSetting MARKER_SIZE = new IntSetting("indicatorSize", "Marker size", null, 7, 3, 15, 1, "");
 		public static final BoolSetting DISTANCE_TEXT = new BoolSetting("indicatorDistanceText", "Distance", "How far away each teammate is", true);
 		public static final BoolSetting COMPASS = new BoolSetting("compass", "Compass", "A strip on the HUD showing which way your teammates are",
@@ -282,12 +285,15 @@ public final class LookMods {
 		public static final RgbSetting COLOR = new RgbSetting("teamColor", "Color", null, 0x55FF55);
 		public static final BoolSetting LIMIT = new BoolSetting("limitVisibleDistance", "Limit distance", "Teammates further away aren't marked",
 			false);
-		public static final IntSetting DISTANCE = new IntSetting("distanceLimit", "Distance limit", null, 65, 8, 512, 1, " blocks");
+		/** At most 64 blocks: as far as Minecraft shows a player's nametag (the markers never go further). */
+		public static final IntSetting DISTANCE = new IntSetting("distanceLimit", "Distance limit", null, 64, 8, 64, 1, " blocks");
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Team Tracker", "Markers showing where your teammates are")
 			.keywords("team", "teammates", "tracker", "compass", "bedwars").icon(IconId.COMPASS).category(Category.COMBAT)
 			.section("Highlighting", MARKERS, MARKER_SIZE, DISTANCE_TEXT).section("Compass", COMPASS)
 			.section("General", OVERRIDE, COLOR, LIMIT, DISTANCE).hud(HudPlacement.of(Anchor.TOP, 0, 64)).needs(Requirement.WORLD)
-			.note("Teammates are the players on your scoreboard team (as servers set them for Bedwars and the like).").build();
+			.note("Teammates are the players on your scoreboard team (as servers set them for Bedwars and the like). Only the ones "
+				+ "whose nametag Minecraft would show you get a marker: not sneaking, not invisible, within 64 blocks, on a team that "
+				+ "shows its own nametags. Off on Hypixel, whose rules don't allow it.").build();
 	}
 
 	public static final class DarkMode {

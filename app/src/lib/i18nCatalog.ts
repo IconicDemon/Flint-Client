@@ -58,3 +58,40 @@ export function coverageOf(english: Messages, catalog: Messages, locale: string)
   }
   return { translated, total: ids.length };
 }
+
+/**
+ * A language's catalog as the build ships it: its texts in English's key order (`v`, 0 where it has none and English
+ * shows) and only the keys English doesn't have spelled out (`x`: a language's own plural forms, `.few` / `.many`).
+ * Every catalog has the same dotted keys as English, about two fifths of each file; English is in the app anyway, so
+ * a language's chunk leaves them out and the app puts the catalog back together with English's keys as it loads it.
+ * `n` is how many keys English had when the build made it.
+ */
+export type CompactCatalog = { n: number; v: (string | 0)[]; x: Messages };
+
+/** The build's side (vite.config.ts): a catalog file without its keys. */
+export function compactCatalog(englishKeys: readonly string[], catalog: Messages): CompactCatalog {
+  const english = new Set(englishKeys);
+  const x: Messages = {};
+  for (const [key, text] of Object.entries(catalog)) if (!english.has(key)) x[key] = text;
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(catalog, key);
+  return { n: englishKeys.length, v: englishKeys.map((key) => (own(key) ? catalog[key] : 0)), x };
+}
+
+/**
+ * The app's side: the catalog again, from a build's compact chunk, or as it is from a catalog file (the development
+ * server and the tests load the files themselves). Null when the chunk was made for another English, which a single
+ * build can't produce: the caller shows English rather than texts under the wrong keys.
+ */
+export function expandCatalog(englishKeys: readonly string[], loaded: Messages | CompactCatalog): Messages | null {
+  if (!isCompact(loaded)) return loaded;
+  if (loaded.n !== englishKeys.length || loaded.v.length !== englishKeys.length) return null;
+  const catalog: Messages = {};
+  for (let i = 0; i < englishKeys.length; i++) {
+    const text = loaded.v[i];
+    if (text !== 0) catalog[englishKeys[i]] = text;
+  }
+  return Object.assign(catalog, loaded.x);
+}
+
+const isCompact = (loaded: Messages | CompactCatalog): loaded is CompactCatalog =>
+  Array.isArray((loaded as CompactCatalog).v) && typeof (loaded as CompactCatalog).n === "number";

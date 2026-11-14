@@ -177,6 +177,13 @@ final class MenuStyle {
 	private static long blendStart = -1;
 	private static final long BLEND_MILLIS = 240;
 
+	/** Bumped whenever the colours are remade (a change of theme), for controls that keep a look made from them. */
+	private static int version;
+
+	static int version() {
+		return version;
+	}
+
 	/** The theme the colours are made from. */
 	static MenuTheme theme() {
 		return theme;
@@ -187,6 +194,8 @@ final class MenuStyle {
 	 * second (eased), and a change of font remakes the type. Called each frame by the screens: cheap unless a blend is running.
 	 */
 	static void applyTheme(MenuTheme t) {
+		// The Flint app's theme, if it changed (and the palette's accent with it).
+		com.flintclient.client.control.ThemeSync.tick();
 		if (!applied) {
 			applied = true;
 			theme = t;
@@ -205,6 +214,7 @@ final class MenuStyle {
 			if (k >= 1) {
 				restore(blendTo);
 				blendStart = -1;
+				version++;
 			} else {
 				float e = k * k * (3 - 2 * k);
 				try {
@@ -264,6 +274,12 @@ final class MenuStyle {
 			return new int[] {0xFF0D0F12, 0xFF0F1215, 0xFF171B20, 0xFF0E1013, 0xFF3F4956, 0xFFEDEDED, 0xFFF97316};
 		}
 		int bg = Palette.lerp(solid(l.background), solid(l.surface1), 0.6F);
+		if (l.light()) {
+			// A light look: cream blocks ringed in its border colour; the pointer darkens a block a little.
+			// Its accent a touch deeper on the menu, so it reads as a mark on cream (3:1) with cocoa text on it (4.5:1).
+			return new int[] {bg, solid(l.surface1), solid(l.surface4), Palette.lerp(solid(l.surface3), solid(l.surface4), 0.5F),
+				Palette.lerp(solid(l.surface3), solid(l.ink), 0.10F), solid(l.ink), Palette.lerp(solid(l.accent), solid(l.accentPress), 0.4F)};
+		}
 		return new int[] {bg, solid(l.surface1), solid(l.surface3), Palette.lerp(bg, solid(l.surface1), 0.5F),
 			Palette.lerp(solid(l.surface4), solid(l.ink), 0.18F), solid(l.ink), solid(l.accent)};
 	}
@@ -272,7 +288,8 @@ final class MenuStyle {
 	 * Sets every colour from a look, as Dawn's stylesheet does: blocks in the two backgrounds with a lit ring, text and its
 	 * grey, controls as the text at 5%, 10% and 15% over the background, green for what is on, the accent for what is chosen.
 	 */
-	private static void computeColors(MenuTheme.Look l) {
+	static void computeColors(MenuTheme.Look l) {
+		version++;
 		int[] t = tokens(l);
 		BG = t[0];
 		BG2 = t[1];
@@ -284,22 +301,28 @@ final class MenuStyle {
 		int bg = BG;
 		int text = TEXT;
 		java.util.function.DoubleFunction<Integer> ink = k -> Palette.lerp(bg, text, (float) k);
-		NEUTRAL = l == MenuTheme.Look.FLINT ? 0xFF7A7A7A : ink.apply(0.48);
+		NEUTRAL = l == MenuTheme.Look.FLINT ? 0xFF7E7E7E : ink.apply(l.light() ? 0.66 : 0.52);
+		// Over a see-through fill the grey text keeps its bar (lightened as needed).
+		NEUTRAL = readableGrey(NEUTRAL, TEXT, BG, seeThrough);
+		boolean light = l.light();
 		SUCCESS = 0xFF2A9328;
-		SUCCESS_TEXT = 0xFF34A832;
-		WARN = 0xFFF8FC42;
-		RED = 0xFFDD3538;
+		// On a light look the meanings are deepened so their words read on cream (WCAG AA).
+		SUCCESS_TEXT = light ? 0xFF145214 : 0xFF4CC94A;
+		WARN = light ? 0xFF7A5A00 : 0xFFF8FC42;
+		RED = light ? 0xFFB8282B : 0xFFDD3538;
 		ACCENT = a;
 		ACCENT_HOVER = Palette.lerp(a, 0xFFFFFFFF, 0.12F);
 		ACCENT_PRESS = Palette.lerp(a, 0xFF000000, 0.12F);
-		ON_ACCENT = TEXT;
+		// Text on an accent fill: white on Flint's orange (Dawn's), each other theme's own ink, as the Flint app draws it (dark on
+		// Ice Cream's strawberry, Mint, Passion Fruit and Blueberry; light on Cherry's crimson).
+		ON_ACCENT = l == MenuTheme.Look.FLINT ? TEXT : solid(l.accentInk);
 		SOFT = Palette.withAlpha(TEXT, 0.05F);
 		SOFT_ON_BLOCK = Palette.withAlpha(TEXT, 0.10F);
 		SOFT_EDGE = Palette.withAlpha(TEXT, 0.15F);
 		int soft = ink.apply(0.05);
 		int soft2 = ink.apply(0.08);
 
-		SCRIM = 0x8C000000;
+		SCRIM = light ? 0x66201610 : 0x8C000000;
 		WINDOW = bg;
 		HEADER = bg;
 		CONTENT_TOP = BG2;
@@ -327,8 +350,8 @@ final class MenuStyle {
 		CHIP_TEXT = NEUTRAL;
 		CHIP_COUNT = ink.apply(0.3);
 		CHIP_SELECTED = a;
-		CHIP_SELECTED_TEXT = TEXT;
-		CHIP_SELECTED_COUNT = Palette.lerp(a, TEXT, 0.5F);
+		CHIP_SELECTED_TEXT = ON_ACCENT;
+		CHIP_SELECTED_COUNT = Palette.lerp(a, ON_ACCENT, 0.5F);
 		VIEW = soft;
 		VIEW_HOVER = soft2;
 		VIEW_ICON = NEUTRAL;
@@ -371,7 +394,7 @@ final class MenuStyle {
 		TILE = BG2;
 		TILE_HOVER = Palette.lerp(BG2, HOVER_LIGHT, 0.35F);
 		TILE_EDGE = RING_LIGHT;
-		SCROLL_THUMB = 0xFF33363B;
+		SCROLL_THUMB = light ? ink.apply(0.28) : 0xFF33363B;
 		FOCUS = Palette.withAlpha(a, 0.60F);
 		SENTENCE_TEXT = NEUTRAL;
 		INFO = NEUTRAL;
@@ -516,11 +539,86 @@ final class MenuStyle {
 		}
 	}
 
+	// ---------- see-through over a live game ----------
+
+	/** The fills' opacity over a live game (General › Menu transparency, and more opaque without the blur); 1 is solid. */
+	private static float seeThrough = 1;
+	/** Whether this frame's blocks are drawn see-through (the Right Shift menu over a live game, while it paints). */
+	private static boolean seeThroughOn;
+	/** The grey text's contrast bar (WCAG AA), kept over a see-through fill: grey text lightens toward the text as needed. */
+	static final double GREY_TEXT_CONTRAST = 4.5;
+	/** The backdrop the bar is checked over: the game's average, blurred or not (a mid grey). */
+	static final int BACKDROP = 0xFF808080;
+
+	/**
+	 * The fill opacity for transparency {@code percent} (0 solid .. 50): over a blurred game {@code 1 - percent}, over a sharp one
+	 * 13 points more (as the menu always was: the sharp game behind text needs more cover). Pure.
+	 */
+	static float seeThroughFor(int percent, boolean blurred) {
+		float a = 1 - Math.clamp(percent, 0, 50) / 100.0F + (blurred ? 0 : 0.13F);
+		return Math.clamp(a, 0.5F, 1);
+	}
+
+	/** This frame's fill opacity (the Right Shift menu sets it while it paints over a live game); a change remakes the colours. */
+	static void useSeeThrough(float alpha, boolean on) {
+		seeThroughOn = on;
+		float a = Math.clamp(alpha, 0.5F, 1);
+		if (Math.abs(a - seeThrough) > 1e-4F) {
+			seeThrough = a;
+			if (applied) {
+				blendStart = -1;
+				computeColors(theme.look());
+			}
+		}
+	}
+
+	/** The see-through fill's opacity now. */
+	static float seeThrough() {
+		return seeThrough;
+	}
+
+	/** Blocks drawn after this are solid again (the menu finished its frame). */
+	static void endSeeThrough() {
+		seeThroughOn = false;
+	}
+
+	/**
+	 * {@code grey} made readable over a fill of {@code bg} at {@code alpha} over the mid-grey {@link #BACKDROP}: unchanged when it
+	 * already keeps {@link #GREY_TEXT_CONTRAST}, else lightened (darkened on a light look) toward {@code text} just enough. Pure.
+	 */
+	static int readableGrey(int grey, int text, int bg, float alpha) {
+		if (alpha >= 0.999F) {
+			return grey;
+		}
+		int behind = Palette.over(Palette.withAlpha(bg, alpha), BACKDROP);
+		for (int i = 0; i <= 20; i++) {
+			int c = Palette.lerp(grey, text, i / 20.0F);
+			if (contrast(c, behind) >= GREY_TEXT_CONTRAST) {
+				return c;
+			}
+		}
+		return text;
+	}
+
+	/** WCAG contrast of two opaque colours. Pure. */
+	static double contrast(int a, int b) {
+		double la = Palette.luminance(a);
+		double lb = Palette.luminance(b);
+		return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+	}
+
 	// ---------- scale ----------
 
-	/** The smallest factor (window pixels per R): below it, text would be too small to read, so the window crops. */
-	private static final float MIN_FACTOR = 0.43F;
-	private static final float MAX_FACTOR = 1.0F;
+	/**
+	 * The smallest factor (window pixels per R): the text is Minecraft's font at 2× at least ({@link #pixelScale}), and a smaller
+	 * layout couldn't hold it; a smaller window gives the menu's window less room instead (it never leaves the screen).
+	 */
+	static final float MIN_FACTOR = 0.43F;
+	/**
+	 * The largest: twice the reference's own size, so the menu keeps growing with the window past 3200 × 2000 (a 4K window with
+	 * UI Scaling above 1, a 5K or 8K screen) instead of shrinking into its middle.
+	 */
+	static final float MAX_FACTOR = 2.0F;
 
 	/** Window pixels per R. */
 	private static float factor = 0.6F;
@@ -531,11 +629,10 @@ final class MenuStyle {
 
 	/**
 	 * Screen pixels per pixel of Minecraft's font for the menu's text: 2 up to about a 1440p window, then growing with it
-	 * (3 at 4K), so text keeps close to Dawn's sizes and never falls to 1, where it is too small to read.
+	 * (4 at 4K, 5 at 5K), so text keeps close to Dawn's sizes and never falls to 1, where it is too small to read.
 	 */
 	static int pixelScale() {
-		float windowPerDesign = factor * 1.8F;
-		return Math.max(2, Math.round(windowPerDesign * 1.6F));
+		return pixelScaleFor(factor);
 	}
 
 	private MenuStyle() {
@@ -543,7 +640,7 @@ final class MenuStyle {
 
 	/**
 	 * Fits the reference to a {@code pxW × pxH} window: the factor that makes the reference fill it as it fills its own
-	 * 3200 × 2000 canvas (in steps of 0.01, between 0.43 and 1), and a whole interface scale near a third of it. Fonts are
+	 * 3200 × 2000 canvas (in steps of 0.01, between 0.43 and 2), and a whole interface scale near a third of it. Fonts are
 	 * remade only when the result changes. Returns the interface scale.
 	 */
 	static int apply(int pxW, int pxH) {
@@ -568,15 +665,49 @@ final class MenuStyle {
 		}
 	}
 
-	/** The reference's factor for a {@code pxW × pxH} window, times General > UI Scaling (the window still bounds the menu). */
+	/** The reference's factor for a {@code pxW × pxH} window, times General › Menu size (the window still bounds the menu). */
 	private static float fit(int pxW, int pxH) {
-		float zoom = 1;
+		return factorFor(pxW, pxH, menuZoom());
+	}
+
+	/** General › Menu size as a share of the window-fitted size (Medium's before the settings are loaded). */
+	static float menuZoom() {
 		try {
-			zoom = ControlState.settings().game(GameOptions.MENU_SCALE);
+			return ControlState.settings().game(GameOptions.MENU_SIZE).zoom();
 		} catch (RuntimeException | LinkageError ignored) {
-			// Settings not loaded yet: the reference size.
+			return GameOptions.MENU_SIZE.defaultValue().zoom();
 		}
+	}
+
+	/**
+	 * The factor for a {@code pxW × pxH} window at UI Scaling {@code zoom}: the reference filling it as it fills its own 3200 ×
+	 * 2000 canvas, in steps of 0.01, from {@link #MIN_FACTOR} to {@link #MAX_FACTOR}. Pure.
+	 */
+	static float factorFor(int pxW, int pxH, float zoom) {
 		return Math.clamp(Math.round(Math.min(pxW / 3200.0F, pxH / 2000.0F) * zoom * 100) / 100.0F, MIN_FACTOR, MAX_FACTOR);
+	}
+
+	/**
+	 * Minecraft's font scale for the menu's text at factor {@code f} ({@link #pixelScale}): the largest whole scale whose text is
+	 * at most a tenth larger than Dawn's at that factor (2× is Dawn's own size at 1080p, factor 0.54), so text grows in step
+	 * with the window (4× at 4K, as 2× at 1080p) without outgrowing the layout; never under 2. Pure.
+	 */
+	static int pixelScaleFor(float f) {
+		return Math.max(2, (int) Math.floor(f * 3.6F * 1.1F));
+	}
+
+	/**
+	 * How much more room the text takes than the layout gives it, at least 1: Minecraft's font is drawn at whole pixel scales
+	 * (2× at 1080p, where it matches Dawn's sizes), so on a smaller window it stays 2× while the layout shrinks (1.29 at 1280 ×
+	 * 720). Parts that hold text (the mods grid's cards) give it that much more room there.
+	 */
+	static float textRoom() {
+		return textRoomFor(factor);
+	}
+
+	/** {@link #textRoom} at factor {@code f}. Pure. */
+	static float textRoomFor(float f) {
+		return Math.max(1, pixelScaleFor(f) / 2.0F / (f * 1.8F));
 	}
 
 	/**
@@ -633,8 +764,15 @@ final class MenuStyle {
 		int b = Math.max(1, c.px(d(1.25F)));
 		int edgeTop = Palette.lerp(Palette.lerp(RING_LIGHT, HOVER_LIGHT, 0.35F), Palette.lerp(HOVER_LIGHT, ACCENT, 0.35F), hover);
 		int edgeLow = Palette.lerp(RING_DARK, Palette.lerp(RING_LIGHT, ACCENT, 0.25F), hover);
-		c.roundGradient(x0, y0, pw, ph, rp, edgeTop, edgeLow);
-		c.roundGradient(x0 + b, y0 + b, pw - 2 * b, ph - 2 * b, Math.max(0, rp - b), BG2, BG);
+		if (seeThroughOn && seeThrough < 0.999F) {
+			// Over a live game: the fill see-through (General › Menu transparency), the edge an outline so it doesn't show through.
+			c.ring(x0, y0, pw, ph, rp, b, Palette.lerp(edgeTop, edgeLow, 0.4F));
+			c.roundGradient(x0 + b, y0 + b, pw - 2 * b, ph - 2 * b, Math.max(0, rp - b), Palette.withAlpha(BG2, seeThrough),
+				Palette.withAlpha(BG, seeThrough));
+		} else {
+			c.roundGradient(x0, y0, pw, ph, rp, edgeTop, edgeLow);
+			c.roundGradient(x0 + b, y0 + b, pw - 2 * b, ph - 2 * b, Math.max(0, rp - b), BG2, BG);
+		}
 		// The top light: strongest at the edge, gone a third of the way down (or 40 design pixels, whichever is less).
 		int band = Math.max(1, Math.min((ph - 2 * b) / 3, c.px(d(40))));
 		c.roundGradient(x0 + b, y0 + b, pw - 2 * b, band, Math.max(0, rp - b), Palette.withAlpha(TEXT, 0.035F + 0.045F * hover),
@@ -642,6 +780,24 @@ final class MenuStyle {
 		if (active > 0.001F) {
 			c.roundRect(x0, y0, pw, ph, rp, Palette.withAlpha(ACCENT, active));
 		}
+	}
+
+	/**
+	 * The window as frosted glass over a live game ({@link #block} made see-through): the same fill and top light at
+	 * {@code alpha}, over the blurred game when the menu blur is on, and the fine edge drawn as an outline so it doesn't show
+	 * through the fill.
+	 */
+	static void glass(Canvas c, float x, float y, float w, float h, float radius, float alpha) {
+		int x0 = c.px(x);
+		int y0 = c.px(y);
+		int pw = c.px(x + w) - x0;
+		int ph = c.px(y + h) - y0;
+		int rp = c.px(radius);
+		int b = Math.max(1, c.px(d(1.25F)));
+		c.roundGradient(x0 + b, y0 + b, pw - 2 * b, ph - 2 * b, Math.max(0, rp - b), Palette.withAlpha(BG2, alpha), Palette.withAlpha(BG, alpha));
+		int band = Math.max(1, Math.min((ph - 2 * b) / 3, c.px(d(40))));
+		c.roundGradient(x0 + b, y0 + b, pw - 2 * b, band, Math.max(0, rp - b), Palette.withAlpha(TEXT, 0.05F), Palette.withAlpha(TEXT, 0));
+		c.ring(x0, y0, pw, ph, rp, b, Palette.lerp(RING_LIGHT, HOVER_LIGHT, 0.5F));
 	}
 
 	/** A block held down: it dims a touch, as if pressed into the window. */

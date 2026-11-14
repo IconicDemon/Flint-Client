@@ -133,11 +133,12 @@ public class Button extends Pressable {
 				ink = Palette.lerp(Tokens2.TEXT_DIM, Tokens2.TEXT, lift);
 			}
 			case DANGER -> {
-				fill = Palette.lerp(Palette.lerp(Palette.DANGER_SURFACE, Palette.DANGER_SURFACE_HOVER, hover), Palette.DANGER_SURFACE, press);
-				border = Palette.lerp(Palette.DANGER_BORDER, Palette.DANGER_BORDER_HOVER, lift);
-				ink = Palette.lerp(Palette.DANGER_TEXT, Palette.DANGER_TEXT_HOVER, hover);
+				// The kit's deck stays dark in every theme: its own (dark) danger colours.
+				fill = Palette.lerp(Palette.lerp(0xCC241215, 0xDD2F161A, hover), 0xCC241215, press);
+				border = Palette.lerp(0x40E07D70, 0x66E07D70, lift);
+				ink = Palette.lerp(0xFFE07D70, 0xFFF0907F, hover);
 			}
-			case ACCENT -> ink = Palette.lerp(Tokens2.EMBER_TEXT, 0xFFF5B060, lift);
+			case ACCENT -> ink = Palette.lerp(Tokens2.EMBER_TEXT, Palette.ember() ? 0xFFF5B060 : Palette.lerp(Palette.ACCENT_TEXT, 0xFFFFFFFF, 0.3F), lift);
 			case DANGER_TEXT -> ink = Palette.lerp(Tokens2.DANGER, 0xFFF0907F, lift);
 			default -> ink = Palette.lerp(Tokens2.muted(), Tokens2.TEXT, lift);
 		}

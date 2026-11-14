@@ -51,6 +51,10 @@ final class MenuLayout {
 	List<ServerSlot> slots = List.of();
 	@Nullable NewsCard news;
 	@Nullable RewardsCard rewards;
+	/** The "Join our Discord" card (above Daily rewards), the showcase and other mods' buttons (bottom left); null or empty: none. */
+	com.flintclient.client.ui.widget.@Nullable DiscordCard discord;
+	com.flintclient.client.ui.widget.@Nullable ShowcaseCard showcase;
+	List<com.flintclient.client.ui.widget.ExternalButton> externals = List.of();
 	/** The logo's wordmark and the version line (the screen's own text), measured at the sizes they're drawn at. */
 	@Nullable TextLine wordmark;
 	@Nullable TextLine footer;
@@ -157,6 +161,9 @@ final class MenuLayout {
 		in.slots = slots.size();
 		in.news = news != null;
 		in.rewards = rewards != null;
+		in.discord = discord != null;
+		in.showcase = showcase != null;
+		in.externals = externals.size();
 		in.copyright = copyright(unit);
 		MenuGeometry.Result r = MenuGeometry.compute(in);
 		result = r;
@@ -193,6 +200,20 @@ final class MenuLayout {
 		}
 		if (rewards != null) {
 			spot(rewards).place(r.rewards);
+		}
+		if (discord != null) {
+			spot(discord).place(r.discord);
+		}
+		if (showcase != null) {
+			spot(showcase).place(r.showcase);
+		}
+		for (int i = 0; i < externals.size(); i++) {
+			com.flintclient.client.ui.widget.ExternalButton button = externals.get(i);
+			boolean shown = i < r.externals.length;
+			WidgetVisibility.set(button, shown);
+			if (shown) {
+				place(button, r.externals[i]);
+			}
 		}
 	}
 

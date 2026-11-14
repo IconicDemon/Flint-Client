@@ -42,6 +42,8 @@ file compat/McCompat.java
 s MINECRAFT = "1\.21\.11" => MINECRAFT = "1.21.10"
 # 1.21.10 still builds item models with gaps: Model Gap Fix works (mixin.feature.ModelGapFixMixin, ModelGapSpriteMixin).
 s ITEM_MODEL_GAPS = false => ITEM_MODEL_GAPS = true
+# The main menu lays Minecraft's title screen out out of sight (other mods' buttons): 1.21.10's Screen.init takes Minecraft too.
+s screen\.init\(width, height\); => screen.init(Minecraft.getInstance(), width, height);
 # Custom F3 and the menu's Graphics tab: 1.21.10 calls the graphics option graphicsMode, and the moon phase comes from the
 # dimension and the day time.
 s options\.graphicsPreset\(\) => options.graphicsMode()
@@ -125,3 +127,10 @@ file control/platform/Mc263Animations.java
 s ItemUseAnimation\.TRIDENT => ItemUseAnimation.SPEAR
 s ArmPose\.THROW_TRIDENT => ArmPose.THROW_SPEAR
 s net\.minecraft\.world\.entity\.vehicle\.boat\.AbstractBoat => net.minecraft.world.entity.vehicle.AbstractBoat
+
+# ---------- 3D cosmetics (the 1.21.11 overlay's) on 1.21.10 ----------
+replace net.minecraft.client.model.object.equipment.ShieldModel net.minecraft.client.model.ShieldModel
+file mixin/cosmetics/ItemInHandLayerCosmeticsMixin.java
+# 1.21.10's held-item submit has no item stack (1.21.11 added it).
+s ItemStackRenderState item, ItemStack stack, HumanoidArm arm => ItemStackRenderState item, HumanoidArm arm
+s original\.call\(state, item, stack, arm => original.call(state, item, arm

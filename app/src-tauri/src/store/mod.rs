@@ -18,13 +18,21 @@
 //! - Tokens are never logged or shown: errors carry fixed messages, and a session's `Debug` is redacted.
 
 pub mod anim;
+pub mod badges;
+pub mod asset_cache;
 pub mod community;
+pub mod community_game;
 pub mod game;
 pub mod handoff;
+pub mod kinds;
+pub mod model;
+pub mod shop;
 #[cfg(test)]
 mod community_tests;
 #[cfg(test)]
 mod fake;
+#[cfg(test)]
+mod shop_tests;
 #[cfg(test)]
 mod tests;
 
@@ -50,8 +58,8 @@ use url::Url;
 pub const CONTRACT_VERSION: u32 = 1;
 pub const PRODUCTION_STORE: &str = "https://store.flintclient.com";
 pub const MOJANG_SESSION_SERVER: &str = "https://sessionserver.mojang.com";
-/// The slots the Store knows (`player_set_equipped`). An item is worn in the slot named by its kind.
-pub const SLOTS: [&str; 4] = ["cape", "back", "head", "aura"];
+/// The slots the Store knows (`player_set_equipped`), and the slot each kind is worn in: [`kinds`].
+pub use kinds::SLOTS;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
 /// A real inventory is a few kilobytes; anything near this is not one.
@@ -203,11 +211,13 @@ pub struct StoreState {
     /// Discord connections and community rewards (community.rs): the public reward catalog, and each account's open
     /// Discord link attempt and last "Check again".
     pub community: community::CommunityState,
+    /// The in-game main menu's showcase (showcase.rs): the last good answer and its pictures.
+    pub showcase: crate::showcase::game::ShowcaseState,
 }
 
 impl StoreState {
     pub fn new(endpoints: Endpoints) -> Self {
-        Self { endpoints, sessions: Mutex::default(), blocked: Mutex::default(), equip_revision: AtomicU64::new(0), partners: Default::default(), community: Default::default() }
+        Self { endpoints, sessions: Mutex::default(), blocked: Mutex::default(), equip_revision: AtomicU64::new(0), partners: Default::default(), community: Default::default(), showcase: Default::default() }
     }
 }
 
@@ -418,6 +428,7 @@ fn failure_text(failure: &Failure) -> String {
             "rate-limited" => "Too many attempts for now. Wait a few minutes and try again.".into(),
             "not_owned" => "This account doesn't own that item (any more). The Flint Store decides what you own.".into(),
             "wrong_slot" | "invalid_slot" => "That item can't be worn there.".into(),
+            "not_an_emote" | "invalid_slots" | "not_owned_emote" => "That emote can't go on your emote wheel.".into(),
             "unavailable" => "The Flint Store isn't available right now. Try again in a few minutes.".into(),
             _ => format!("The Flint Store refused that (HTTP {status}). Try again later."),
         },
@@ -447,12 +458,17 @@ fn lenient_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Str
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct Asset {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub version: i64,
-    #[serde(skip_serializing)]
+    #[serde(default, skip_serializing)]
     pub url: String,
-    #[serde(skip_serializing)]
+    #[serde(default, skip_serializing)]
     pub sha256: String,
+    /// The same file on Flint's CDN (`cdn_url`), tried first; absent until the Store names one.
+    #[serde(default, skip_serializing)]
+    pub cdn_url: Option<String>,
     #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
@@ -461,14 +477,25 @@ pub struct Asset {
     /// (the texture above, its poster, is then shown as a static cape).
     #[serde(default, deserialize_with = "anim::lenient")]
     pub animation: Option<anim::Animation>,
+    /// A 3D cosmetic's files (cosmetics v2, [`model`]); none for a cape.
+    #[serde(default, deserialize_with = "model::lenient", skip_serializing_if = "Option::is_none")]
+    pub model: Option<model::Model>,
+    /// Whether `url` above is a texture Flint can use (`store_asset`). A 3D cosmetic may have only its model's files.
+    #[serde(default, skip_deserializing)]
+    pub has_texture: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct Owned {
     pub cosmetic_id: String,
+    #[serde(default)]
     pub slug: String,
+    /// The Store's kind ([`kinds`]): an older name is read as today's, and a kind Flint doesn't know is kept as it came.
     pub kind: String,
+    /// The slot the kind is worn in ([`kinds::slot_of`]); none for an emote or a kind Flint doesn't know.
+    #[serde(default, skip_deserializing)]
+    pub slot: Option<String>,
     pub name: String,
     #[serde(default)]
     pub source: Option<String>,
@@ -497,6 +524,17 @@ pub struct Owned {
     /// usable during the grace period).
     #[serde(default, deserialize_with = "lenient_text")]
     pub state: Option<String>,
+    /// The Merit price, when it can be bought with Merit (cosmetics v2; a catalog field some answers carry).
+    #[serde(default, deserialize_with = "lenient_i64")]
+    pub price_coins: Option<i64>,
+    /// The card price, in the currency's minor unit.
+    #[serde(default, deserialize_with = "lenient_i64")]
+    pub direct_price_minor: Option<i64>,
+    #[serde(default, deserialize_with = "lenient_text")]
+    pub direct_currency: Option<String>,
+    /// A rarity, when a Store sends one (`common`, `rare`…; the v2 contract has none yet: the launcher sorts by it only then).
+    #[serde(default, deserialize_with = "lenient_text")]
+    pub rarity: Option<String>,
 }
 
 /// `GET /api/v1/me/inventory/`, checked. Shown to the interface in camelCase.
@@ -514,6 +552,16 @@ pub struct Inventory {
     pub owned: Vec<Owned>,
     #[serde(default)]
     pub equipped: BTreeMap<String, String>,
+    /// The emote wheel: [`kinds::EMOTE_SLOTS`] places, each an owned emote or empty. None from a Store without emotes.
+    #[serde(default, deserialize_with = "lenient_emotes")]
+    pub emotes: Option<Vec<Option<String>>>,
+}
+
+fn lenient_emotes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Vec<Option<String>>>, D::Error> {
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::Array(list)) => Some(list.iter().take(kinds::EMOTE_SLOTS).map(|v| v.as_str().map(str::to_owned)).collect()),
+        _ => None,
+    })
 }
 
 fn clip(text: &str, max: usize) -> String {
@@ -532,7 +580,12 @@ fn parse_inventory(body: &Value) -> Option<Inventory> {
         return None;
     }
     inventory.name = clip(&inventory.name, 32);
-    inventory.owned.retain(|o| is_uuid(&o.cosmetic_id) && SLOTS.contains(&o.kind.as_str()));
+    inventory.owned.retain_mut(|o| {
+        let Some(kind) = kinds::normalize(&o.kind) else { return false };
+        o.slot = kinds::slot_of(&kind).map(str::to_owned);
+        o.kind = kind;
+        is_uuid(&o.cosmetic_id)
+    });
     for owned in &mut inventory.owned {
         owned.slug = clip(&owned.slug, 80);
         owned.name = clip(&owned.name, 120);
@@ -548,14 +601,34 @@ fn parse_inventory(body: &Value) -> Option<Inventory> {
             _ => None,
         };
         owned.state = owned.state.take().filter(|s| matches!(s.as_str(), "owned" | "eligible" | "unavailable"));
-        let usable = owned.asset.as_ref().is_some_and(|a| {
-            is_uuid(&a.id) && a.version >= 0 && a.sha256.len() == 64 && a.sha256.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        owned.price_coins = owned.price_coins.filter(|p| *p >= 0);
+        owned.direct_price_minor = owned.direct_price_minor.filter(|p| *p >= 0);
+        owned.direct_currency = clip_opt(&owned.direct_currency, 3).filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase()));
+        owned.rarity = clip_opt(&owned.rarity, 16).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'));
+        let kind = owned.kind.clone();
+        owned.asset = owned.asset.take().and_then(|mut a| {
+            if !is_uuid(&a.id) || a.version < 0 {
+                return None;
+            }
+            a.has_texture = !a.url.is_empty() && a.sha256.len() == 64 && a.sha256.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+            if !a.has_texture {
+                a.animation = None;
+            }
+            a.model = a.model.take().and_then(|m| m.checked(&kind));
+            (a.has_texture || a.model.is_some()).then_some(a)
         });
-        if !usable {
-            owned.asset = None;
-        }
     }
     inventory.equipped.retain(|slot, id| SLOTS.contains(&slot.as_str()) && is_uuid(id));
+    // The wheel holds owned emotes only, in exactly its places.
+    if let Some(wheel) = inventory.emotes.as_mut() {
+        wheel.resize(kinds::EMOTE_SLOTS, None);
+        for place in wheel.iter_mut() {
+            let owned_emote = place.as_deref().is_some_and(|id| inventory.owned.iter().any(|o| o.cosmetic_id == id && o.kind == kinds::EMOTE));
+            if !owned_emote {
+                *place = None;
+            }
+        }
+    }
     Some(inventory)
 }
 
@@ -587,7 +660,8 @@ fn save_cache(state: &AppState, uuid: &str, etag: Option<String>, inventory: &Va
     }
 }
 
-/// Removes everything Flint cached for the account from this Store (inventory and textures).
+/// Removes everything Flint cached for the account from this Store (its inventory copy; the public files it showed stay in
+/// the shared cache by hash, [`asset_cache`], for anyone who wears them).
 fn clear_cache(state: &AppState, uuid: &str) {
     let _ = std::fs::remove_dir_all(account_dir(state, uuid));
 }
@@ -859,6 +933,27 @@ pub async fn equip(state: &AppState, uuid: &str, slot: &str, cosmetic_id: Option
     Ok(shown)
 }
 
+/// `PUT /api/v1/me/emotes/`: asks the Store to put these emotes on the wheel (exactly [`kinds::EMOTE_SLOTS`] places, each an
+/// emote id or empty). The Store decides; the inventory shown afterwards is its answer.
+pub async fn set_emotes(state: &AppState, uuid: &str, slots: &[Option<String>]) -> CmdResult<StoreView> {
+    if slots.len() != kinds::EMOTE_SLOTS || slots.iter().flatten().any(|id| !is_uuid(id)) {
+        return Err("That emote can't go on your emote wheel.".into());
+    }
+    let session = session_for_action(state, uuid)?;
+    let answer = call(state, Method::PUT, "/api/v1/me/emotes/", Some(&session.token), Some(json!({ "slots": slots })), None)
+        .await
+        .map_err(|f| action_failure(state, uuid, f))?;
+    handoff::equip_changed(state);
+    let changed = answer.body["version"].as_i64();
+    let mut shown = view(state, uuid, false).await;
+    if let (Some(version), Some(inventory)) = (changed, shown.inventory.as_ref()) {
+        if inventory.version < version && !shown.stale {
+            shown = view(state, uuid, false).await;
+        }
+    }
+    Ok(shown)
+}
+
 /// Tells the app's window about a Store answer it didn't ask for (an equip made in a game): the Store page and the
 /// character previews show it at once (`store-view`, lib/api.ts `onStoreView`).
 pub fn announce(app: &AppHandle, view: &StoreView) {
@@ -911,14 +1006,31 @@ fn code_not_waiting(endpoints: &Endpoints) -> String {
     )
 }
 
-/// Where a texture may come from: the Store itself, or any https address (its storage). Never with credentials.
+/// Where the Store keeps cosmetic files in a Supabase project's public storage (Store src/lib/server/config.ts `assetUrl`).
+const SUPABASE_ASSETS: &str = "/storage/v1/object/public/cosmetic-assets/";
+/// Flint's asset CDN (Cloudflare R2): the same files as the Store's storage, by the same hashes (`cdn_url`).
+pub const CDN_HOST: &str = "assets.flintclient.com";
+
+/// Where a cosmetic file may come from (as the game's `StoreEndpoint.allowsAsset`): the Store itself, a Supabase project's
+/// public `cosmetic-assets` bucket over https, or Flint's CDN over https. Never with credentials, a query, a fragment or
+/// (outside the Store's own origin) a port.
 fn asset_url(endpoints: &Endpoints, raw: &str) -> Option<Url> {
     let url = Url::parse(raw).ok()?;
-    if !url.username().is_empty() || url.password().is_some() {
+    if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
         return None;
     }
-    let same_origin = url.origin() == endpoints.store.origin();
-    (url.scheme() == "https" || same_origin).then_some(url)
+    if url.origin() == endpoints.store.origin() {
+        return Some(url);
+    }
+    if url.scheme() != "https" || url.port().is_some() {
+        return None;
+    }
+    let host = url.host_str()?;
+    let path = url.path();
+    let project = host.strip_suffix(".supabase.co").is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()));
+    let supabase = project && path.starts_with(SUPABASE_ASSETS) && path.len() > SUPABASE_ASSETS.len();
+    let cdn = host == CDN_HOST && path.len() > 1;
+    (supabase || cdn).then_some(url)
 }
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -944,37 +1056,52 @@ pub async fn asset(state: &AppState, uuid: &str, cosmetic_id: &str) -> CmdResult
         .iter()
         .find(|o| o.cosmetic_id == cosmetic_id)
         .and_then(|o| o.asset.clone())
+        .filter(|a| a.has_texture)
         .ok_or("This item has no texture.")?;
-    let path = account_dir(state, uuid).join("assets").join(format!("{}-v{}.png", asset.id, asset.version));
-    verified_texture(state, &asset, &path).await.map(|bytes| data_url(&bytes))
+    verified_texture(state, &asset).await.map(|bytes| data_url(&bytes))
 }
 
-/// A texture the Store approved (`asset`, its id already checked): from `path` when its SHA-256 still matches, otherwise
-/// downloaded (without the Store session), checked against the Store's SHA-256 and only then kept at `path`.
-pub(crate) async fn verified_texture(state: &AppState, asset: &Asset, path: &std::path::Path) -> CmdResult<Vec<u8>> {
-    if let Ok(bytes) = std::fs::read(path) {
-        if sha256_hex(&bytes) == asset.sha256 {
-            return Ok(bytes);
-        }
-        // Changed on disk since it was checked: fetch it again.
-        let _ = std::fs::remove_file(path);
-    }
-    let url = asset_url(&state.store.endpoints, &asset.url).ok_or("The Flint Store listed this texture at an address Flint doesn't download from.")?;
-    let response = state.http.get(url).timeout(REQUEST_TIMEOUT).send().await.map_err(|_| OFFLINE.to_owned())?;
-    if !response.status().is_success() {
-        return Err(format!("The texture couldn't be downloaded (HTTP {}).", response.status().as_u16()));
-    }
-    let bytes = read_capped(response, MAX_ASSET).await.map_err(|_| "The texture couldn't be downloaded completely.".to_owned())?;
-    if sha256_hex(&bytes) != asset.sha256 {
+/// A texture the Store approved (`asset`, its id already checked): from Flint's shared cache ([`asset_cache`], by SHA-256,
+/// rehashed) when it is there, otherwise downloaded (without the Store session; Flint's CDN first when the Store names it),
+/// checked against the Store's SHA-256 and only then kept there.
+pub(crate) async fn verified_texture(state: &AppState, asset: &Asset) -> CmdResult<Vec<u8>> {
+    if !asset_cache::is_sha256(&asset.sha256) {
         return Err(HASH_MISMATCH.into());
     }
-    if !bytes.starts_with(PNG_SIGNATURE) {
-        return Err("This item's texture isn't a PNG image.".into());
+    let check = |bytes: &[u8]| -> Result<(), String> {
+        if sha256_hex(bytes) != asset.sha256 {
+            return Err(HASH_MISMATCH.into());
+        }
+        if !bytes.starts_with(PNG_SIGNATURE) {
+            return Err("This item's texture isn't a PNG image.".into());
+        }
+        Ok(())
+    };
+    asset_cache::fetch(state, &asset.sha256, asset.cdn_url.as_deref(), &asset.url, MAX_ASSET, "texture", check).await
+}
+
+/// A file the Store approved by its SHA-256 (a 3D cosmetic's geometry, texture, animation or thumbnail): from Flint's shared
+/// cache ([`asset_cache`], rehashed) when it is there and passes `check`, otherwise downloaded (without the Store session)
+/// from Flint's CDN (`cdn`, when the Store names it) and, when that fails in any way, from `raw_url` (an address
+/// [`asset_url`] accepts), at most `max` bytes, checked against the hash and by `check`, and only then kept there.
+pub(crate) async fn verified_download(
+    state: &AppState,
+    raw_url: &str,
+    cdn: Option<&str>,
+    sha256: &str,
+    max: usize,
+    check: impl Fn(&[u8]) -> Result<(), String>,
+) -> CmdResult<Vec<u8>> {
+    if !asset_cache::is_sha256(sha256) {
+        return Err(HASH_MISMATCH.into());
     }
-    if let Err(error) = write_atomic(path, &bytes) {
-        eprintln!("[flint] couldn't keep a Store texture: {error}");
-    }
-    Ok(bytes)
+    let checked = |bytes: &[u8]| -> Result<(), String> {
+        if sha256_hex(bytes) != sha256 {
+            return Err(HASH_MISMATCH.into());
+        }
+        check(bytes)
+    };
+    asset_cache::fetch(state, sha256, cdn, raw_url, max, "file", checked).await
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -1169,6 +1296,19 @@ pub async fn store_equip(state: State<'_, AppState>, uuid: String, slot: String,
 pub async fn store_asset(state: State<'_, AppState>, uuid: String, cosmetic_id: String) -> CmdResult<String> {
     let (uuid, _) = flint_account(&state, &uuid)?;
     asset(&state, &uuid, &cosmetic_id).await
+}
+
+#[tauri::command]
+pub async fn store_set_emotes(state: State<'_, AppState>, uuid: String, slots: Vec<Option<String>>) -> CmdResult<StoreView> {
+    let (uuid, _) = flint_account(&state, &uuid)?;
+    set_emotes(&state, &uuid, &slots).await
+}
+
+/// A file of a 3D cosmetic the account owns ([`model::model_file`]): `part` is geometry, texture, animation or thumbnail.
+#[tauri::command]
+pub async fn store_model_file(state: State<'_, AppState>, uuid: String, cosmetic_id: String, part: String) -> CmdResult<String> {
+    let (uuid, _) = flint_account(&state, &uuid)?;
+    model::model_file(&state, &uuid, &cosmetic_id, &part).await
 }
 
 #[tauri::command]

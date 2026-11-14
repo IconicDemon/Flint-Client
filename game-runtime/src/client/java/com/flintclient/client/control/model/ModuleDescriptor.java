@@ -69,6 +69,8 @@ public final class ModuleDescriptor {
 	 * by Flint, but no panel or HUD look of Flint's.
 	 */
 	private boolean drawnByMinecraft;
+	/** Its page is a panel of its own (Item Customizer's): the menu lists none of its settings as rows (but its Mod section). */
+	private boolean ownPage;
 	/** A key that turns the module on or off in a world, and whether that says so on screen (usable modules only). */
 	private final @Nullable KeySetting modKey;
 	private final @Nullable BoolSetting modKeyNotify;
@@ -136,6 +138,11 @@ public final class ModuleDescriptor {
 
 	/** The boxed-counter look this module uses (its settings are among the module's), or null. */
 	/** Whether Minecraft draws it and Flint only places it (no HUD look of its own). */
+	/** Whether its page is a panel of its own, which shows its settings (the menu adds only the Mod section's rows). */
+	public boolean ownPage() {
+		return ownPage;
+	}
+
 	public boolean drawnByMinecraft() {
 		return drawnByMinecraft;
 	}
@@ -299,6 +306,7 @@ public final class ModuleDescriptor {
 		private @Nullable String statusNote;
 		private @Nullable BoxStyle style;
 		private boolean drawnByMinecraft;
+		private boolean ownPage;
 
 		private Builder(String id, String name, String description) {
 			this.id = id;
@@ -382,11 +390,18 @@ public final class ModuleDescriptor {
 			return this;
 		}
 
+		/** Its page is a panel of its own ({@link ModuleDescriptor#ownPage()}). */
+		public Builder ownPage() {
+			ownPage = true;
+			return this;
+		}
+
 		public ModuleDescriptor build() {
 			ModuleDescriptor made = new ModuleDescriptor(id, name, description, keywords, icon, category, sections, placement, requirement, note, kind,
 				status, statusNote);
 			made.boxStyle = style;
 			made.drawnByMinecraft = drawnByMinecraft;
+			made.ownPage = ownPage;
 			return made;
 		}
 	}

@@ -9,9 +9,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
-pub const SUPPORTED_VERSIONS: [&str; 9] =
-    ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.8.9"];
-pub const DISCORD_INVITE: &str = "https://discord.gg/59rAHZMWb7";
+pub const SUPPORTED_VERSIONS: [&str; 11] =
+    ["26.3", "26.2", "26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.10", "1.21.1", "1.19.2", "1.19", "1.8.9"];
+pub const DISCORD_INVITE: &str = "https://discord.gg/flintclient";
 /// Built-in address of Flint's AI gateway, the production Cloudflare Worker (Mojang-verified players
 /// only; no key or secret in the app). FLINT_AI_GATEWAY_URL (at run or build time) can point a build
 /// elsewhere, e.g. at staging for tests; it is no longer a setting, so an address saved by an older Flint
@@ -1323,6 +1323,8 @@ mod tests {
         assert!(validate_version("26.3", "fabric").is_ok());
         assert!(validate_version("1.8.9", "vanilla").is_ok());
         assert!(validate_version("1.8.9", "fabric").is_ok(), "Fabric from Ornithe");
+        assert!(validate_version("1.19.2", "fabric").is_ok() && validate_version("1.19", "vanilla").is_ok());
+        assert!(validate_version("1.19.1", "fabric").is_err(), "only the 1.19 releases Flint offers");
         assert!(validate_version("1.12.2", "vanilla").is_err());
         assert!(validate_version("26.3", "forge").is_err());
     }

@@ -146,7 +146,7 @@
 }
 
 .fdot.is-offline {
-  background: #5d5953;
+  background: rgba(var(--ink-rgb), 0.34);
 }
 
 .fdot.is-inline {
@@ -327,7 +327,7 @@
 }
 
 .friend-row:not(.is-active):hover {
-  --fdot-ring: #171615;
+  --fdot-ring: var(--surface-2);
 }
 
 .friend-main {
@@ -713,6 +713,23 @@ button.friend-main:focus-visible {
 }
 
 /* ---------- The composer ---------- */
+
+/* "Alex is typing…": a strip kept above the composer, so nothing moves when it shows. */
+.chat-typing {
+  height: 16px;
+  margin: 2px 18px -4px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.chat-typing.is-on {
+  opacity: 1;
+}
 
 .composer {
   display: flex;

@@ -48,8 +48,8 @@ pub mod testkit {
 
     /// A minimal client jar for `version` under `game_root/versions/`, whose version.json reports
     /// `data_version` and the resource pack format the way Minecraft's own jars do (the real values, read
-    /// from the 1.21.x and 26.1–26.3 jars: 1.21.1 34, 1.21.10 69.0, 1.21.11 75.0, 26.1.x 84.0, 26.2 88.0,
-    /// 26.3 97.1).
+    /// from the 1.19.x, 1.21.x and 26.1–26.3 jars: 1.19 and 1.19.2 9, 1.21.1 34, 1.21.10 69.0, 1.21.11 75.0, 26.1.x 84.0,
+    /// 26.2 88.0, 26.3 97.1).
     pub fn install_version(game_root: &Path, version: &str, data_version: u32) {
         use std::io::Write;
         let dir = game_root.join("versions").join(version);
@@ -57,6 +57,7 @@ pub mod testkit {
         let mut zip = zip::ZipWriter::new(std::fs::File::create(dir.join(format!("{version}.jar"))).unwrap());
         zip.start_file("version.json", zip::write::SimpleFileOptions::default()).unwrap();
         let pack = match data_version {
+            3105 | 3120 => serde_json::json!({ "resource": 9, "data": 10 }),
             3955 => serde_json::json!({ "resource": 34, "data": 48 }),
             4556 => serde_json::json!({ "resource_major": 69, "resource_minor": 0, "data_major": 88, "data_minor": 0 }),
             4671 => serde_json::json!({ "resource_major": 75, "resource_minor": 0, "data_major": 94, "data_minor": 1 }),

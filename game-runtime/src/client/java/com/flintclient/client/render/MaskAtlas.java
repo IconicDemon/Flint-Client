@@ -202,9 +202,18 @@ public final class MaskAtlas {
 		return batching ? find(MaskKey.of(MaskKey.ICON, sizePx, codepoint, 3, 0)) : lookup(new Key("glyph", sizePx, codepoint));
 	}
 
+	/**
+	 * A Font Awesome Solid glyph as {@link #glyph}, but its ink centred in the {@code sizePx} square both ways (an icon on its own
+	 * in a tile sits in the tile's optical middle, whatever its shape): the ICON kind with {@code c} = 4.
+	 */
+	public Entry centredGlyph(int codepoint, int sizePx) {
+		return batching ? find(MaskKey.of(MaskKey.ICON, sizePx, codepoint, 4, 0)) : lookup(new Key("glyphc", sizePx, codepoint));
+	}
+
 	/** The Flint mark, {@code heightPx} tall, in its own colours. */
 	public Entry mark(int heightPx) {
-		return batching ? find(MaskKey.of(MaskKey.MARK, heightPx, 0, 0, 0)) : lookup(new Key("mark", heightPx, null));
+		int theme = markTheme();
+		return batching ? find(MaskKey.of(MaskKey.MARK, heightPx, theme, 0, 0)) : lookup(new Key("mark", heightPx, theme));
 	}
 
 	public static int markWidth(int heightPx) {
@@ -386,7 +395,8 @@ public final class MaskAtlas {
 			case "filled" -> filledPixels((FilledIcon) key.detail, key.size);
 			case "card" -> cardPixels((Integer) key.detail, key.size);
 			case "glyph" -> new Shape(key.size, key.size, GlyphRaster.pixels((Integer) key.detail, key.size));
-			case "mark" -> markPixels(key.size);
+			case "glyphc" -> new Shape(key.size, key.size, centred(GlyphRaster.pixels((Integer) key.detail, key.size), key.size));
+			case "mark" -> markPixels(key.size, key.detail instanceof Integer theme ? theme : 0);
 			default -> throw new IllegalArgumentException("Unknown mask " + key.kind);
 		};
 	}
@@ -404,11 +414,49 @@ public final class MaskAtlas {
 				case 0 -> iconPixels(Icon.values()[MaskKey.b(key)], a);
 				case 1 -> filledPixels(FilledIcon.values()[MaskKey.b(key)], a);
 				case 3 -> new Shape(a, a, GlyphRaster.pixels(MaskKey.b(key), a));
+				case 4 -> new Shape(a, a, centred(GlyphRaster.pixels(MaskKey.b(key), a), a));
 				default -> cardPixels(MaskKey.b(key), a);
 			};
-			case MaskKey.MARK -> markPixels(a);
+			case MaskKey.MARK -> markPixels(a, MaskKey.b(key));
 			default -> throw new IllegalArgumentException("Unknown mask kind " + MaskKey.kind(key));
 		};
+	}
+
+	/**
+	 * A {@code size} square mask with its ink (every pixel with any coverage) moved by whole pixels so its box sits in the
+	 * middle both ways (an odd pixel left over goes right and down); the coverage itself is kept, so its edges stay as smooth
+	 * as drawn. All clear stays all clear. Pure.
+	 */
+	static int[] centred(int[] argb, int size) {
+		int left = size;
+		int top = size;
+		int right = -1;
+		int bottom = -1;
+		for (int y = 0; y < size; y++) {
+			for (int x = 0; x < size; x++) {
+				if ((argb[y * size + x] >>> 24) != 0) {
+					left = Math.min(left, x);
+					right = Math.max(right, x);
+					top = Math.min(top, y);
+					bottom = Math.max(bottom, y);
+				}
+			}
+		}
+		if (right < 0) {
+			return argb;
+		}
+		int dx = (size - (right - left + 1) + 1) / 2 - left;
+		int dy = (size - (bottom - top + 1) + 1) / 2 - top;
+		if (dx == 0 && dy == 0) {
+			return argb;
+		}
+		int[] out = new int[size * size];
+		for (int y = top; y <= bottom; y++) {
+			for (int x = left; x <= right; x++) {
+				out[(y + dy) * size + x + dx] = argb[y * size + x];
+			}
+		}
+		return out;
 	}
 
 	private static Shape cornerPixels(int r) {
@@ -527,7 +575,30 @@ public final class MaskAtlas {
 		return filledPixels(icon, size).argb;
 	}
 
-	private static Shape markPixels(int height) {
+	/** The mark's colours per theme seen this session (index 0: the brand's own, Ember); a few at most, one per theme. */
+	private static final List<int[]> MARK_THEMES = new java.util.concurrent.CopyOnWriteArrayList<>(List.of(new int[] {Logo.DARK, Logo.LIGHT, Logo.CORE}));
+
+	/**
+	 * The mark's colours for the player's theme ({@link Palette}): the brand's amber on Ember; on another theme its facets in the
+	 * theme's accent (pressed and hover shades), the core as it is. Its index is part of the mark's cache key.
+	 */
+	static int markTheme() {
+		if (Palette.ember()) {
+			return 0;
+		}
+		int[] colours = {Palette.ACCENT_PRESS & 0xFFFFFF, Palette.ACCENT_HOVER & 0xFFFFFF, Logo.CORE};
+		for (int i = 0; i < MARK_THEMES.size(); i++) {
+			if (java.util.Arrays.equals(MARK_THEMES.get(i), colours)) {
+				return i;
+			}
+		}
+		MARK_THEMES.add(colours);
+		return MARK_THEMES.size() - 1;
+	}
+
+	private static Shape markPixels(int height, int theme) {
+		int[] colours = MARK_THEMES.get(Math.clamp(theme, 0, MARK_THEMES.size() - 1));
+		Sdf.Polygon[] facets = Logo.facets(colours[0], colours[1], colours[2]);
 		int width = markWidth(height);
 		float unit = height / Logo.HEIGHT;
 		int[] argb = new int[width * height];
@@ -540,7 +611,7 @@ public final class MaskAtlas {
 				float b = 0;
 				float a = 0;
 				// The facets are painted in order, compositing "over" with premultiplied colour.
-				for (Sdf.Polygon facet : Logo.FACETS) {
+				for (Sdf.Polygon facet : facets) {
 					float c = Sdf.coverage(facet.signedDistance(lx, ly) * unit);
 					if (c <= 0) {
 						continue;
@@ -579,11 +650,19 @@ public final class MaskAtlas {
 		static final float TOP = 60;
 		static final float HEIGHT = 350;
 		static final float ASPECT = 190.0F / 350.0F;
-		static final Sdf.Polygon[] FACETS = {
-			new Sdf.Polygon(new float[] {256, 351, 256, 161}, new float[] {60, 228, 312, 228}, 0xB45309),
-			new Sdf.Polygon(new float[] {256, 351, 256}, new float[] {60, 228, 186}, 0xD97706),
-			new Sdf.Polygon(new float[] {239, 318, 239, 194}, new float[] {172, 284, 410, 284}, 0xFEF3E2),
-		};
+		/** The brand's colours: the dark facet, the light one and the core. */
+		static final int DARK = 0xB45309;
+		static final int LIGHT = 0xD97706;
+		static final int CORE = 0xFEF3E2;
+
+		/** The three facets, in the given colours (RGB). */
+		static Sdf.Polygon[] facets(int dark, int light, int core) {
+			return new Sdf.Polygon[] {
+				new Sdf.Polygon(new float[] {256, 351, 256, 161}, new float[] {60, 228, 312, 228}, dark),
+				new Sdf.Polygon(new float[] {256, 351, 256}, new float[] {60, 228, 186}, light),
+				new Sdf.Polygon(new float[] {239, 318, 239, 194}, new float[] {172, 284, 410, 284}, core),
+			};
+		}
 
 		private Logo() {
 		}

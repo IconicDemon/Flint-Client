@@ -1,0 +1,25 @@
+# The unit tests (src/test/java) as Minecraft 1.19.2 runs them, on top of 1.21.1's: shared-sources.rules' renames, then these
+# (same forms; paths relative to src/test/java's com/flintclient/client).
+
+# Java 17: no List.getFirst/getLast/removeLast (Java 21).
+s-in {control/feature/FeatureLogicTest.java,control/platform/HookGuardTest.java,control/store/FpsPersistenceTest.java,graphics/PreparationsTest.java,module/servers/PingRoundTest.java} \.getFirst\(\) => .get(0)
+file control/rshift/CatalogTest.java
+s catalog\.mods\(\)\.getLast\(\) => com.flintclient.client.compat.J17.getLast(catalog.mods())
+file graphics/PreparationsTest.java
+s workers\.queued\.removeLast\(\); => com.flintclient.client.compat.J17.removeLast(workers.queued);
+
+# 1.19.2 names a sound's file itself (1.19.3 added the sound lister): sounds/<path>.ogg.
+file control/platform/UiSoundsTest.java
+s Sound\.SOUND_LISTER\.idToFile\((UiSounds\.\w+)\) => new net.minecraft.resources.ResourceLocation($1.getNamespace(), "sounds/" + $1.getPath() + ".ogg")
+
+# 1.19.2's tick durations know no tick rate (1.20.3 added it, and the format Flint's HUD uses): the HUD's durations are checked
+# against 1.20.3's format, kept here.
+file control/hud/render/HudFormatTest.java
+s StringUtil\.formatTickDuration\(ticks, tickrate\) => flint\$formatTickDuration(ticks, tickrate)
+s import net\.minecraft\.util\.StringUtil;\n =>
+s (?s)\n\}\n?$ => \n\n\t/** 1.20.3's StringUtil.formatTickDuration (minutes and seconds, hours once there are any). */\n\tprivate static String flint\$formatTickDuration(int ticks, float tickrate) {\n\t\tint seconds = net.minecraft.util.Mth.floor(ticks / tickrate);\n\t\tint minutes = seconds / 60;\n\t\tseconds %= 60;\n\t\tint hours = minutes / 60;\n\t\tminutes %= 60;\n\t\treturn hours > 0 ? String.format(java.util.Locale.ROOT, "%02d:%02d:%02d", hours, minutes, seconds)\n\t\t\t: String.format(java.util.Locale.ROOT, "%02d:%02d", minutes, seconds);\n\t}\n}\n
+
+# 1.19.x has no mace (1.21 added it): Armor's mace slot is greyed out with that reason, the rest as on every line with an offhand.
+file control/model/ArmorSettingsTest.java
+s Armor\.SHIELD, Armor\.TRIDENT, Armor\.MACE, Armor\.OFFHAND_DURABILITY\} => Armor.SHIELD, Armor.TRIDENT, Armor.OFFHAND_DURABILITY}
+s (\t\tString missing = com\.flintclient\.client\.compat\.McCompat\.OFFHAND \? null : "Not in Minecraft 1\.8\.9";\n) => $1\t\torg.junit.jupiter.api.Assertions.assertNotNull(ModuleSettings.inactiveReason(armor, Armor.MACE), "1.19.x has no mace");\n

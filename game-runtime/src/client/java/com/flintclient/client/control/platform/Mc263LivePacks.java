@@ -164,6 +164,20 @@ public final class Mc263LivePacks {
 			return;
 		}
 		PackRepository repository = mc.getResourcePackRepository();
+		boolean touchesSelection = false;
+		for (Waiting w : changes) {
+			touchesSelection |= w.change.enable() || w.change.removed() && repository.getSelectedIds().contains("file/" + w.change.file());
+		}
+		if (!touchesSelection) {
+			// Only added (or a pack that wasn't on taken out): nothing loads. The file is in the folder and Minecraft's Resource
+			// Packs screen lists it when it opens (it reads the folder then): no folder scan here, so no frame pays for it.
+			for (Waiting w : changes) {
+				if (!w.told) {
+					say(w.change.title() + (w.change.removed() ? " removed" : " added to your resource packs"));
+				}
+			}
+			return;
+		}
 		List<String> before = new ArrayList<>(repository.getSelectedIds());
 		repository.reload();
 		// A pack removed while it was on (where the system let the file go) left the selection with the reload.

@@ -156,6 +156,6 @@ public final class WhatsNewScreen extends FlintPageScreen {
 		int barY = viewTop + Math.round((view - barH) * k);
 		int barW = Math.max(2, c.px(1.2F));
 		int barX = c.px(width) - c.px(MARGIN / 2.0F) - barW;
-		c.roundRect(barX, barY, barW, barH, barW / 2, 0x40FFFFFF);
+		c.roundRect(barX, barY, barW, barH, barW / 2, Palette.tint(0x40FFFFFF));
 	}
 }

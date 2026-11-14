@@ -23,11 +23,12 @@ fn stability(v: &Value) -> u8 {
 }
 
 /// Whether Flint can install a version's file as this kind of content: a plain file name of the right type,
-/// with a published SHA-512 and an address.
+/// with a published hash (Modrinth's SHA-512, CurseForge's SHA-1) and an address.
 fn installable(v: &Value, kind: &str) -> bool {
+    let algo = if curseforge::is_ref(v["project_id"].as_str().unwrap_or_default()) { "sha1" } else { "sha512" };
     primary_file(v).is_some_and(|f| {
         let name = f["filename"].as_str().unwrap_or_default();
-        plain_name(name) && file_fits(kind, name) && f["hashes"]["sha512"].as_str().is_some_and(|h| !h.is_empty()) && f["url"].is_string()
+        plain_name(name) && file_fits(kind, name) && f["hashes"][algo].as_str().is_some_and(|h| !h.is_empty()) && f["url"].is_string()
     })
 }
 
@@ -86,8 +87,8 @@ fn dependency_needs(version: &Value, present: &HashMap<String, String>) -> (Vec<
     let mut missing = Vec::new();
     let mut clashes = Vec::new();
     for dep in version["dependencies"].as_array().into_iter().flatten() {
-        let project = dep["project_id"].as_str().filter(|p| valid_id(p)).map(str::to_owned);
-        let pinned = dep["version_id"].as_str().filter(|v| valid_id(v)).map(str::to_owned);
+        let project = dep["project_id"].as_str().filter(|p| curseforge::valid_ref(p)).map(str::to_owned);
+        let pinned = dep["version_id"].as_str().filter(|v| curseforge::valid_ref(v)).map(str::to_owned);
         match dep["dependency_type"].as_str() {
             Some("required") if !project.as_ref().is_some_and(|p| present.contains_key(p)) && (project.is_some() || pinned.is_some()) => {
                 missing.push(Dependency { project, version: pinned });
@@ -172,6 +173,11 @@ impl Needs {
     async fn plan(catalog: &impl Catalog, profile: &Profile, installed: &[ContentEntry], project_id: &str, version: Option<String>, title: &str, kind: &str) -> Result<Vec<Value>, String> {
         let unchecked = || "Flint couldn't check what this version needs. Try again later.".to_string();
         let project = catalog.project(project_id).await.map_err(|_| unchecked())?;
+        // The same mod from the other site is already in the profile (Fabric API from Modrinth for a CurseForge update).
+        let slug = project["slug"].as_str().map(slug_key).unwrap_or_default();
+        if !slug.is_empty() && installed.iter().any(|e| e.kind == "mod" && slug_key(&e.slug) == slug) {
+            return Ok(Vec::new());
+        }
         let dep_kind = match project_kind(&project) {
             k if k == "datapack" => kind.to_owned(),
             k => k,
@@ -191,12 +197,29 @@ impl Needs {
 trait UpdateSource: Catalog {
     /// The newest version, by file hash, among those for these loaders and this Minecraft version.
     async fn latest(&self, hashes: &[String], kind: &str, game_version: &str) -> CmdResult<Value>;
+    /// CurseForge mods by id, for their `latestFilesIndexes` (which says whether anything newer may exist). Empty when
+    /// unknown: every CurseForge item's files are then listed.
+    async fn curseforge_mods(&self, _ids: &[u64]) -> Vec<Value> {
+        Vec::new()
+    }
+    /// The changelog of a version that came without one (CurseForge's are asked for separately).
+    async fn changelog_of(&self, _version: &Value) -> Option<String> {
+        None
+    }
 }
 
 impl UpdateSource for AppState {
     async fn latest(&self, hashes: &[String], kind: &str, game_version: &str) -> CmdResult<Value> {
-        let body = json!({ "hashes": hashes, "algorithm": "sha512", "loaders": loaders_for(kind), "game_versions": [game_version] });
+        let body = json!({ "hashes": hashes, "algorithm": "sha512", "loaders": loaders_on(kind, game_version), "game_versions": [game_version] });
         self.modrinth.post(&self.http, "/version_files/update", &body, "Couldn't check for updates").await
+    }
+    async fn curseforge_mods(&self, ids: &[u64]) -> Vec<Value> {
+        curseforge::mods(self, ids).await.unwrap_or_default()
+    }
+    async fn changelog_of(&self, version: &Value) -> Option<String> {
+        let project = version["project_id"].as_str().and_then(curseforge::parse_ref)?;
+        let file = version["id"].as_str().and_then(curseforge::parse_ref)?;
+        curseforge::changelog(self, project, file).await.ok().filter(|c| !c.trim().is_empty())
     }
 }
 
@@ -225,7 +248,7 @@ fn survey(state: &AppState, profile: &Profile) -> (Vec<Installed>, Vec<Value>) {
     let mut known = Vec::new();
     let mut unmanaged = Vec::new();
     for (kind, world) in content_targets(state, &profile.id) {
-        if (kind == "mod" || kind == "shader") && !takes_mods(profile) {
+        if !takes(profile, &kind) {
             continue;
         }
         let Ok(dir) = kind_dir(state, &profile.id, &kind, world.as_deref()) else { continue };
@@ -318,29 +341,70 @@ async fn find_updates(source: &impl UpdateSource, profile: &Profile, installed: 
     let game = profile.game_version.as_str();
     let mut needs = Needs::default();
     let mut updates = Vec::new();
+    // CurseForge projects' pages, for the update dialog's changelog link.
+    let mut sites: HashMap<String, Value> = HashMap::new();
     for kind in ["mod", "resourcepack", "shader", "datapack"] {
-        let group: Vec<&Installed> = files.iter().filter(|f| f.kind == kind && !f.sha512.is_empty()).collect();
-        if group.is_empty() {
+        // Each item is checked where it came from: a CurseForge install never turns into a Modrinth one, or back.
+        let (from_curseforge, from_modrinth): (Vec<&Installed>, Vec<&Installed>) = files.iter().filter(|f| f.kind == kind).partition(|f| curseforge::is_ref(&f.project_id));
+        let group: Vec<&Installed> = from_modrinth.into_iter().filter(|f| !f.sha512.is_empty()).collect();
+        let mut newer: Vec<&Installed> = Vec::new();
+        if !group.is_empty() {
+            let hashes: Vec<String> = group.iter().map(|f| f.sha512.clone()).collect::<HashSet<_>>().into_iter().collect();
+            let mut latest = serde_json::Map::new();
+            for chunk in hashes.chunks(300) {
+                latest.extend(source.latest(chunk, kind, game).await?.as_object().cloned().unwrap_or_default());
+            }
+            // Modrinth's answer is the newest build of any channel; when that's the installed one, nothing is newer.
+            newer.extend(group.into_iter().filter(|file| latest.get(&file.sha512).is_some_and(|newest| newest["id"].as_str() != Some(file.version_id.as_str()))));
+        }
+        if !from_curseforge.is_empty() {
+            // One request says which mods may have a newer file for this profile; only those have their files listed.
+            let ids: Vec<u64> = from_curseforge.iter().filter_map(|f| curseforge::parse_ref(&f.project_id)).collect::<HashSet<_>>().into_iter().collect();
+            let mods = source.curseforge_mods(&ids).await;
+            for m in &mods {
+                if let (Some(id), Some(site)) = (m["id"].as_u64(), m["links"]["websiteUrl"].as_str().filter(|u| u.starts_with("https://"))) {
+                    sites.insert(curseforge::reference(id), json!(site));
+                }
+            }
+            newer.extend(from_curseforge.into_iter().filter(|file| {
+                let id = curseforge::parse_ref(&file.project_id);
+                let installed_file = curseforge::parse_ref(&file.version_id).unwrap_or(0);
+                mods.iter().find(|m| m["id"].as_u64() == id).is_none_or(|m| curseforge::may_have_newer(m, installed_file, kind, game))
+            }));
+        }
+        if newer.is_empty() {
             continue;
         }
-        let hashes: Vec<String> = group.iter().map(|f| f.sha512.clone()).collect::<HashSet<_>>().into_iter().collect();
-        let mut latest = serde_json::Map::new();
-        for chunk in hashes.chunks(300) {
-            latest.extend(source.latest(chunk, kind, game).await?.as_object().cloned().unwrap_or_default());
-        }
-        // Modrinth's answer is the newest build of any channel; when that's the installed one, nothing is newer.
-        let newer: Vec<&Installed> = group
-            .into_iter()
-            .filter(|file| latest.get(&file.sha512).is_some_and(|newest| newest["id"].as_str() != Some(file.version_id.as_str())))
-            .collect();
         let mut each = Vec::with_capacity(newer.len());
         for file in &newer {
             each.push(versions_of(source, file, kind, game));
         }
         let looked_up: Vec<Option<(Vec<Value>, Value)>> = futures_util::stream::iter(each).buffered(parallel.max(1)).collect().await;
-        for (file, looked_up) in newer.into_iter().zip(looked_up) {
-            let Some((list, current)) = looked_up else { continue };
-            let Some((proposed, alternatives)) = update_options(&current, &list, kind, game) else { continue };
+        let proposals: Vec<(&Installed, Value, Value, Vec<Value>)> = newer
+            .into_iter()
+            .zip(looked_up)
+            .filter_map(|(file, looked_up)| {
+                let (list, current) = looked_up?;
+                let (proposed, alternatives) = update_options(&current, &list, kind, game)?;
+                Some((file, current, proposed, alternatives))
+            })
+            .collect();
+        // CurseForge lists files without their changelogs: the proposed version's is asked for, all at once.
+        let mut notes = Vec::with_capacity(proposals.len());
+        for (_, _, proposed, _) in &proposals {
+            notes.push(async move {
+                if proposed["changelog"].as_str().is_some_and(|c| !c.is_empty()) {
+                    None
+                } else {
+                    source.changelog_of(proposed).await
+                }
+            });
+        }
+        let notes: Vec<Option<String>> = futures_util::stream::iter(notes).buffered(parallel.max(1)).collect().await;
+        for ((file, current, mut proposed, alternatives), note) in proposals.into_iter().zip(notes) {
+            if let Some(note) = note {
+                proposed["changelog"] = json!(note);
+            }
             let mut options = Vec::new();
             for v in std::iter::once(&proposed).chain(&alternatives) {
                 let option = match needs.of(source, profile, installed, v, &file.title, kind).await {
@@ -366,6 +430,9 @@ async fn find_updates(source: &impl UpdateSource, profile: &Profile, installed: 
             ] {
                 update[key] = value;
             }
+            if let Some(site) = sites.get(&file.project_id) {
+                update["websiteUrl"] = site.clone();
+            }
             updates.push(update);
         }
     }
@@ -383,7 +450,8 @@ pub async fn content_updates(state: State<'_, AppState>, profile_id: String) -> 
 async fn check_profile(state: &AppState, source: &impl UpdateSource, profile: &Profile) -> CmdResult<Value> {
     let (mut files, mut unmanaged) = survey(state, profile);
     // Records from before Flint kept hashes: the file on disk is hashed instead.
-    for file in files.iter_mut().filter(|f| f.sha512.is_empty()) {
+    // CurseForge items are checked by their ids, not a hash.
+    for file in files.iter_mut().filter(|f| f.sha512.is_empty() && !curseforge::is_ref(&f.project_id)) {
         let path = file.path.clone();
         file.sha512 = tokio::task::spawn_blocking(move || sha512_file(&path)).await.ok().flatten().unwrap_or_default();
         if file.sha512.is_empty() {
@@ -492,7 +560,9 @@ struct NewFile {
     slug: String,
     icon_url: Option<String>,
     file_name: String,
+    /// Modrinth's SHA-512, or empty for a CurseForge file (`sha1`).
     sha512: String,
+    sha1: String,
     url: String,
     size: Option<u64>,
     requires: Vec<String>,
@@ -507,7 +577,13 @@ fn new_file(version: &Value, project: Option<&Value>, kind: &str, world: Option<
     if !file_fits(kind, name) {
         return Err(format!("{name} isn't a file type Flint installs for this content"));
     }
-    let sha512 = file["hashes"]["sha512"].as_str().filter(|h| !h.is_empty()).ok_or("Modrinth published no SHA-512 hash for this file")?;
+    let from_curseforge = curseforge::is_ref(version["project_id"].as_str().unwrap_or_default());
+    let hash = |algo: &str| file["hashes"][algo].as_str().filter(|h| !h.is_empty()).map(str::to_owned);
+    let (sha512, sha1) = if from_curseforge {
+        (String::new(), hash("sha1").ok_or("CurseForge published no SHA-1 hash for this file")?)
+    } else {
+        (hash("sha512").ok_or("Modrinth published no SHA-512 hash for this file")?, String::new())
+    };
     let text = |v: &Value, key: &str| v[key].as_str().unwrap_or_default().to_owned();
     Ok(NewFile {
         kind: kind.to_owned(),
@@ -519,8 +595,9 @@ fn new_file(version: &Value, project: Option<&Value>, kind: &str, world: Option<
         slug: project.map(|p| text(p, "slug")).unwrap_or_default(),
         icon_url: project.and_then(|p| p["icon_url"].as_str()).map(str::to_owned),
         file_name: name.to_owned(),
-        sha512: sha512.to_owned(),
-        url: file["url"].as_str().ok_or("No download address")?.to_owned(),
+        sha512,
+        sha1,
+        url: file["url"].as_str().ok_or(if from_curseforge { "Its author allows downloads only on CurseForge" } else { "No download address" })?.to_owned(),
         size: file["size"].as_u64(),
         requires: version["dependencies"]
             .as_array()
@@ -565,6 +642,8 @@ struct Live<'a> {
     app: &'a AppHandle,
     state: &'a AppState,
     job: &'a str,
+    /// The profile is a 1.8.9 one (Fabric from Ornithe): each downloaded mod jar is checked (`ornithe::check_jar`).
+    ornithe: bool,
 }
 
 impl Catalog for Live<'_> {
@@ -581,8 +660,17 @@ impl Catalog for Live<'_> {
 
 impl Transfer for Live<'_> {
     async fn download(&self, file: &NewFile, target: &Path, quiet: bool) -> CmdResult<u64> {
-        let fetch = Fetch { url: &file.url, expected: Expected::Sha512(&file.sha512), max_bytes: jobs::listed_cap(file.size), allowed_hosts: MODRINTH_CDN, quiet };
-        download_verified(self.app, self.state, self.job, fetch, target).await
+        let (expected, hosts) = if curseforge::is_ref(&file.project_id) {
+            (Expected::Sha1(&file.sha1), self.state.curseforge.download_hosts())
+        } else {
+            (Expected::Sha512(&file.sha512), MODRINTH_CDN)
+        };
+        let fetch = Fetch { url: &file.url, expected, max_bytes: jobs::listed_cap(file.size), allowed_hosts: hosts, quiet };
+        let size = download_verified(self.app, self.state, self.job, fetch, target).await?;
+        if self.ornithe && file.kind == "mod" {
+            crate::ornithe::check_jar_async(target.to_path_buf(), file.title.clone()).await?;
+        }
+        Ok(size)
     }
     fn stage(&self, stage: &str, done: usize, total: usize) {
         self.state.jobs.update(self.app, self.job, false, |j| {
@@ -633,7 +721,7 @@ pub async fn content_update(app: AppHandle, state: State<'_, AppState>, profile_
     ensure_not_running(&state, &profile_id)?;
     let mut unique: Vec<UpdateItem> = Vec::new();
     for item in items.into_iter().take(300) {
-        if !plain_name(&item.file_name) || item.world.as_deref().is_some_and(|w| !plain_name(w)) || !valid_id(&item.version_id) {
+        if !plain_name(&item.file_name) || item.world.as_deref().is_some_and(|w| !plain_name(w)) || !curseforge::valid_ref(&item.version_id) {
             return Err("Unsafe file name".into());
         }
         if !unique.iter().any(|u| u.kind == item.kind && u.file_name == item.file_name && u.world == item.world) {
@@ -648,7 +736,8 @@ pub async fn content_update(app: AppHandle, state: State<'_, AppState>, profile_
     let (id, _) = state.jobs.create(&app, "update", Some(&profile_id), &title, unique.len());
     jobs::spawn(&app, id.clone(), move |app, job| async move {
         let state = app.state::<AppState>();
-        let live = Live { app: &app, state: state.inner(), job: &job };
+        let ornithe = find_profile(state.inner(), &profile_id).is_ok_and(|p| p.loader == "fabric" && crate::ornithe::on_ornithe(&p.game_version));
+        let live = Live { app: &app, state: state.inner(), job: &job, ornithe };
         apply(state.inner(), &live, &profile_id, unique).await
     });
     Ok(id)
@@ -673,8 +762,8 @@ fn item_title(state: &AppState, profile_id: &str, item: &UpdateItem) -> String {
 /// Works out one update: the file must still be there, Flint must know its project, and the version must be
 /// that project's and built for this profile.
 async fn plan_swap(state: &AppState, catalog: &impl Catalog, profile: &Profile, manifest: &[ContentEntry], identified: &HashMap<String, Identified>, item: &UpdateItem) -> CmdResult<Option<Swap>> {
-    if (item.kind == "mod" || item.kind == "shader") && !takes_mods(profile) {
-        return Err(no_mods_reason(profile).into());
+    if !takes(profile, &item.kind) {
+        return Err(refusal(profile, &item.kind).into());
     }
     let dir = kind_dir(state, &profile.id, &item.kind, item.world.as_deref())?;
     if !dir.join(&item.file_name).is_file() && !dir.join(format!("{}{DISABLED}", item.file_name)).is_file() {
@@ -1016,6 +1105,7 @@ fn commit(state: &AppState, io: &impl Transfer, profile_id: &str, swaps: &mut [S
             version_number: new.version_number.clone(),
             file_name: new.file_name.clone(),
             sha512: new.sha512.clone(),
+            sha1: new.sha1.clone(),
             size: new.size.unwrap_or(0),
             source: if old.source.is_empty() { "user".into() } else { old.source.clone() },
             reason: old.reason.clone(),
@@ -1042,6 +1132,7 @@ fn commit(state: &AppState, io: &impl Transfer, profile_id: &str, swaps: &mut [S
             version_number: file.version_number.clone(),
             file_name: file.file_name.clone(),
             sha512: file.sha512.clone(),
+            sha1: file.sha1.clone(),
             size: file.size.unwrap_or(0),
             source: "dependency".into(),
             icon_url: file.icon_url.clone(),
@@ -1415,6 +1506,58 @@ mod tests {
         let unmanaged: Vec<&str> = result["unmanaged"].as_array().unwrap().iter().map(|u| u["fileName"].as_str().unwrap()).collect();
         assert_eq!(unmanaged, ["mystery.jar", "My Pack"], "files nobody can match are listed, never guessed");
         assert_eq!(updates.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn curseforge_items_are_checked_on_curseforge_and_never_turn_into_modrinth_ones() {
+        let dir = TestDir::new();
+        let cf_file = |id: u64, date: &str, release: u64, deps: Value, url: Option<&str>| {
+            crate::curseforge::version_of(&json!({
+                "id": id, "modId": 248787, "displayName": format!("AppleSkin {id}"), "fileName": format!("appleskin-{id}.jar"), "releaseType": release,
+                "fileDate": format!("2026-{date}T00:00:00Z"), "fileLength": 100, "gameVersions": [GAME, "Fabric"], "downloadUrl": url,
+                "hashes": [{ "value": format!("{id:040}"), "algo": 1 }], "dependencies": deps,
+            }))
+        };
+        let needs_api = json!([{ "modId": 306612, "relationType": 3 }]);
+        let fake = Fake {
+            projects: vec![
+                json!({ "id": "cf:248787", "slug": "appleskin", "title": "AppleSkin", "project_type": "mod", "loaders": ["fabric"], "platform": "curseforge" }),
+                json!({ "id": "cf:306612", "slug": "fabric-api", "title": "Fabric API", "project_type": "mod", "loaders": ["fabric"], "platform": "curseforge" }),
+                mod_project("FABRICAP", "Fabric API"),
+            ],
+            versions: vec![
+                cf_file(5000, "01-01", 1, needs_api.clone(), Some("https://edge.forgecdn.net/files/5/0/a.jar")),
+                cf_file(5001, "02-01", 1, needs_api.clone(), Some("https://edge.forgecdn.net/files/5/1/a.jar")),
+                // Newer, but its author keeps it on CurseForge: never offered (Flint can't download it).
+                cf_file(5002, "03-01", 1, needs_api, None),
+                version("FABRICAP", "F1", "0.140.0", "fabric", GAME, "release", "01-15", json!([])),
+            ],
+            ..Default::default()
+        };
+        let state = AppState::for_tests(dir.0.clone());
+        let profile = Profile { id: PROFILE.into(), name: "Test".into(), game_version: GAME.into(), loader: "fabric".into(), ..Default::default() };
+        crate::data::save_profiles(&state, &crate::data::ProfilesFile { selected: None, profiles: vec![profile.clone()] }).unwrap();
+        let mods = state.paths.profile_dir(PROFILE).join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("appleskin-5000.jar"), b"cf").unwrap();
+        std::fs::write(mods.join("fabric-api.jar"), b"F1").unwrap();
+        let manifest = vec![
+            ContentEntry { kind: "mod".into(), project_id: "cf:248787".into(), version_id: "cf:5000".into(), slug: "appleskin".into(), title: "AppleSkin".into(), version_number: "AppleSkin 5000".into(), file_name: "appleskin-5000.jar".into(), sha1: format!("{:040}", 5000), ..Default::default() },
+            ContentEntry { kind: "mod".into(), project_id: "FABRICAP".into(), version_id: "F1".into(), slug: "fabric-api".into(), title: "Fabric API".into(), version_number: "0.140.0".into(), file_name: "fabric-api.jar".into(), sha512: sha(b"F1"), ..Default::default() },
+        ];
+        save(&state, PROFILE, &manifest).unwrap();
+        let result = check_profile(&state, &fake, &profile).await.unwrap();
+        let updates = result["updates"].as_array().unwrap();
+        assert_eq!(updates.len(), 1, "{updates:?}");
+        let apple = &updates[0];
+        assert_eq!((apple["projectId"].as_str(), apple["versionId"].as_str(), apple["currentVersionId"].as_str()), (Some("cf:248787"), Some("cf:5001"), Some("cf:5000")));
+        assert!(apple["adds"].as_array().unwrap().is_empty(), "Fabric API from Modrinth is already there: {}", apple["adds"]);
+        assert!(apple["blocked"].is_null());
+        assert!(result["unmanaged"].as_array().unwrap().is_empty(), "the CurseForge item isn't hashed for Modrinth: {}", result["unmanaged"]);
+        // The new file is CurseForge's, checked by its SHA-1, from CurseForge's CDN.
+        let new = new_file(&fake.versions[1], fake.projects.first(), "mod", None, "AppleSkin").unwrap();
+        assert_eq!((new.sha512.as_str(), new.sha1.as_str(), new.url.as_str()), ("", format!("{:040}", 5001).as_str(), "https://edge.forgecdn.net/files/5/1/a.jar"));
+        assert!(new_file(&fake.versions[2], None, "mod", None, "AppleSkin").unwrap_err().contains("only on CurseForge"));
     }
 
     #[tokio::test]

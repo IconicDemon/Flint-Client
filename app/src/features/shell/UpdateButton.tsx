@@ -1,23 +1,36 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useT } from "../../lib/i18n";
 import { useStoreSelect } from "../../lib/store";
-import { canInstallNow, downloadUpdate, installAndRestart, megabytes, progressLabel, retryUpdate, useUpdates } from "../../lib/updater";
+import { canInstallNow, downloadUpdate, installAndRestart, megabytes, progressLabel, releaseName, retryUpdate, useUpdates } from "../../lib/updater";
 import { Button, Progress, Spinner } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
+import { FlintMark } from "../../ui/Logo";
 import { Popover } from "../../ui/overlays";
 
 /**
- * The top bar's Update action, beside the account chip. Nothing shows while Flint is current (or while a
- * quiet check runs); once a newer version is published it appears as a compact "Update" chip. Its panel
- * shows the version and release notes, downloads with real progress, and restarts Flint into the new
- * version, which it holds back while Minecraft is running so a game is never cut short.
+ * The top bar's Update action, beside the account chip. Nothing shows while Flint is current (or while a quiet check
+ * runs); once a newer version is published it appears as a compact "Update" chip. Its panel is short on purpose (owner,
+ * 1.0.4): the version, the release's name and one Update button. The full notes are in News and on flintclient.com.
+ * Update downloads with real progress, checks the signature, then restarts Flint into the new version by itself, unless
+ * Minecraft is running: then it waits, so a game is never cut short.
  */
 export function UpdateButton() {
   const t = useT();
   const update = useUpdates();
   const gameRunning = useStoreSelect((s) => Object.values(s.states).some((st) => st.state === "running" || st.state === "launching"));
   const [open, setOpen] = useState(false);
+  // The release's name is known while the update is "available"; it stays shown through download and install.
+  const [name, setName] = useState<string | null>(null);
+  // Update was pressed here: once the download is ready, Flint restarts into it by itself (when no game runs).
+  const [auto, setAuto] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (update.phase === "available") setName(releaseName(update.notes));
+  }, [update]);
+  useEffect(() => {
+    if (auto && update.phase === "ready" && canInstallNow(update, gameRunning)) void installAndRestart(gameRunning);
+  }, [auto, update, gameRunning]);
 
   const visible =
     update.phase === "available" ||
@@ -34,6 +47,11 @@ export function UpdateButton() {
     : update.phase === "error" ? t("shell.update.failed")
     : t("shell.update.chip");
   const version = "version" in update ? update.version : null;
+  const share = update.phase === "downloading" && update.total ? Math.min(1, update.received / update.total) : null;
+  const start = () => {
+    setAuto(true);
+    void downloadUpdate();
+  };
 
   return (
     <>
@@ -44,27 +62,32 @@ export function UpdateButton() {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={version ? t("shell.update.chipLabel", { version, label }) : label}
+        style={share !== null ? ({ "--update-share": share } as CSSProperties) : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        {update.phase === "downloading" || update.phase === "installing" ? (
-          <Spinner size={14} />
-        ) : (
-          <Icon name={update.phase === "ready" ? "refresh" : update.phase === "error" ? "x" : "download"} size={15} />
-        )}
-        <span>{label}</span>
+        <span className="update-chip-icon" aria-hidden="true">
+          {update.phase === "downloading" || update.phase === "installing" ? (
+            <Spinner size={12} />
+          ) : (
+            <Icon name={update.phase === "ready" ? "refresh" : update.phase === "error" ? "x" : "download"} size={13} />
+          )}
+        </span>
+        <span className="update-chip-label">{label}</span>
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" label={t("shell.update.panelLabel")} className="update-pop">
-        <header className="update-head">
-          <strong>Flint {version}</strong>
-          <span className="faint">{t("shell.update.signed")}</span>
-        </header>
+        <div className="update-card">
+          <span className="update-mark" aria-hidden="true">
+            <FlintMark size={22} />
+          </span>
+          <span className="update-title">
+            <strong>Flint {version}</strong>
+            {name && <span title={name}>{name}</span>}
+          </span>
+        </div>
         {update.phase === "available" && (
-          <>
-            {update.notes && <p className="update-notes">{update.notes}</p>}
-            <Button variant="primary" icon="download" onClick={() => void downloadUpdate()}>
-              {t("shell.update.download")}
-            </Button>
-          </>
+          <Button variant="primary" icon="download" className="update-go" onClick={start}>
+            {t("shell.update.chip")}
+          </Button>
         )}
         {update.phase === "downloading" && (
           <div className="update-progress">
@@ -76,17 +99,17 @@ export function UpdateButton() {
         )}
         {update.phase === "ready" && (
           <>
-            <p className="update-notes">{gameRunning ? t("shell.update.waitForGame") : t("shell.update.readyNote")}</p>
-            <Button variant="primary" icon="refresh" disabled={!canInstallNow(update, gameRunning)} onClick={() => void installAndRestart(gameRunning)}>
+            {gameRunning && <p className="update-note">{t("shell.update.waitForGame")}</p>}
+            <Button variant="primary" icon="refresh" className="update-go" disabled={!canInstallNow(update, gameRunning)} onClick={() => void installAndRestart(gameRunning)}>
               {t("shell.update.restart")}
             </Button>
           </>
         )}
-        {update.phase === "installing" && <p className="update-notes">{t("shell.update.installingNote")}</p>}
+        {update.phase === "installing" && <p className="update-note">{t("shell.update.installingNote")}</p>}
         {update.phase === "error" && (
           <>
-            <p className="update-notes is-danger">{update.message}</p>
-            <Button variant="secondary" icon="refresh" onClick={() => retryUpdate()}>
+            <p className="update-note is-danger">{update.message}</p>
+            <Button variant="secondary" icon="refresh" className="update-go" onClick={() => retryUpdate()}>
               {t("common.retry")}
             </Button>
           </>

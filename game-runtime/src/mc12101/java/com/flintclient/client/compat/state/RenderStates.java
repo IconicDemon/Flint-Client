@@ -96,6 +96,9 @@ public final class RenderStates {
 			if (living instanceof AvatarRenderState avatar && entity instanceof AbstractClientPlayer player) {
 				avatar.id = player.getId();
 				avatar.skin = player.getSkin();
+				avatar.isFallFlying = player.isFallFlying();
+				avatar.isVisuallySwimming = player.isVisuallySwimming();
+				avatar.isInWater = player.isInWater();
 				cape(avatar, player, partialTick);
 			}
 		}

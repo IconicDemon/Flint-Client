@@ -42,6 +42,14 @@ final class SettingsList extends Node {
 	private final ScrollView scroll;
 	private final List<Catalog.Section> sections;
 	private final Label question = new Label(Type.SENTENCE, "Reset every setting on this page?");
+	/** The page's own panel (its settings, or a part of the page), when it has one. */
+	private final @Nullable PagePanel panel;
+	/** A part kept in view under the top row while the list scrolls (Crosshair's preview), or null. */
+	private @Nullable Node pinned;
+	/** A part over the whole page (Crosshair's drawing pad), or null. */
+	private @Nullable Node overlay;
+	/** Over the name and what it does: says both in full in a tooltip while a narrow window cuts them short. */
+	private final Heading heading;
 	/** Whether anything on the page can go back to a default (a page of rows Flint doesn't have can't). */
 	private final boolean resettable;
 	private boolean asking;
@@ -65,7 +73,9 @@ final class SettingsList extends Node {
 		title = new Label(Type.SENTENCE, name);
 		description = new Label(Type.SENTENCE, about);
 		back = onBack == null ? null : add(new Parts.Square(Glyph.CHEVRON_LEFT, "Back to the mods", onBack));
-		resettable = sections.stream().anyMatch(s -> s.rows().stream().anyMatch(row -> row.inFlint() && !row.toggle()));
+		panel = extra instanceof PagePanel p ? p : null;
+		resettable = sections.stream().anyMatch(s -> s.rows().stream().anyMatch(row -> row.inFlint() && !row.toggle()))
+			|| panel != null && panel.resettable();
 		reset = add(new TextButton("Reset Settings", Glyph.RESET, PageControls.Look.PLAIN, () -> setAsking(true)));
 		keep = add(new TextButton("Keep", null, PageControls.Look.PLAIN, () -> setAsking(false)));
 		confirm = add(new TextButton("Reset", null, PageControls.Look.DANGER, this::resetAll));
@@ -74,7 +84,20 @@ final class SettingsList extends Node {
 		info = new Info(note);
 		body = new Body(host, info, sections, extra, name, preview);
 		scroll = add(new ScrollView(body));
+		heading = add(new Heading(name + "\n" + about));
 		setAsking(false);
+	}
+
+	/** Keeps {@code node} in view under the top row, above the scrolled settings. */
+	void pin(Node node) {
+		pinned = add(node);
+		invalidate();
+	}
+
+	/** Lays {@code node} over the whole page (it shows itself when needed). */
+	void overlay(Node node) {
+		overlay = add(node);
+		invalidate();
 	}
 
 	private void setAsking(boolean value) {
@@ -97,11 +120,17 @@ final class SettingsList extends Node {
 				}
 			}
 		}
+		if (panel != null) {
+			panel.resetAll();
+		}
 		setAsking(false);
 	}
 
 	/** Escape: a pending reset question goes first. */
 	boolean escape() {
+		if (overlay instanceof CrosshairPad pad && pad.closeIfOpen()) {
+			return true;
+		}
 		if (asking) {
 			setAsking(false);
 			return true;
@@ -128,7 +157,8 @@ final class SettingsList extends Node {
 			reset.setBounds(right - rw, by, rw, bh);
 		}
 		if (status != null) {
-			float sw = d(140);
+			// Wider while it says why the server you play on keeps the mod off ("Off on Hypixel").
+			float sw = status.widthFor(d(140));
 			float statusRight = reset.visible() ? reset.x() - d(8) : right;
 			status.setBounds(statusRight - sw, by, sw, bh);
 		}
@@ -136,7 +166,16 @@ final class SettingsList extends Node {
 			back.setBounds(x + d(PAD), by, bh, bh);
 		}
 		scroll.flatBar(MenuStyle.SCROLL_THUMB, d(6), d(80));
-		scroll.setBounds(x, y + d(HEADER), w, Math.max(0, h - d(HEADER)));
+		float top = y + d(HEADER);
+		if (pinned != null && pinned.visible()) {
+			float ph = pinned.prefHeight(w - 2 * d(PAD));
+			pinned.setBounds(x + d(PAD), top, w - 2 * d(PAD), ph);
+			top += ph;
+		}
+		scroll.setBounds(x, top, w, Math.max(0, y + h - top));
+		if (overlay != null) {
+			overlay.setBounds(x, y, w, h);
+		}
 	}
 
 	/** The top row: the mod's icon (white while on, grey while off) or the info mark, its name, then what it does in grey. */
@@ -160,8 +199,42 @@ final class SettingsList extends Node {
 		float room = end - d(24) - left;
 		MenuStyle.fitted(c, title, left, cy, MenuStyle.TEXT, room);
 		float after = left + Math.min(title.width(c), room) + d(16);
+		boolean whole = title.width(c) <= room;
 		if (after < end - d(24) - d(40)) {
 			MenuStyle.fitted(c, description, after, cy, MenuStyle.NEUTRAL, end - d(24) - after);
+			whole &= description.width(c) <= end - d(24) - after;
+		} else {
+			whole = false;
+		}
+		heading.cut(!whole, left, cy - d(20), Math.max(0, end - d(24) - left), d(40));
+	}
+
+	/**
+	 * The heading's area: while the name or what it does is cut short (a narrow window), the pointer over it shows both in full
+	 * in a tooltip, wrapped to the screen; otherwise it takes no input at all.
+	 */
+	private static final class Heading extends Node {
+		private final String text;
+		private boolean cut;
+
+		Heading(String text) {
+			this.text = text;
+		}
+
+		/** From the page's drawing: whether the heading is cut short now, and where it is. */
+		void cut(boolean value, float hx, float hy, float hw, float hh) {
+			if (value != cut) {
+				cut = value;
+				tooltip(value ? text : null);
+			}
+			if (hx != x() || hy != y() || hw != width() || hh != height()) {
+				setBounds(hx, hy, hw, hh);
+			}
+		}
+
+		@Override
+		public boolean interactive() {
+			return cut;
 		}
 	}
 
@@ -365,9 +438,18 @@ final class SettingsList extends Node {
 			return total;
 		}
 
+		/** Whether the page's panel goes before the sections (a page that is its own panel). */
+		private boolean leads() {
+			return extra instanceof PagePanel p && p.leads();
+		}
+
+		private float leadHeight(float width) {
+			return leads() ? extra.prefHeight(width - 2 * d(PAD)) + d(GAP) : 0;
+		}
+
 		@Override
 		public float prefHeight(float width) {
-			float total = d(TOP) + infoHeight(width);
+			float total = d(TOP) + infoHeight(width) + leadHeight(width);
 			for (int i = 0; i < headers.size(); i++) {
 				if (shown(rows.get(i)).isEmpty()) {
 					continue;
@@ -378,12 +460,17 @@ final class SettingsList extends Node {
 				}
 				total += d(GAP);
 			}
-			return total + (extra != null ? extra.prefHeight(width - 2 * d(PAD)) + d(GAP) : 0) + d(PAD) - d(GAP);
+			return total + (extra != null && !leads() ? extra.prefHeight(width - 2 * d(PAD)) + d(GAP) : 0) + d(PAD) - d(GAP);
 		}
 
 		@Override
 		protected void layout() {
 			float at = y + d(TOP) + infoHeight(w);
+			if (extra != null && leads()) {
+				float eh = extra.prefHeight(w - 2 * d(PAD));
+				extra.setBounds(x + d(PAD), at, w - 2 * d(PAD), eh);
+				at += eh + d(GAP);
+			}
 			two = twoColumns(w);
 			float colW = columnWidth(w, two);
 			float firstColumn = x + d(PAD) + d(CARD_PAD);
@@ -445,7 +532,7 @@ final class SettingsList extends Node {
 				cardBottom[i] = at - y;
 				at += d(GAP);
 			}
-			if (extra != null) {
+			if (extra != null && !leads()) {
 				extra.setBounds(x + d(PAD), at, w - 2 * d(PAD), extra.prefHeight(w - 2 * d(PAD)));
 			}
 		}

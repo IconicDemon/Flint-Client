@@ -175,7 +175,7 @@ pub fn version_fits(version: &str, versions: Option<&Versions>) -> bool {
 }
 
 /// What tells a game to join a server as it starts: Quick Play (`--quickPlayMultiplayer`, Minecraft 1.20 and newer),
-/// which finds the server in its list by the same address; older versions (1.8.9) take `--server` and `--port`.
+/// which finds the server in its list by the same address; older versions (1.19.x, 1.8.9) take `--server` and `--port`.
 pub fn join_args(game_version: &str, address: &str, host: &str, port: u16) -> Vec<String> {
     if compare_versions(game_version, "1.20").is_ge() {
         vec!["--quickPlayMultiplayer".into(), address.into()]
@@ -251,6 +251,7 @@ mod tests {
         assert_eq!(join_args("26.3", "play.example.net:25570", "play.example.net", 25570), ["--quickPlayMultiplayer", "play.example.net:25570"]);
         assert_eq!(join_args("1.21.1", "play.example.net", "play.example.net", 25565), ["--quickPlayMultiplayer", "play.example.net"]);
         assert_eq!(join_args("1.8.9", "play.example.net:25570", "play.example.net", 25570), ["--server", "play.example.net", "--port", "25570"]);
+        assert_eq!(join_args("1.19.2", "play.example.net", "play.example.net", 25565), ["--server", "play.example.net", "--port", "25565"], "Quick Play came in 1.20");
     }
 
     #[test]

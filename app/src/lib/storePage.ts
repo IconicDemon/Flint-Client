@@ -4,6 +4,7 @@
  * newest, and the order history as rows. The cape a player shows is lib/capeSource.ts's rule. Everything here is
  * display: the Store decides what an account owns, wears and has spent (lib/storeSync.ts, src-tauri/src/store).
  */
+import { slotOf } from "./cosmeticTypes.ts";
 import { searchable, type MessageKey } from "./i18n.ts";
 import { STORE_SLOTS, type StoreInventory, type StoreItem, type StoreOrder, type StoreSlot, type StoreView } from "./storeSync.ts";
 
@@ -41,8 +42,11 @@ export const ITEM_SORTS: { value: ItemSort; label: MessageKey }[] = [
 
 /** How many items each slot has, every slot listed. */
 export function slotCounts(inventory: StoreInventory | null | undefined): Record<StoreSlot, number> {
-  const counts = { cape: 0, back: 0, head: 0, aura: 0 } as Record<StoreSlot, number>;
-  for (const item of inventory?.owned ?? []) if (item.kind in counts) counts[item.kind]++;
+  const counts = Object.fromEntries(STORE_SLOTS.map((slot) => [slot, 0])) as Record<StoreSlot, number>;
+  for (const item of inventory?.owned ?? []) {
+    const slot = slotOf(item);
+    if (slot) counts[slot]++;
+  }
   return counts;
 }
 
@@ -63,7 +67,7 @@ const byName = (a: StoreItem, b: StoreItem) => a.name.localeCompare(b.name, unde
 /** A slot's items matching `query` (name, case and accents ignored), in `sort` order. Ties fall back to the name. */
 export function inventoryList(items: readonly StoreItem[], { slot, query, sort }: { slot: StoreSlot; query: string; sort: ItemSort }): StoreItem[] {
   const needle = searchable(query.trim());
-  const list = items.filter((item) => item.kind === slot && (!needle || searchable(item.name).includes(needle)));
+  const list = items.filter((item) => slotOf(item) === slot && (!needle || searchable(item.name).includes(needle)));
   if (sort === "name") return list.sort(byName);
   const direction = sort === "newest" ? -1 : 1;
   return list.sort((a, b) => (grantedTime(a) - grantedTime(b)) * direction || byName(a, b));
@@ -136,7 +140,7 @@ export function shownName(item: Pick<StoreItem, "name" | "test">): string {
 /** What a slot has on: the owned item, or null (nothing, or an item the inventory no longer lists). */
 export function wornIn(inventory: StoreInventory | null | undefined, slot: StoreSlot): StoreItem | null {
   const id = inventory?.equipped[slot];
-  return (id && inventory?.owned.find((item) => item.cosmeticId === id && item.kind === slot)) || null;
+  return (id && inventory?.owned.find((item) => item.cosmeticId === id && slotOf(item) === slot)) || null;
 }
 
 // ---------- Merit ----------

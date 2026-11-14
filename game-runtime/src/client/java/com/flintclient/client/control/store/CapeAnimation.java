@@ -35,6 +35,8 @@ public final class CapeAnimation {
 	public static final int ATLAS_HEIGHT = 17;
 	/** Pixels per atlas unit the Store makes animations at: 88×68, 176×136, 352×272 (standard) and 704×544 (HD) frames. */
 	static final int[] SCALES = {4, 8, 16, 32};
+	/** The scales a card preview is made at (Store PREVIEW_SCALES), always below its animation's. */
+	static final int[] PREVIEW_SCALES = {4, 8, 16};
 	public static final int MIN_FRAMES = 2;
 	public static final int MAX_FRAMES = 120;
 	public static final int MIN_FRAME_MILLIS = 10;
@@ -48,8 +50,14 @@ public final class CapeAnimation {
 	public static final String LAYOUT = "cape-atlas-22x17";
 	private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
 
-	/** One PNG of frames stacked top to bottom: download {@code url}, check its {@code bytes} and {@code sha256}. */
-	public record Strip(URI url, String sha256, int bytes, int frames) {
+	/**
+	 * One PNG of frames stacked top to bottom: download {@code cdnUrl} when given (Flint's CDN, the same file), else or when that
+	 * fails {@code url}; check its {@code bytes} and {@code sha256}.
+	 */
+	public record Strip(URI url, String sha256, int bytes, int frames, @Nullable URI cdnUrl) {
+		public Strip(URI url, String sha256, int bytes, int frames) {
+			this(url, sha256, bytes, frames, null);
+		}
 	}
 
 	private final int scale;
@@ -59,8 +67,10 @@ public final class CapeAnimation {
 	private final int framesPerStrip;
 	private final List<Strip> strips;
 	private final String key;
+	/** The card preview (Store {@code animation.preview}): the same frames and timing at a smaller scale; null when none. */
+	private final @Nullable CapeAnimation preview;
 
-	private CapeAnimation(int scale, int[] durations, int framesPerStrip, List<Strip> strips) {
+	private CapeAnimation(int scale, int[] durations, int framesPerStrip, List<Strip> strips, @Nullable CapeAnimation preview) {
 		this.scale = scale;
 		this.durations = durations;
 		this.ends = new int[durations.length];
@@ -72,6 +82,22 @@ public final class CapeAnimation {
 		this.framesPerStrip = framesPerStrip;
 		this.strips = List.copyOf(strips);
 		this.key = key(scale, durations, this.strips);
+		this.preview = preview;
+	}
+
+	/**
+	 * The Store's card preview of this animation ({@code animation.preview}, Store src/lib/cape-animation.ts {@code CapePreview}):
+	 * every frame, each for its own duration, at a smaller scale (4, 8 or 16, below this one's), its own strips; an animation of
+	 * its own (its {@link #preview} is null). Null when the Store gave none, or one that doesn't check out (the full strips are
+	 * then used). Other players' capes play it: about a quarter of the bytes for what a cape in the world shows.
+	 */
+	public @Nullable CapeAnimation preview() {
+		return preview;
+	}
+
+	/** What another player's cape plays: the {@link #preview} when there is one, else this. */
+	public CapeAnimation forOthers() {
+		return preview != null ? preview : this;
 	}
 
 	/** Pixels per atlas unit: 4, 8, 16 or 32. */
@@ -229,7 +255,55 @@ public final class CapeAnimation {
 		if (bytes > MAX_TOTAL_STRIP_BYTES) {
 			return null;
 		}
-		return new CapeAnimation(scale.intValue(), durations, per, strips);
+		CapeAnimation preview = preview(a.get("preview"), scale.intValue(), durations, endpoint);
+		return new CapeAnimation(scale.intValue(), durations, per, strips, preview);
+	}
+
+	/**
+	 * {@code animation.preview} as an animation of its own, or null when it is absent or isn't exactly one: a scale of 4, 8 or 16
+	 * below the animation's, its frame size, {@code frames_per_strip} and strips laid out as the full ones (every frame, the
+	 * same durations), each strip checked as a full one.
+	 */
+	private static @Nullable CapeAnimation preview(@Nullable JsonElement json, int fullScale, int[] durations, StoreEndpoint endpoint) {
+		if (json == null || !json.isJsonObject()) {
+			return null;
+		}
+		JsonObject p = json.getAsJsonObject();
+		Long scale = JsonFields.integer(p, "scale");
+		Long width = JsonFields.integer(p, "width");
+		Long height = JsonFields.integer(p, "height");
+		Long perStrip = JsonFields.integer(p, "frames_per_strip");
+		if (scale == null || !Arrays.stream(PREVIEW_SCALES).anyMatch(s -> s == scale) || scale >= fullScale || width == null
+			|| width != ATLAS_WIDTH * scale || height == null || height != ATLAS_HEIGHT * scale || perStrip == null
+			|| perStrip != framesPerStrip(height.intValue())) {
+			return null;
+		}
+		JsonElement stripsJson = p.get("strips");
+		if (stripsJson == null || !stripsJson.isJsonArray()) {
+			return null;
+		}
+		int frames = durations.length;
+		int per = perStrip.intValue();
+		JsonArray stripsArray = stripsJson.getAsJsonArray();
+		int stripCount = (frames + per - 1) / per;
+		if (stripsArray.size() != stripCount) {
+			return null;
+		}
+		List<Strip> strips = new ArrayList<>(stripCount);
+		long bytes = 0;
+		for (int s = 0; s < stripCount; s++) {
+			JsonElement e = stripsArray.get(s);
+			Strip strip = e != null && e.isJsonObject() ? strip(e.getAsJsonObject(), endpoint) : null;
+			if (strip == null || strip.frames() != Math.min(per, frames - s * per)) {
+				return null;
+			}
+			bytes += strip.bytes();
+			strips.add(strip);
+		}
+		if (bytes > MAX_TOTAL_STRIP_BYTES) {
+			return null;
+		}
+		return new CapeAnimation(scale.intValue(), durations, per, strips, null);
 	}
 
 	private static @Nullable Strip strip(JsonObject s, StoreEndpoint endpoint) {
@@ -254,7 +328,24 @@ public final class CapeAnimation {
 		if (!endpoint.allowsAsset(uri)) {
 			return null;
 		}
-		return new Strip(uri, hash, bytes.intValue(), frames.intValue());
+		return new Strip(uri, hash, bytes.intValue(), frames.intValue(), cdnUrl(s, endpoint));
+	}
+
+	/**
+	 * A file's {@code cdn_url} (Flint's CDN: the same file by the same hash), or null when it is absent or not an address
+	 * {@code endpoint} allows: the file then comes from its {@code url} only.
+	 */
+	static @Nullable URI cdnUrl(JsonObject file, StoreEndpoint endpoint) {
+		String cdn = JsonFields.string(file, "cdn_url");
+		if (cdn == null || cdn.isEmpty() || cdn.length() > 2048) {
+			return null;
+		}
+		try {
+			URI uri = new URI(cdn);
+			return endpoint.allowsAsset(uri) ? uri : null;
+		} catch (URISyntaxException e) {
+			return null;
+		}
 	}
 
 	/** A whole number (no fraction, within ±2^53), or null. */
@@ -288,7 +379,7 @@ public final class CapeAnimation {
 	@Override
 	public boolean equals(Object other) {
 		return other instanceof CapeAnimation a && a.scale == scale && a.framesPerStrip == framesPerStrip && Arrays.equals(a.durations, durations)
-			&& a.strips.equals(strips);
+			&& a.strips.equals(strips) && java.util.Objects.equals(a.preview, preview);
 	}
 
 	@Override
@@ -299,6 +390,6 @@ public final class CapeAnimation {
 	@Override
 	public String toString() {
 		return "animation " + key + " (" + frameCount() + " frames at " + scale + " px per unit, " + loopMillis() + " ms a loop, "
-			+ strips.size() + " strips)";
+			+ strips.size() + " strips" + (preview == null ? "" : ", preview at " + preview.scale) + ")";
 	}
 }

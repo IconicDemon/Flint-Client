@@ -39,6 +39,9 @@ public abstract class HostScreen extends Screen {
 		broken = true;
 		com.flintclient.client.FlintClient.LOGGER.error("Flint: the {} screen failed while {}; it closes instead of crashing the game",
 			getClass().getSimpleName(), step, error);
+		// The safety net's record (the QA crash sweep reads it) and the player's toast once the screen has closed.
+		String label = getTitle().getString();
+		com.flintclient.client.control.feature.Faults.screenFailed(label.isBlank() || label.equals("Flint") ? "Flint menu" : label, step, error);
 	}
 
 	/** Closes a screen that broke, if it is still the one shown. */
@@ -282,10 +285,13 @@ public abstract class HostScreen extends Screen {
 	@Override
 	public final void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		if (!broken) {
+			Frame.holdBlur(drawnUnder());
 			try {
 				paintBackground(Frame.of(graphics));
 			} catch (RuntimeException | LinkageError e) {
 				broke("drawing its background", e);
+			} finally {
+				Frame.holdBlur(false);
 			}
 		}
 		// As Screen.extractBackground: subtitles stay readable under the screen.
@@ -297,11 +303,25 @@ public abstract class HostScreen extends Screen {
 		if (broken) {
 			return;
 		}
+		Frame.holdBlur(drawnUnder());
 		try {
+			if (com.flintclient.client.control.feature.Faults.qaFailScreen) {
+				throw com.flintclient.client.control.feature.Faults.qaFailure(getClass().getSimpleName());
+			}
 			paint(Frame.of(graphics));
 		} catch (RuntimeException | LinkageError e) {
 			broke("drawing", e);
+		} finally {
+			Frame.holdBlur(false);
 		}
+	}
+
+	/**
+	 * Whether another screen draws this one under itself now: Minecraft's friends list (26.2 and later) draws the screen it
+	 * was opened over, then blurs it. This screen's own blur stays off then ({@link Frame#holdBlur}), one blur a frame.
+	 */
+	private boolean drawnUnder() {
+		return minecraft != null && minecraft.gui.screen() != this;
 	}
 
 	@Override

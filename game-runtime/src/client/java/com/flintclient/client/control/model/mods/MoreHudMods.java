@@ -22,15 +22,21 @@ public final class MoreHudMods {
 	private MoreHudMods() {
 	}
 
+	/**
+	 * Block Indicator: the block you could break or use now, the one Minecraft outlines (within your reach, never through a wall).
+	 * It has no range of its own since Flint 1.0.4 (the old {@code indicatorRange} is retired). A block made to pass for another
+	 * (a trapped chest, an infested block, powder snow) is named as the block it passes for ({@code feature/BlockCamouflage}).
+	 */
 	public static final class BlockIndicator {
 		public static final String ID = "block_indicator";
-		public static final IntSetting RANGE = new IntSetting("indicatorRange", "Range", "How far away a block is still shown", 12, 1, 32, 1,
-			" blocks");
 		public static final BoolSetting BREAKING = new BoolSetting("showBlockBreakingPercentage", "Breaking progress", "How far you've mined it",
 			true);
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Block Indicator", "Show the block under your crosshair")
 			.keywords("block", "look at", "waila", "jade", "hwyla", "mining").icon(IconId.GAUGE).category(Category.UTILITY)
-			.section("General", RANGE, BREAKING).hud(HudPlacement.of(Anchor.TOP, 0, 4)).needs(Requirement.WORLD).build();
+			.section("General", BREAKING).hud(HudPlacement.of(Anchor.TOP, 0, 4)).needs(Requirement.WORLD)
+			.note("Only the block within your reach, the one Minecraft outlines: nothing further away or behind a wall. A trap shows as "
+				+ "the block it looks like (a trapped chest as a chest).")
+			.build();
 	}
 
 	public static final class DamageIndicator {
@@ -39,7 +45,9 @@ public final class MoreHudMods {
 			" blocks");
 		public static final ModuleDescriptor DESCRIPTOR = ModuleDescriptor.builder(ID, "Damage Indicator", "Show the health of the mob you look at")
 			.keywords("health", "mob", "target", "hp", "damage").icon(IconId.SHIELD).category(Category.COMBAT)
-			.section("General", RANGE).hud(HudPlacement.of(Anchor.TOP, 0, 34)).needs(Requirement.WORLD).build();
+			.section("General", RANGE).hud(HudPlacement.of(Anchor.TOP, 0, 34)).needs(Requirement.WORLD)
+			.note("Only what you can see: nothing behind a wall, nothing invisible. On Hypixel only mobs, as its rules don't allow other "
+				+ "players' health.").build();
 	}
 
 	public static final class PlayerModel {

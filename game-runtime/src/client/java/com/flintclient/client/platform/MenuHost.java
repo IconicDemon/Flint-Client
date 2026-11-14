@@ -95,6 +95,14 @@ public final class MenuHost {
 		return Minecraft.getInstance().options.getMenuBackgroundBlurriness() >= 1.0F;
 	}
 
+	/**
+	 * Whether the Right Shift menu shows the game and the HUD live around its panel over a world: the HUD mods stay sharp (with
+	 * sample values where they have nothing to show) and only the panel is frosted. 26.3 for now ({@code McCompat.MENU_PREVIEW}).
+	 */
+	public static boolean livePreview() {
+		return com.flintclient.client.compat.McCompat.MENU_PREVIEW;
+	}
+
 	/** Pushes the saved gameplay motion blur choice (off by default) and strength to the effect; after changing them. */
 	public static void applyGameplayBlur(ControlSettings saved) {
 		MotionBlur.setStrength(saved.gameplayBlurStrength() / 100.0F);
@@ -219,5 +227,122 @@ public final class MenuHost {
 	/** A menu screen threw while building, drawing or handling input: reported once, and the open path stays off for the session. */
 	public static void screenFailed(Throwable error) {
 		ControlCenter.screenFailed(error);
+	}
+
+	// ---------- the main menu's pages (Discover, Friends) ----------
+
+	/** This game's Minecraft version (the partner servers it can join). */
+	public static String minecraftVersion() {
+		return com.flintclient.client.util.FlintInfo.minecraftVersion();
+	}
+
+	/** Why the player can't play online now (Minecraft's own reason: a ban, parental controls), or null when they can. */
+	public static @Nullable String multiplayerBlocked() {
+		net.minecraft.network.chat.Component reason = com.flintclient.client.ui.screen.MultiplayerAccess.disabledReason(Minecraft.getInstance());
+		return reason == null ? null : reason.getString();
+	}
+
+	/**
+	 * Joins {@code address} (named {@code name}) through Minecraft's own connection screen, its errors and timeouts included,
+	 * coming back to {@code parent} when it fails; the first multiplayer visit shows Minecraft's safety notice first, as its
+	 * Multiplayer button does.
+	 */
+	public static void joinServer(Object parent, String name, String address) {
+		Minecraft minecraft = Minecraft.getInstance();
+		net.minecraft.client.gui.screens.Screen back = (net.minecraft.client.gui.screens.Screen) parent;
+		if (!minecraft.options.skipMultiplayerWarning) {
+			minecraft.gui.setScreen(new net.minecraft.client.gui.screens.multiplayer.SafetyScreen(back));
+			return;
+		}
+		net.minecraft.client.multiplayer.ServerData data = new net.minecraft.client.multiplayer.ServerData(name, address,
+			net.minecraft.client.multiplayer.ServerData.Type.OTHER);
+		net.minecraft.client.gui.screens.ConnectScreen.startConnecting(back, minecraft,
+			net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(address), data, false, null);
+	}
+
+	/** Whether this Minecraft has its own friends list (26.2 added it). */
+	public static boolean minecraftFriends() {
+		return com.flintclient.client.compat.McCompat.FRIENDS;
+	}
+
+	/** Opens Minecraft's own friends list over {@code parent} (after its online-options check), where it has one. */
+	public static void openMinecraftFriends(Object parent) {
+		if (com.flintclient.client.compat.McCompat.FRIENDS) {
+			com.flintclient.client.compat.McCompat.openFriends(Minecraft.getInstance(), (net.minecraft.client.gui.screens.Screen) parent);
+		}
+	}
+
+	// ---------- the in-game Library ----------
+
+	/**
+	 * Whether this game offers the in-game Library (the Right Shift tile, the Utilities row): started by a Flint app that has it,
+	 * on a line with Instant Swap (its swap engine, so a mod added works once the Library closes). A newer Minecraft running a
+	 * line's build keeps that line's answer.
+	 */
+	public static boolean libraryOffered() {
+		return com.flintclient.client.module.social.InstantSwap.available();
+	}
+
+	/** Minecraft's Resource Packs screen over {@code parent} (Done applies the choice and comes back), or null. */
+	public static @Nullable Object resourcePacksScreen(Object parent) {
+		return PackScreens.resourcePacks(Minecraft.getInstance(), (net.minecraft.client.gui.screens.Screen) parent);
+	}
+
+	/** Whether the Library offers shader packs here (a line with a shader loader: Iris on 26.x and 1.21.x). */
+	public static boolean shadersOffered() {
+		return true;
+	}
+
+	/** Iris' shader pack screen over {@code parent} (by name: Iris is optional), or null without Iris. */
+	public static @Nullable Object shaderPacksScreen(Object parent) {
+		try {
+			Class<?> api = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+			Object iris = api.getMethod("getInstance").invoke(null);
+			return api.getMethod("openMainIrisScreenObj", Object.class).invoke(iris, parent);
+		} catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+			return null;
+		}
+	}
+
+	/** Opens Flint's own Discord sign-in page (the launcher checked it, and the game checked it again) in the browser. */
+	public static void openTrusted(String url) {
+		com.flintclient.client.compat.McCompat.openUri(url);
+	}
+
+	// ---------- the wardrobe (control/rshift/WardrobeScreen) ----------
+
+	/**
+	 * Draws the player as a whole 3D model in the pixel box ({@code x}, {@code y}, {@code w}, {@code h}) of the frame's canvas:
+	 * wearing {@code skin} ({@code slim} its arm model; null: the account's own skin) and {@code cape} (null: none), turned
+	 * {@code yaw} degrees from facing the viewer. False where this Minecraft can't draw that (the window shows a picture instead).
+	 */
+	public static boolean previewPlayer(Frame frame, @Nullable Texture skin, boolean slim, @Nullable Texture cape, int x, int y, int w, int h,
+		float yaw, float capeLean) {
+		return com.flintclient.client.compat.McCompat.previewAvatar(frame, skin, slim, cape, x, y, w, h, yaw, capeLean);
+	}
+
+	/**
+	 * Whether this game has the wardrobe: 26.3 and every newer Minecraft (a 26.4 running this line's build too), and every line
+	 * whose build has the 3D cosmetics renderer (its platform class, {@code cosmetics/platform/Mc263Cosmetics}); the other lines
+	 * keep the Cosmetics window they had.
+	 */
+	public static boolean wardrobe() {
+		if (com.flintclient.client.control.feature.CosmeticKinds.wardrobeOn(minecraftVersion())) {
+			return true;
+		}
+		try {
+			Class.forName("com.flintclient.client.cosmetics.platform.Mc263Cosmetics", false, MenuHost.class.getClassLoader());
+			return true;
+		} catch (ClassNotFoundException | LinkageError e) {
+			return false;
+		}
+	}
+
+	/**
+	 * The wardrobe's Apply: the skin just uploaded ({@code skin}, a 64 × 64 texture) on the player's own model at once, until the
+	 * next join. False where this Minecraft can't (the skin then shows after the next join).
+	 */
+	public static boolean wearOwnSkin(Texture skin, boolean slim) {
+		return com.flintclient.client.compat.McCompat.wearOwnSkin(skin, slim);
 	}
 }

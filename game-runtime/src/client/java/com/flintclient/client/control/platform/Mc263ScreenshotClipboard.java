@@ -157,7 +157,8 @@ public final class Mc263ScreenshotClipboard {
 			return;
 		}
 		if (type == 2 || mc.player == null) {
-			SystemToast.add(mc.gui.toastManager(), SystemToast.SystemToastId.NARRATOR_TOGGLE, text, Component.literal(""));
+			// The popup: Flint's own notice (one style for every Flint notification).
+			Mc263NoticeToast.show(text.getString());
 		} else if (type == 0) {
 			com.flintclient.client.compat.McCompat.hud().getChat().addClientSystemMessage(text);
 		} else {

@@ -28,6 +28,10 @@ pub struct Handoff {
     /// When the player last changed what they wear through this launcher (ms since the epoch), 0 if not since it started.
     /// A game that sees it change refetches its own player's cosmetics.
     pub equip_revision: u64,
+    /// Flint's shared cache of verified cosmetic files (`<data>/cache/assets`, [`super::asset_cache`]): the game reads and keeps
+    /// files there, so nothing is downloaded once per profile. Left out when the folder isn't an absolute path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_cache_dir: Option<String>,
 }
 
 pub fn handoff(state: &AppState) -> Handoff {
@@ -38,6 +42,7 @@ pub fn handoff(state: &AppState) -> Handoff {
         public_cosmetics_url: format!("{base}/api/v1/players/cosmetics/"),
         store_base_url: base,
         equip_revision: state.store.equip_revision.load(Ordering::SeqCst),
+        asset_cache_dir: Some(super::asset_cache::dir(state)).filter(|d| d.is_absolute()).and_then(|d| d.to_str().map(str::to_owned)),
     }
 }
 

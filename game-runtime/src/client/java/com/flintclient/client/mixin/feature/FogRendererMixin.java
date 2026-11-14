@@ -13,7 +13,9 @@ import org.spongepowered.asm.mixin.injection.At;
 abstract class FogRendererMixin {
 	@ModifyReturnValue(method = "setupFog", at = @At("RETURN"))
 	private FogData flint$fog(FogData fog, Camera camera) {
-		Mc263Features.fog(fog, camera.getFluidInCamera());
+		if (Mc263Features.fogOn()) {
+			Mc263Features.fog(fog, camera.getFluidInCamera());
+		}
 		return fog;
 	}
 }

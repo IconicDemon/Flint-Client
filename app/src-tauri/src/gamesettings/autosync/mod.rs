@@ -24,7 +24,7 @@
 //! different options.txt is translated both ways (`legacy189`). Resource packs are selected only where they
 //! fit the version and never cross into or out of 1.8.9; Flint's own files follow between 26.x profiles only.
 //! Servers go to every version (hidden ones never to 1.8.9), hotbars only to the same or a newer version
-//! from 1.20.5 on, command history between 1.21 and newer (`gamefiles`).
+//! from 1.20.5 on, command history between 1.21 and newer, never to 1.19 or 1.19.2, which keep none (`gamefiles`).
 //!
 //! Turning Auto Sync on seeds the store from one profile (the most recently played eligible one, or the one
 //! the player picked); every profile that exists then is taken as it is at its first launch or exit
@@ -1237,7 +1237,8 @@ fn apply_servers(ctx: &Ctx, st: &State, view: &View, snap: &Snap, entries: &[(&S
 }
 
 /// Brings the saved hotbars or the command history in whole: the hotbars only where Minecraft can read them
-/// (`gamefiles::hotbar_fits`). A file that is there but couldn't be read isn't written over.
+/// (`gamefiles::hotbar_fits`), the command history only where Minecraft keeps one (`gamefiles::commands_fit`). A file
+/// that is there but couldn't be read isn't written over.
 fn apply_list_file(ctx: &Ctx, view: &View, snap: &Snap, key: &str, rel: &'static str, entry: &Entry, work: &mut Work) {
     let current = snap.lists.shas.get(rel);
     // What this profile shares of its file is the stored copy already (a command history's login commands aside).
@@ -1248,6 +1249,11 @@ fn apply_list_file(ctx: &Ctx, view: &View, snap: &Snap, key: &str, rel: &'static
     let mut wait = |reason: &str| {
         work.deferred.insert(key.to_owned(), reason.to_owned());
     };
+    if rel == COMMANDS_FILE {
+        if let Err(reason) = gamefiles::commands_fit(view.support.data_version) {
+            return wait(reason);
+        }
+    }
     if current.is_some_and(Option::is_none) {
         return wait("this profile's file can't be read");
     }

@@ -29,6 +29,15 @@ public final class QaHooks {
 	/** The window-pixel bounds {x, y, w, h} of the shown element named {@code name} (equal, else starting with it), or null. */
 	public static int[] bounds(String name) {
 		Object screen = Minecraft.getInstance().screen;
+		if (screen instanceof com.flintclient.client.mc.Screen menu) {
+			com.flintclient.client.mc.AbstractWidget w = widget(menu, name);
+			if (w == null) {
+				return null;
+			}
+			// Flint's main menu and its pages lay out in menu units (MenuScale).
+			float px = com.flintclient.client.ui.MenuScale.pixels();
+			return new int[] {Math.round(w.getX() * px), Math.round(w.getY() * px), Math.round(w.getWidth() * px), Math.round(w.getHeight() * px)};
+		}
 		if (screen instanceof KitScreen kit) {
 			Node node = node(kit, name);
 			if (node == null) {
@@ -56,6 +65,15 @@ public final class QaHooks {
 	/** The names of every shown element of a kit screen, for writing tours. */
 	public static String names() {
 		Object screen = Minecraft.getInstance().screen;
+		if (screen instanceof com.flintclient.client.mc.Screen menu) {
+			StringBuilder out = new StringBuilder();
+			for (com.flintclient.client.mc.AbstractWidget w : menu.children()) {
+				if (w.visible) {
+					out.append(" | '").append(w.getMessage().getString()).append('\'');
+				}
+			}
+			return out.toString();
+		}
 		if (!(screen instanceof KitScreen kit)) {
 			return "";
 		}
@@ -66,6 +84,20 @@ public final class QaHooks {
 			out.append(" | '").append(n.accessibleName()).append('\'');
 		}
 		return out.toString();
+	}
+
+	/** A shown widget of Flint's main menu or one of its pages by its name (equal, else starting with it). */
+	private static com.flintclient.client.mc.AbstractWidget widget(com.flintclient.client.mc.Screen menu, String name) {
+		String wanted = name.toLowerCase(Locale.ROOT);
+		for (int pass = 0; pass < 2; pass++) {
+			for (com.flintclient.client.mc.AbstractWidget w : menu.children()) {
+				String label = w.getMessage().getString().toLowerCase(Locale.ROOT);
+				if (w.visible && (pass == 0 ? label.equals(wanted) : label.startsWith(wanted))) {
+					return w;
+				}
+			}
+		}
+		return null;
 	}
 
 	private static Node node(KitScreen kit, String name) {
@@ -104,6 +136,19 @@ public final class QaHooks {
 	public static void openPacks() {
 		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
 		mc.openScreen(new net.minecraft.client.gui.screen.menu.resourcepacks.ResourcePacksScreen(mc.screen));
+	}
+
+	/** Joins the server at {@code address} as the main menu's Discover does (MenuHost.joinServer). */
+	public static String joinServer(String address) {
+		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+		com.flintclient.client.platform.MenuHost.joinServer(mc.screen, address, address);
+		return "joining " + address;
+	}
+
+	/** The server the game is on now, as Instant Swap reads it. */
+	public static String server() {
+		net.minecraft.client.options.ServerListEntry e = net.minecraft.client.Minecraft.getInstance().getCurrentServerEntry();
+		return e == null ? "none" : e.ip;
 	}
 
 	/** Singleplayer's world list, over the current screen. */

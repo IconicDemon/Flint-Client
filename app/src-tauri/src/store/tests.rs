@@ -175,8 +175,8 @@ async fn a_texture_is_used_only_when_it_matches_the_stores_hash() {
 
     let url = asset(&rig.state, STEVE, &rig.ember).await.unwrap();
     assert_eq!(STANDARD.decode(url.strip_prefix("data:image/png;base64,").unwrap()).unwrap(), EMBER);
-    // Cached by (asset id, version) for this account, and served from there.
-    let file = account_dir(&rig.state, STEVE).join("assets").join(format!("{}-v1.png", ember.asset.as_ref().unwrap().id));
+    // Cached by SHA-256 in Flint's shared cache (the games use it too), and served from there.
+    let file = asset_cache::file(&asset_cache::dir(&rig.state), &ember.asset.as_ref().unwrap().sha256);
     assert_eq!(std::fs::read(&file).unwrap(), EMBER);
     asset(&rig.state, STEVE, &rig.ember).await.unwrap();
     assert_eq!(rig.fake.with(|w| w.count("GET /assets/ember-cape.png 200")), 1);
@@ -189,8 +189,8 @@ async fn a_texture_is_used_only_when_it_matches_the_stores_hash() {
     // Bytes that aren't the ones the Store hashed are refused and never kept.
     rig.fake.with(|w| w.files.insert("/assets/frost-cape.png".into(), b"\x89PNG\r\n\x1a\nswapped".to_vec()));
     assert_eq!(asset(&rig.state, STEVE, &rig.frost).await.unwrap_err(), HASH_MISMATCH);
-    let kept: Vec<_> = std::fs::read_dir(account_dir(&rig.state, STEVE).join("assets")).unwrap().flatten().collect();
-    assert_eq!(kept.len(), 1, "only the verified ember texture");
+    let frost_sha = hex::encode(Sha256::digest(FROST));
+    assert!(!asset_cache::file(&asset_cache::dir(&rig.state), &frost_sha).exists(), "only the verified ember texture");
 
     // Only items in this account's inventory.
     assert!(asset(&rig.state, STEVE, "00000000-0000-4000-8000-000000000000").await.is_err());
@@ -444,6 +444,22 @@ fn only_a_safe_store_address_is_accepted() {
     assert!(asset_url(&local, "http://localhost:3214/test-capes/ember-cape.png").is_some(), "the Store itself");
     assert!(asset_url(&local, "https://p.supabase.co/storage/v1/object/public/cosmetic-assets/a.png").is_some());
     assert!(asset_url(&local, "http://elsewhere.example/a.png").is_none());
+    // Flint's CDN, over https only, without a port, query or credentials; nowhere else off the Store.
+    assert!(asset_url(&local, "https://assets.flintclient.com/cosmetic-assets/animated/a.png").is_some());
+    for bad in [
+        "http://assets.flintclient.com/a.png",
+        "https://assets.flintclient.com:8443/a.png",
+        "https://assets.flintclient.com/a.png?v=1",
+        "https://u:p@assets.flintclient.com/a.png",
+        "https://assets.flintclient.com/",
+        "https://assets.flintclient.com.evil.example/a.png",
+        "https://evil.example/storage/v1/object/public/cosmetic-assets/a.png",
+        "https://p.supabase.co/storage/v1/object/public/other/a.png",
+        "https://p.supabase.co/storage/v1/object/public/cosmetic-assets/a.png?x=1",
+        "https://cdn.example/a.png",
+    ] {
+        assert!(asset_url(&local, bad).is_none(), "{bad}");
+    }
     assert!(asset_url(&Endpoints::production(), "http://localhost:3214/a.png").is_none());
 }
 
@@ -473,7 +489,9 @@ fn an_inventory_is_checked_before_it_is_shown() {
     let inventory = parse_inventory(&body).unwrap();
     assert_eq!(inventory.name, "Steve");
     assert_eq!(inventory.balance, Some(250));
-    assert_eq!(inventory.owned.iter().map(|o| o.slug.as_str()).collect::<Vec<_>>(), ["ok", "bad-hash"]);
+    // A kind Flint doesn't know yet is kept (shown under "More", not worn from here); an item without an id isn't.
+    assert_eq!(inventory.owned.iter().map(|o| o.slug.as_str()).collect::<Vec<_>>(), ["ok", "bad-hash", "boots"]);
+    assert_eq!((inventory.owned[2].kind.as_str(), inventory.owned[2].slot.as_deref()), ("boots", None));
     assert!(inventory.owned[0].asset.is_some() && inventory.owned[1].asset.is_none(), "an unusable texture is left out");
     assert_eq!(inventory.equipped.keys().collect::<Vec<_>>(), ["cape"]);
     let shown = serde_json::to_value(&inventory).unwrap();
@@ -490,7 +508,8 @@ fn the_game_handoff_names_the_store_and_carries_nothing_private() {
     let written: Value = read_json(&state.paths.profile_dir("p1").join(".flint-store.json"));
     assert_eq!(
         written,
-        json!({ "schema": 1, "contractVersion": 1, "storeBaseUrl": "https://store.flintclient.com", "publicCosmeticsUrl": "https://store.flintclient.com/api/v1/players/cosmetics/", "equipRevision": 0 })
+        json!({ "schema": 1, "contractVersion": 1, "storeBaseUrl": "https://store.flintclient.com", "publicCosmeticsUrl": "https://store.flintclient.com/api/v1/players/cosmetics/", "equipRevision": 0,
+                "assetCacheDir": asset_cache::dir(&state).to_str().unwrap() })
     );
     handoff::equip_changed(&state);
     assert!(state.store.equip_revision.load(Ordering::SeqCst) > 0);
@@ -897,10 +916,10 @@ async fn an_animated_capes_strips_are_served_only_when_they_match_the_stores_has
     for (i, (bytes, _)) in strips.iter().enumerate() {
         assert_eq!(&anim::strip(&rig.state, STEVE, &cape, i).await.unwrap(), bytes);
     }
-    // Cached by SHA-256 for this account, and served from there.
-    let strips_dir = account_dir(&rig.state, STEVE).join("assets").join("strips");
+    // Cached by SHA-256 in the shared cache, and served from there.
+    let cache = asset_cache::dir(&rig.state);
     let sha = hex::encode(Sha256::digest(&strips[0].0));
-    let file = strips_dir.join(format!("{sha}.png"));
+    let file = asset_cache::file(&cache, &sha);
     assert_eq!(std::fs::read(&file).unwrap(), strips[0].0);
     anim::strip(&rig.state, STEVE, &cape, 0).await.unwrap();
     assert_eq!(rig.fake.with(|w| w.count(&format!("GET /assets/animated/{sha}.png 200"))), 1);
@@ -911,13 +930,13 @@ async fn an_animated_capes_strips_are_served_only_when_they_match_the_stores_has
 
     // Bytes that aren't the ones the Store hashed are refused and never kept.
     let sha2 = hex::encode(Sha256::digest(&strips[2].0));
-    std::fs::remove_file(strips_dir.join(format!("{sha2}.png"))).unwrap();
+    std::fs::remove_file(asset_cache::file(&cache, &sha2)).unwrap();
     rig.fake.with(|w| w.files.insert(format!("/assets/animated/{sha2}.png"), png(704, 2 * 544, "zz")));
     assert_eq!(anim::strip(&rig.state, STEVE, &cape, 2).await.unwrap_err(), HASH_MISMATCH);
     // Nor is more than the Store listed read at all.
     rig.fake.with(|w| w.files.insert(format!("/assets/animated/{sha2}.png"), png(704, 2 * 544, "longer")));
     assert!(anim::strip(&rig.state, STEVE, &cape, 2).await.unwrap_err().contains("completely"));
-    assert!(!strips_dir.join(format!("{sha2}.png")).exists());
+    assert!(!asset_cache::file(&cache, &sha2).exists());
     // A strip that isn't the size the manifest lists is refused too.
     assert!(anim::strip(&rig.state, STEVE, &wrong_size, 0).await.unwrap_err().contains("size"));
 
@@ -928,8 +947,408 @@ async fn an_animated_capes_strips_are_served_only_when_they_match_the_stores_has
     rig.view(STEVE).await;
     assert!(anim::strip(&rig.state, STEVE, &rig.ember, 0).await.is_err());
 
-    // Signing out forgets the strips with the rest of the account's Store copy.
+    // Signing out forgets the account's Store copy: its strips are no longer served for it (the public files stay in the
+    // shared cache, by hash, for anyone who wears them).
     sign_out(&rig.state, STEVE).await;
-    assert!(!file.exists());
     assert!(anim::strip(&rig.state, STEVE, &cape, 0).await.is_err());
+}
+
+// ---------- Flint's shared cache of verified files, and the CDN first ----------
+
+fn texture(sha: &str, url: &str, cdn: Option<&str>) -> Asset {
+    Asset { id: "00000000-0000-4000-8000-0000000000c1".into(), version: 1, url: url.into(), sha256: sha.into(), cdn_url: cdn.map(Into::into), width: None, height: None, animation: None, model: None, has_texture: true }
+}
+
+#[tokio::test]
+async fn the_cdn_is_asked_first_and_the_stores_url_when_it_fails() {
+    let rig = rig().await;
+    let base = rig.fake.url();
+    let sha = hex::encode(Sha256::digest(EMBER));
+    rig.fake.with(|w| {
+        w.files.insert("/cdn/ember.png".into(), EMBER.to_vec());
+        w.files.insert("/assets/ember.png".into(), EMBER.to_vec());
+        w.files.insert("/cdn/swapped.png".into(), FROST.to_vec());
+    });
+    let url = format!("{base}assets/ember.png");
+    // The CDN has it: the Store's storage isn't touched.
+    let cdn = format!("{base}cdn/ember.png");
+    assert_eq!(verified_texture(&rig.state, &texture(&sha, &url, Some(&cdn))).await.unwrap(), EMBER);
+    assert_eq!(rig.fake.with(|w| (w.count("GET /cdn/ember.png 200"), w.count("GET /assets/ember.png 200"))), (1, 0));
+    // Kept by hash: asked again, nothing is downloaded.
+    assert_eq!(verified_texture(&rig.state, &texture(&sha, &url, Some(&cdn))).await.unwrap(), EMBER);
+    assert_eq!(rig.fake.with(|w| w.count("GET /cdn/ember.png 200")), 1);
+
+    // A CDN 404, or a CDN file that isn't the Store's hash: the url.
+    for cdn in [format!("{base}cdn/missing.png"), format!("{base}cdn/swapped.png")] {
+        std::fs::remove_file(asset_cache::file(&asset_cache::dir(&rig.state), &sha)).unwrap();
+        let before = rig.fake.with(|w| w.count("GET /assets/ember.png 200"));
+        assert_eq!(verified_texture(&rig.state, &texture(&sha, &url, Some(&cdn))).await.unwrap(), EMBER, "{cdn}");
+        assert_eq!(rig.fake.with(|w| w.count("GET /assets/ember.png 200")), before + 1, "{cdn}");
+    }
+    // No CDN address, or one Flint doesn't download from: the url.
+    for cdn in [None, Some("https://cdn.example/ember.png")] {
+        std::fs::remove_file(asset_cache::file(&asset_cache::dir(&rig.state), &sha)).unwrap();
+        let before = rig.fake.with(|w| w.count("GET /assets/ember.png 200"));
+        assert_eq!(verified_texture(&rig.state, &texture(&sha, &url, cdn)).await.unwrap(), EMBER);
+        assert_eq!(rig.fake.with(|w| w.count("GET /assets/ember.png 200")), before + 1);
+    }
+    // Both failing: a clean error, nothing kept.
+    std::fs::remove_file(asset_cache::file(&asset_cache::dir(&rig.state), &sha)).unwrap();
+    let missing = format!("{base}assets/none.png");
+    assert!(verified_texture(&rig.state, &texture(&sha, &missing, Some(&format!("{base}cdn/none.png")))).await.unwrap_err().contains("HTTP 404"));
+    assert_eq!(verified_texture(&rig.state, &texture(&sha, &format!("{base}cdn/swapped.png"), Some(&format!("{base}cdn/swapped.png")))).await.unwrap_err(), HASH_MISMATCH);
+    assert!(!asset_cache::file(&asset_cache::dir(&rig.state), &sha).exists());
+}
+
+#[tokio::test]
+async fn a_second_profile_or_account_never_downloads_what_the_cache_has() {
+    let rig = rig().await;
+    let base = rig.fake.url();
+    let sha = hex::encode(Sha256::digest(EMBER));
+    rig.fake.with(|w| w.files.insert("/assets/shared.png".into(), EMBER.to_vec()));
+    let asset = texture(&sha, &format!("{base}assets/shared.png"), None);
+    verified_texture(&rig.state, &asset).await.unwrap();
+    // A game (another process) reads the same file by its hash.
+    assert_eq!(asset_cache::read(&asset_cache::dir(&rig.state), &sha, 1 << 20).unwrap(), EMBER);
+    // The same file under another cosmetic id (another account's copy, a reward): still one download.
+    let other = Asset { id: "00000000-0000-4000-8000-0000000000c2".into(), ..asset.clone() };
+    verified_texture(&rig.state, &other).await.unwrap();
+    assert_eq!(rig.fake.with(|w| w.count("GET /assets/shared.png 200")), 1);
+}
+
+#[test]
+fn the_shared_cache_keeps_files_by_hash_and_drops_the_least_recently_used() {
+    let dir = TestDir::new();
+    let cache = dir.0.join("assets");
+    let files: Vec<Vec<u8>> = (0..4).map(|i| vec![i as u8; 1000]).collect();
+    let shas: Vec<String> = files.iter().map(|f| hex::encode(Sha256::digest(f))).collect();
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    for (i, (f, sha)) in files.iter().zip(&shas).enumerate() {
+        asset_cache::put(&cache, sha, f).unwrap();
+        let path = asset_cache::file(&cache, sha);
+        assert_eq!(path, cache.join(&sha[..2]).join(sha));
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(old + Duration::from_secs(60 * i as u64)).unwrap();
+    }
+    assert!(asset_cache::put(&cache, &shas[0], b"not that file").is_err(), "bytes that aren't the hash are never kept");
+    // Reading the oldest marks it used.
+    assert_eq!(asset_cache::read(&cache, &shas[0], 10_000).unwrap(), files[0]);
+    asset_cache::prune(&cache, 2500, 100);
+    let kept: Vec<bool> = shas.iter().map(|s| asset_cache::file(&cache, s).exists()).collect();
+    assert_eq!(kept, [true, false, false, true], "the least recently used go first");
+    // A file that changed on disk is deleted (and so downloaded again).
+    std::fs::write(asset_cache::file(&cache, &shas[3]), b"edited").unwrap();
+    assert!(asset_cache::read(&cache, &shas[3], 10_000).is_none());
+    assert!(!asset_cache::file(&cache, &shas[3]).exists());
+    // A writer's fresh temporary file stays; a crashed one's goes.
+    let folder = cache.join(&shas[0][..2]);
+    std::fs::write(folder.join("x.1.tmp"), b"being written").unwrap();
+    std::fs::write(folder.join("x.2.tmp"), b"crashed").unwrap();
+    std::fs::OpenOptions::new().write(true).open(folder.join("x.2.tmp")).unwrap().set_modified(old - Duration::from_secs(7200)).unwrap();
+    asset_cache::prune(&cache, u64::MAX, usize::MAX);
+    assert!(folder.join("x.1.tmp").exists() && !folder.join("x.2.tmp").exists());
+}
+
+#[test]
+fn concurrent_writers_never_leave_half_a_file() {
+    let dir = TestDir::new();
+    let cache = dir.0.join("assets");
+    let files: Vec<Vec<u8>> = (0..6).map(|i| vec![i as u8 + 1; 200_000 + i]).collect();
+    std::thread::scope(|scope| {
+        for w in 0..12 {
+            let (cache, files) = (&cache, &files);
+            scope.spawn(move || {
+                for k in 0..files.len() {
+                    let f = &files[(w + k) % files.len()];
+                    let sha = hex::encode(Sha256::digest(f));
+                    let _ = asset_cache::put(cache, &sha, f);
+                    if let Some(read) = asset_cache::read(cache, &sha, u64::MAX) {
+                        assert_eq!(&read, f, "never half a file");
+                    }
+                }
+            });
+        }
+    });
+    for f in &files {
+        assert_eq!(&asset_cache::read(&cache, &hex::encode(Sha256::digest(f)), u64::MAX).unwrap(), f);
+    }
+    let temps = std::fs::read_dir(&cache).unwrap().flatten().flat_map(|d| std::fs::read_dir(d.path()).unwrap().flatten()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
+    assert_eq!(temps, 0);
+}
+
+#[test]
+fn the_old_per_account_caches_are_removed() {
+    let dir = TestDir::new();
+    let store = dir.0.join("store").join("store.flintclient.com");
+    for sub in ["8667ba71b85a4004af54457a9734eed7/assets/strips", "community/assets"] {
+        std::fs::create_dir_all(store.join(sub)).unwrap();
+        std::fs::write(store.join(sub).join("a.png"), b"old").unwrap();
+    }
+    std::fs::write(store.join("8667ba71b85a4004af54457a9734eed7").join("inventory.json"), b"{}").unwrap();
+    asset_cache::remove_old(&dir.0);
+    assert!(!store.join("8667ba71b85a4004af54457a9734eed7/assets").exists());
+    assert!(!store.join("community/assets").exists());
+    assert!(store.join("8667ba71b85a4004af54457a9734eed7").join("inventory.json").exists(), "only the textures go");
+}
+
+#[test]
+fn a_strips_cdn_address_is_kept_for_the_game() {
+    let strips: Vec<Value> = (0..2)
+        .map(|s| json!({ "path": "animated/x.png", "url": format!("https://p.supabase.co/storage/v1/object/public/cosmetic-assets/{s}.png"), "cdn_url": format!("https://assets.flintclient.com/cosmetic-assets/{s}.png"), "sha256": format!("{s:0>64}"), "bytes": 1000, "frames": 7.min(10 - s * 7) }))
+        .collect();
+    let a = anim::parse(&json!({ "v": 1, "layout": "cape-atlas-22x17", "scale": 16, "width": 352, "height": 272, "frame_count": 10, "durations_ms": vec![100; 10], "duration_ms": 1000, "frames_per_strip": 7, "strips": strips })).unwrap();
+    assert_eq!(a.strips[0].cdn_url.as_deref(), Some("https://assets.flintclient.com/cosmetic-assets/0.png"));
+    let written = anim::manifest(&a).unwrap();
+    assert_eq!(written["strips"][1]["cdn_url"], "https://assets.flintclient.com/cosmetic-assets/1.png", "the game's Cosmetics window tries it too");
+}
+
+// ---------- cosmetics v2: every kind, 3D models and the emote wheel ----------
+
+fn id_n(n: u32) -> String {
+    format!("00000000-0000-4000-8000-{n:012x}")
+}
+
+#[test]
+fn every_v2_kind_is_read_with_its_slot_and_its_model_checked() {
+    let file = |n: u32, bytes: u64| json!({ "path": format!("m/{n}"), "sha256": format!("{n:0>64}"), "bytes": bytes, "url": format!("https://cdn.example/{n}") });
+    let item = |n: u32, kind: &str, asset: Value| json!({ "cosmetic_id": id_n(n), "slug": format!("s{n}"), "kind": kind, "name": format!("Item {n}"), "asset": asset });
+    let body = json!({
+        "version": 9, "minecraft_uuid": dashed(STEVE), "name": "Steve",
+        "owned": [
+            item(1, "wings", json!({ "id": id_n(101), "version": 1, "model": {
+                "geometry": file(1, 4000), "texture": file(2, 9000), "animation": null, "thumbnail": file(3, 20_000),
+                "texture_frames": 4, "frame_ms": 20, "attach": { "anchor": "anchor_body", "side": "up" }, "hides_cape": true } })),
+            item(2, "back", json!(null)),
+            item(3, "head", json!(null)),
+            item(4, "pet", json!({ "id": id_n(104), "version": 2, "model": {
+                "geometry": file(4, 300 * 1024), "texture": { "sha256": "nope", "bytes": 10, "url": "https://cdn.example/x" },
+                "thumbnail": file(5, 1000), "texture_frames": 40, "frame_ms": [100, 30, "x"], "attach": { "anchor": "anchor_tail" }, "hides_cape": true } })),
+            item(5, "emote", json!({ "id": id_n(105), "version": 1, "model": { "geometry": file(6, 10), "texture": file(7, 10), "animation": file(8, 500), "thumbnail": file(9, 900) } })),
+            item(6, "gloves", json!({ "id": id_n(106), "version": 1, "model": "not an object" })),
+            item(7, "shield", json!({ "id": id_n(107), "version": 1, "model": { "geometry": file(10, 0) } })),
+            { "cosmetic_id": id_n(8), "slug": "s8", "kind": "bodywear", "name": "Scarf", "price_coins": "450", "direct_price_minor": 299, "direct_currency": "usd", "rarity": "Epic!" },
+            item(9, "Jetpack", json!(null)),
+        ],
+        "equipped": { "back": id_n(1), "pet": id_n(4), "hands": id_n(6), "emote_1": id_n(5), "boots": id_n(1) },
+        "emotes": [id_n(5), null, id_n(1), "nope", id_n(5)]
+    });
+    let inventory = parse_inventory(&body).unwrap();
+    let kinds: Vec<(&str, Option<&str>)> = inventory.owned.iter().map(|o| (o.kind.as_str(), o.slot.as_deref())).collect();
+    assert_eq!(
+        kinds,
+        [("wings", Some("back")), ("wings", Some("back")), ("headwear", Some("head")), ("pet", Some("pet")), ("emote", None), ("gloves", Some("hands")), ("shield", Some("shield")), ("bodywear", None)],
+        "older names read as today's; a dropped or unknown kind is kept with no slot; a kind that isn't a plain token is left out"
+    );
+
+    let wings = inventory.owned[0].asset.as_ref().unwrap();
+    assert!(!wings.has_texture, "a 3D cosmetic has only its model's files");
+    let model = wings.model.as_ref().unwrap();
+    assert!(model.geometry.is_some() && model.texture.is_some() && model.thumbnail.is_some() && model.animation.is_none());
+    assert_eq!((model.texture_frames, model.frame_ms.clone(), model.hides_cape), (Some(4), vec![50], true), "frames at least 50 ms");
+    assert_eq!(model.attach.as_ref().map(|a| (a.anchor.as_str(), a.side.clone())), Some(("anchor_body", None)), "an unknown side is none");
+
+    let pet = inventory.owned[3].asset.as_ref().unwrap().model.as_ref().unwrap();
+    assert!(pet.geometry.is_none(), "over the Store's 256 KB geometry limit");
+    assert!(pet.texture.is_none(), "no hash");
+    assert_eq!((pet.texture_frames, pet.frame_ms.clone(), pet.attach.clone(), pet.hides_cape), (None, vec![100, 50], None, false));
+
+    let emote = inventory.owned[4].asset.as_ref().unwrap().model.as_ref().unwrap();
+    assert!(emote.geometry.is_none() && emote.texture.is_none() && emote.animation.is_some() && emote.thumbnail.is_some(), "an emote is its animation");
+    assert!(inventory.owned[5].asset.is_none() && inventory.owned[6].asset.is_none(), "nothing usable: no asset");
+
+    let scarf = &inventory.owned[7];
+    assert_eq!((scarf.price_coins, scarf.direct_price_minor, scarf.direct_currency.as_deref(), scarf.rarity.as_deref()), (Some(450), Some(299), None, None));
+
+    assert_eq!(inventory.equipped.keys().map(String::as_str).collect::<Vec<_>>(), ["back", "hands", "pet"], "only slots the Store knows");
+    assert_eq!(inventory.emotes, Some(vec![Some(id_n(5)), None, None, None, Some(id_n(5)), None, None, None]), "owned emotes only, eight places");
+
+    let shown = serde_json::to_value(&inventory).unwrap().to_string();
+    assert!(!shown.contains("sha256") && !shown.contains("cdn.example"), "no file address or hash reaches the interface: {shown}");
+    let first = serde_json::to_value(&inventory.owned[0]).unwrap();
+    assert_eq!(first["slot"], "back");
+    assert_eq!(first["asset"]["model"]["geometry"]["bytes"], 4000);
+    assert_eq!(first["asset"]["model"]["hidesCape"], true);
+
+    // Today's Store: no wheel at all.
+    let today = parse_inventory(&json!({ "version": 1, "minecraft_uuid": dashed(STEVE), "name": "Steve", "owned": [] })).unwrap();
+    assert_eq!(today.emotes, None);
+}
+
+#[tokio::test]
+async fn a_3d_cosmetics_files_are_used_only_when_they_match_the_stores_hash_and_size() {
+    let rig = rig().await;
+    const GEOMETRY: &[u8] = br#"{"format_version":"1.12.0","minecraft:geometry":[]}"#;
+    let thumbnail = png(512, 512, "wings-thumb");
+    let wings = rig.fake.with(|w| {
+        w.v2 = true;
+        w.add_model_cosmetic("angel-wings", "wings", &[("geometry", GEOMETRY), ("thumbnail", &thumbnail)])
+    });
+    rig.sign_in(STEVE).await;
+    rig.grant(STEVE, &wings);
+    let view = rig.view(STEVE).await;
+    let item = view.inventory.as_ref().unwrap().owned.iter().find(|o| o.cosmetic_id == wings).unwrap().clone();
+    assert_eq!(item.slot.as_deref(), Some("back"));
+
+    assert_eq!(model::model_file(&rig.state, STEVE, &wings, "geometry").await.unwrap(), String::from_utf8_lossy(GEOMETRY));
+    let picture = model::model_file(&rig.state, STEVE, &wings, "thumbnail").await.unwrap();
+    assert_eq!(STANDARD.decode(picture.strip_prefix("data:image/png;base64,").unwrap()).unwrap(), thumbnail);
+    // Kept, and served from there.
+    model::model_file(&rig.state, STEVE, &wings, "geometry").await.unwrap();
+    assert_eq!(rig.fake.with(|w| w.count("GET /assets/model/angel-wings-geometry 200")), 1);
+    assert!(model::model_file(&rig.state, STEVE, &wings, "texture").await.is_err(), "a file it doesn't have");
+    assert!(model::model_file(&rig.state, STEVE, &wings, "../secrets").await.is_err());
+    assert!(asset(&rig.state, STEVE, &wings).await.is_err(), "no cape texture");
+
+    // A game gets the thumbnail as the picture of a cosmetic without a texture.
+    let art = game::art(&rig.state, STEVE, &wings).await.unwrap();
+    assert_eq!(STANDARD.decode(art).unwrap(), thumbnail);
+
+    // Swapped bytes (the same size) are refused and not kept.
+    let swapped = GEOMETRY.iter().map(|b| if *b == b'1' { b'2' } else { *b }).collect::<Vec<u8>>();
+    let geometry_sha = item.asset.as_ref().unwrap().model.as_ref().unwrap().geometry.as_ref().unwrap().sha256.clone();
+    let kept = asset_cache::file(&asset_cache::dir(&rig.state), &geometry_sha);
+    std::fs::remove_file(&kept).unwrap();
+    rig.fake.with(|w| w.files.insert("/assets/model/angel-wings-geometry".into(), swapped));
+    assert_eq!(model::model_file(&rig.state, STEVE, &wings, "geometry").await.unwrap_err(), HASH_MISMATCH);
+    assert!(!kept.exists());
+
+    // Worn in its slot.
+    let worn = equip(&rig.state, STEVE, "back", Some(&wings)).await.unwrap();
+    assert_eq!(worn.inventory.unwrap().equipped.get("back"), Some(&wings));
+    assert!(equip(&rig.state, STEVE, "head", Some(&wings)).await.unwrap_err().contains("can't be worn there"));
+}
+
+#[tokio::test]
+async fn the_emote_wheel_is_the_stores_and_a_game_sees_it() {
+    let rig = rig().await;
+    const DANCE: &[u8] = br#"{"format_version":"1.8.0","animations":{"animation.flint.dance":{"animation_length":2}}}"#;
+    let thumbnail = png(512, 512, "dance");
+    let dance = rig.fake.with(|w| {
+        w.v2 = true;
+        w.add_model_cosmetic("dance", "emote", &[("animation", DANCE), ("thumbnail", &thumbnail)])
+    });
+    rig.sign_in(STEVE).await;
+    rig.grant(STEVE, &dance);
+    rig.grant(STEVE, &rig.ember);
+    rig.state.running.lock().unwrap().insert("p1".into(), RunningGame { kill: None });
+    assert_eq!(rig.view(STEVE).await.inventory.unwrap().emotes, Some(vec![None; 8]));
+
+    let mut wheel: Vec<Option<String>> = vec![None; 8];
+    wheel[0] = Some(dance.clone());
+    wheel[5] = Some(dance.clone());
+    let view = set_emotes(&rig.state, STEVE, &wheel).await.unwrap();
+    assert_eq!(view.inventory.unwrap().emotes, Some(wheel.clone()));
+    let handoff: Value = read_json(&rig.state.paths.profile_dir("p1").join(handoff::FILE));
+    assert!(handoff["equipRevision"].as_u64().unwrap() > 0, "running games hear of it: {handoff}");
+
+    // The Store refuses a cape on the wheel; Flint refuses a wheel of the wrong size before asking.
+    let mut cape = wheel.clone();
+    cape[1] = Some(rig.ember.clone());
+    assert!(set_emotes(&rig.state, STEVE, &cape).await.unwrap_err().contains("emote wheel"));
+    let before = rig.fake.with(|w| w.log.len());
+    assert!(set_emotes(&rig.state, STEVE, &wheel[..7]).await.is_err());
+    assert!(set_emotes(&rig.state, STEVE, &[Some("nope".into()), None, None, None, None, None, None, None]).await.is_err());
+    assert_eq!(rig.fake.with(|w| w.log.len()), before);
+
+    let shown = game::cosmetics(&rig.state, STEVE).await.unwrap();
+    assert_eq!(shown.emotes, wheel);
+    let emote = shown.items.iter().find(|i| i.id == dance).unwrap();
+    assert_eq!((emote.kind.as_str(), emote.slot.as_deref()), ("emote", None));
+    let cape_item = shown.items.iter().find(|i| i.id == rig.ember).unwrap();
+    assert_eq!((cape_item.kind.as_str(), cape_item.slot.as_deref()), ("cape", Some("cape")));
+    let cleared = game::wheel(&rig.state, STEVE, &[None, None, None, None, None, None, None, None], |_| {}).await.unwrap();
+    assert!(cleared.emotes.iter().all(Option::is_none));
+}
+
+#[tokio::test]
+async fn a_3d_cosmetics_files_come_from_the_cdn_first_and_the_shared_cache() {
+    let rig = rig().await;
+    let base = rig.fake.url();
+    const GEOMETRY: &[u8] = br#"{"format_version":"1.12.0","minecraft:geometry":[]}"#;
+    let sha = hex::encode(Sha256::digest(GEOMETRY));
+    rig.fake.with(|w| {
+        w.files.insert("/cdn/model/g".into(), GEOMETRY.to_vec());
+        w.files.insert("/assets/model/g".into(), GEOMETRY.to_vec());
+    });
+    let (url, cdn) = (format!("{base}assets/model/g"), format!("{base}cdn/model/g"));
+    let json = |b: &[u8]| serde_json::from_slice::<Value>(b).map(|_| ()).map_err(|_| "not JSON".to_owned());
+    assert_eq!(verified_download(&rig.state, &url, Some(&cdn), &sha, 1 << 18, json).await.unwrap(), GEOMETRY);
+    assert_eq!(verified_download(&rig.state, &url, Some(&cdn), &sha, 1 << 18, json).await.unwrap(), GEOMETRY, "kept");
+    assert_eq!(rig.fake.with(|w| (w.count("GET /cdn/model/g 200"), w.count("GET /assets/model/g 200"))), (1, 0));
+    std::fs::remove_file(asset_cache::file(&asset_cache::dir(&rig.state), &sha)).unwrap();
+    let gone = format!("{base}cdn/model/none");
+    assert_eq!(verified_download(&rig.state, &url, Some(&gone), &sha, 1 << 18, json).await.unwrap(), GEOMETRY, "the CDN fails: the url");
+    assert_eq!(rig.fake.with(|w| w.count("GET /assets/model/g 200")), 1);
+    std::fs::remove_file(asset_cache::file(&asset_cache::dir(&rig.state), &sha)).unwrap();
+    assert!(verified_download(&rig.state, &format!("{base}assets/model/none"), Some(&gone), &sha, 1 << 18, json).await.is_err(), "both fail: an error");
+}
+
+// ---------- badges (`GET /me/` badges/badge, `PUT /me/badge/`) ----------
+
+#[tokio::test]
+async fn badges_today_s_store_has_none_the_flint_mark_only() {
+    let rig = rig().await;
+    rig.sign_in(STEVE).await;
+    let shown = badges::list(&rig.state, STEVE).await.unwrap();
+    assert_eq!(shown, badges::Badges::unknown());
+    assert!(!shown.known);
+}
+
+#[tokio::test]
+async fn badges_owned_and_chosen_are_read_and_changed() {
+    let rig = rig().await;
+    rig.sign_in(STEVE).await;
+    rig.fake.with(|w| {
+        w.badges.insert(dashed(STEVE), (vec!["default".into(), "staff".into(), "vip".into(), "a_new_mark".into()], "staff".into()));
+    });
+    let shown = badges::list(&rig.state, STEVE).await.unwrap();
+    assert!(shown.known);
+    assert_eq!(shown.badges, vec!["default", "staff", "vip"], "a mark Flint doesn't know is left out");
+    assert_eq!(shown.badge, "staff");
+    let after = badges::set(&rig.state, STEVE, "vip").await.unwrap();
+    assert_eq!(after.badge, "vip");
+    assert!(rig.fake.with(|w| w.log.iter().any(|l| l.starts_with("PUT /api/v1/me/badge/"))));
+    assert_eq!(badges::list(&rig.state, STEVE).await.unwrap().badge, "vip", "the Store keeps it");
+    assert_eq!(badges::set(&rig.state, STEVE, "default").await.unwrap().badge, "default", "the Flint mark is always allowed");
+}
+
+#[tokio::test]
+async fn badges_refusals_are_told_plainly() {
+    let rig = rig().await;
+    rig.sign_in(STEVE).await;
+    rig.fake.with(|w| {
+        w.badges.insert(dashed(STEVE), (vec!["default".into(), "staff".into()], "default".into()));
+    });
+    let not_owned = badges::set(&rig.state, STEVE, "owner").await.unwrap_err();
+    assert!(not_owned.contains("isn't yours"), "{not_owned}");
+    let unknown = badges::set(&rig.state, STEVE, "emperor").await.unwrap_err();
+    assert!(unknown.contains("doesn't know that badge"), "{unknown}");
+    assert!(rig.fake.with(|w| w.log.iter().filter(|l| l.starts_with("PUT /api/v1/me/badge/")).count()) == 1, "an unknown tag never reaches the Store");
+    for _ in 0..9 {
+        badges::set(&rig.state, STEVE, "staff").await.unwrap();
+    }
+    assert_eq!(badges::set(&rig.state, STEVE, "default").await.unwrap_err(), badges::SLOW_DOWN, "429: slow down");
+    // Without a session: sign in first.
+    let none = badges::set(&rig.state, ALEX, "default").await.unwrap_err();
+    assert!(none.contains("Sign in"), "{none}");
+}
+
+#[tokio::test]
+async fn badges_an_expired_session_signs_out() {
+    let rig = rig().await;
+    rig.sign_in(STEVE).await;
+    rig.fake.with(|w| {
+        w.badges.insert(dashed(STEVE), (vec!["default".into(), "staff".into()], "staff".into()));
+        w.sessions.clear();
+    });
+    assert_eq!(badges::set(&rig.state, STEVE, "staff").await.unwrap_err(), SIGN_IN_AGAIN);
+    assert!(rig.saved(STEVE).is_none(), "the refused session is forgotten");
+}
+
+#[test]
+fn badges_answer_is_checked() {
+    assert_eq!(badges::parse(&json!({})), None);
+    assert_eq!(badges::parse(&json!({ "badges": "staff" })), None);
+    let b = badges::parse(&json!({ "badges": ["staff", "default", "staff", 7], "badge": "owner" })).unwrap();
+    assert_eq!(b.badges, vec!["default", "staff"], "default first and once");
+    assert_eq!(b.badge, "default", "a chosen badge that isn't owned shows the Flint mark");
 }
